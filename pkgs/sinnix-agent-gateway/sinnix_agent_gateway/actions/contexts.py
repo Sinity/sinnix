@@ -127,7 +127,6 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
         CampaignInput,
         OwnerProduct,
         _campaign,
-        owner_product,
     )
 
     if inp.job is not None:
@@ -161,11 +160,18 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
         assert inp.project is not None
         project = await anyio.to_thread.run_sync(_resolve_project, runtime, inp.project)
         ref = project_ref(project)
-    if inp.intent in {"project.overview", "project.triage"}:
+    if inp.intent in {"project.overview", "project.triage"} or (
+        inp.intent in {"verification.regression", "project.trajectory"}
+        and not inp.roots
+    ):
         return await _native_project_context(runtime, inp, project, ref)
     if inp.intent == "job.review":
         pass
-    elif inp.intent == "campaign.progress":
+    elif inp.intent in {
+        "campaign.progress",
+        "verification.regression",
+        "project.trajectory",
+    }:
         product = (
             await _campaign(
                 runtime,
@@ -185,30 +191,12 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
         )
         product = OwnerProduct(
             owner="sinnix-observe",
-            availability="unavailable"
-            if value.get("available") is False
-            else "available",
+            availability=(
+                "unavailable" if value.get("available") is False else "available"
+            ),
             data=value,
             reason=value.get("reason"),
             source_ref="sinnix://machine/overview",
-        )
-    else:
-        product = await owner_product(
-            runtime,
-            "lynchpin",
-            "lynchpin_project",
-            {
-                "action": "project_context",
-                "project": project,
-                "intent": inp.intent,
-                "roots": inp.roots,
-                "at": inp.at.owner_value() if inp.at else None,
-                "budget_bytes": min(
-                    56000, max(8192, runtime.config.max_result_bytes - 8192)
-                ),
-                **({"refresh_id": inp.refresh_id} if inp.refresh_id else {}),
-            },
-            deadline_at=inp.deadline_at,
         )
     # Persistence identifies this observation. Domain components, ordering,
     # coverage and the owner's terminal state remain exactly as the owner
@@ -308,9 +296,9 @@ async def _native_project_context(
                 "observed_at": datetime.now(timezone.utc).isoformat(),
                 "source_ref": source_ref,
                 "source_revision": revision or source_revision(data),
-                "revision_kind": "owner"
-                if revision and name != "git"
-                else "observation",
+                "revision_kind": (
+                    "owner" if revision and name != "git" else "observation"
+                ),
                 "coverage": {
                     "complete": not bool(data.get("truncated")),
                     "scope": "current project",
@@ -367,15 +355,30 @@ async def _native_project_context(
             if product.data is not None:
                 position = product.data.get("commit_seq") if name == "sinex" else None
                 component.update(
-                    source_revision=str(position)
-                    if position is not None
-                    else source_revision(product.data),
+                    source_revision=(
+                        str(position)
+                        if position is not None
+                        else source_revision(product.data)
+                    ),
                     revision_kind="owner" if position is not None else "observation",
                 )
         components[name] = component
     ordered = [
         components[name] for name in ("git", "beads", "agentctl", "sinex", "polylogue")
     ]
+    if inp.intent in {"verification.regression", "project.trajectory"}:
+        ordered.append(
+            {
+                "name": "acceptance",
+                "status": "unavailable",
+                "required": True,
+                "coverage": {
+                    "complete": False,
+                    "scope": "independent delivery, acceptance and regression assessment",
+                },
+                "reason": "Current Git, task status and retained job receipts do not establish delivery, acceptance, historical trajectory or regression",
+            }
+        )
     required = ordered[:3]
     failures = [
         c
@@ -386,9 +389,11 @@ async def _native_project_context(
     availability: Availability = (
         "available"
         if not failures
-        else "degraded"
-        if any(c["status"] == "available" for c in required)
-        else "unavailable"
+        else (
+            "degraded"
+            if any(c["status"] == "available" for c in required)
+            else "unavailable"
+        )
     )
     return await _finish_context(
         runtime,
@@ -453,11 +458,7 @@ def _presentation_size(context: Mapping[str, Any]) -> int:
 def _within_budget(
     context: Mapping[str, Any], *, reserve_bytes: int = 0
 ) -> dict[str, Any]:
-    """Use the owner's compact view when full data exceeds the payload bound.
-
-    The immutable snapshot always retains the original. Unsupported or unusable
-    presentations are explicitly unavailable, independently of transport success.
-    """
+    """Bound inline component data while retaining the complete immutable snapshot."""
     budget = int(context["total_budget_bytes"])
     budget -= min(4096, max(1, budget // 2)) + reserve_bytes
 
@@ -466,30 +467,7 @@ def _within_budget(
     if size(context) <= budget:
         return dict(context)
     bounded = dict(context)
-    components = []
-    for index, component in enumerate(context["components"]):
-        entry = dict(component)
-        product = entry.get("data")
-        data = product.get("data") if isinstance(product, dict) else None
-        projection = data.get("presentation") if isinstance(data, dict) else None
-        if (
-            entry["name"] == "lynchpin"
-            and isinstance(projection, dict)
-            and projection.get("product") == "project_context_compact"
-            and projection.get("outcome") in {"ok", "partial"}
-            and projection.get("components")
-        ):
-            entry["data"] = {**product, "data": projection, "owner_metadata": None}
-            entry["presentation"] = "compact"
-            entry["full_product_pointer"] = f"/components/{index}/data/data"
-            entry["reason"] = (
-                "Owner-selected compact view; full observation is in snapshot_ref"
-            )
-        components.append(entry)
-    bounded["components"] = components
-    if size(bounded) <= budget:
-        return bounded
-    components = [dict(component) for component in bounded["components"]]
+    components = [dict(component) for component in context["components"]]
     bounded["components"] = components
     for entry in sorted(
         components,
@@ -551,7 +529,7 @@ ACTIONS: tuple[Action, ...] = (
             "review job",
             "incident",
         ),
-        documentation="The owner supplies domain composition and a compact presentation when full data exceeds the inline budget. snapshot_ref retains the exact observation. availability and component presentation report usability independently of transport success; omitted data is unavailable.",
+        documentation="Native owners supply bounded task closure, current project state and retained job receipts. Delivery, acceptance and historical comparisons remain unknown without independent evidence. snapshot_ref retains the exact observation. availability and component presentation report usability independently of transport success; omitted data is unavailable.",
         examples=(
             Example(
                 title="Orient in sinnix",

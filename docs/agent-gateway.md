@@ -236,17 +236,28 @@ returns only new log bytes.
   leaves code and job evidence visible with degraded availability. Live
   orientation refuses historical selectors rather than presenting current
   state as historical evidence.
-- **Historical products and progress.** Campaign, regression and trajectory
-  products retain their owner adapters. Task closure, reported delivery and
-  independently verified acceptance remain distinct owner evidence.
+- **Campaign and verification evidence.** `campaign.progress` reads the configured
+  Beads authority's bounded closure for explicit roots, retaining native task
+  fields, provenance, completeness and resolved revisions. `at` and `baseline`
+  pin separate owner observations. Their presence leaves historical AgentCTL
+  coverage explicitly unknown; current jobs never stand in for historical
+  receipts. Without historical selectors, one bounded current AgentCTL page
+  remains separate from task claims, with its native continuation. Closed tasks
+  and successful jobs do not prove delivery or acceptance. Those assessments
+  remain unknown, as does an exact scope delta without complete owner evidence.
+  `verification.regression` and `project.trajectory` use this evidence for
+  explicit roots, or the native project overview when roots are omitted. The
+  latter refuses historical selectors. Neither route infers a regression or
+  historical trajectory from a current observation. Refresh-generation inputs
+  are unsupported because the native owners are read directly. Every composed
+  context retains the full observation behind its immutable snapshot reference.
 - **Machine.** `machine.snapshot` and `machine.query` delegate to
   `sinnix-observe`. `machine.prepare` and `machine.operate` send typed requests
   to the hub server.
 
-The checked-in Beads and Lynchpin input models are generated from the
-owners' published contracts (`generate_beads_inputs.py`,
-`generate_owner_inputs.py`); package checks compare them with the pinned
-sources.
+The checked-in Beads input models are generated from the owner's published
+contract (`generate_beads_inputs.py`); package checks compare them with the
+pinned native schema. Gateway composition inputs belong to the Gateway.
 
 ## Audit and events
 

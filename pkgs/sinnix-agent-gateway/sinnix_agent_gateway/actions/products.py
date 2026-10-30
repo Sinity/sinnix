@@ -10,8 +10,7 @@ from pydantic import Field, model_validator
 
 from ..action import Action, Example, RequestControls
 from ..contracts import VerbFamily
-from ..generated_lynchpin_inputs import CampaignInput as OwnerCampaignInput
-from ..locators import ProjectLocator
+from ..locators import ProjectLocator, project_ref
 from ..mcp_broker import McpBrokerError
 from ..schemas import GatewayModel
 
@@ -191,10 +190,16 @@ class HistoricalSelector(GatewayModel):
         return self.revision or self.timestamp or ""
 
 
-class CampaignInput(RequestControls, OwnerCampaignInput):
+class CampaignInput(RequestControls):
     project: ProjectLocator
+    roots: list[str] = Field(min_length=1, max_length=100)
+    relation: Literal["blocks", "parent-child"] = "blocks"
+    direction: Literal["prerequisites", "dependents"] = "prerequisites"
+    max_nodes: int = Field(default=500, ge=1, le=1000)
+    max_depth: int = Field(default=50, ge=1, le=100)
     at: HistoricalSelector | None = None
     baseline: HistoricalSelector | None = None
+    refresh_id: str | None = Field(default=None, min_length=1, max_length=512)
 
 
 class CampaignResult(GatewayModel):
@@ -215,23 +220,111 @@ async def _campaign(runtime: Runtime, inp: CampaignInput) -> CampaignResult:
     from .contexts import _resolve_project
 
     project = await anyio.to_thread.run_sync(_resolve_project, runtime, inp.project)
-    product = await owner_product(
-        runtime,
-        "lynchpin",
-        "lynchpin_project",
-        {
-            "action": "campaign_progress",
-            "project": project,
-            "roots": inp.roots,
-            "at": inp.at.owner_value() if inp.at else None,
-            "baseline": inp.baseline.owner_value() if inp.baseline else None,
-            "relation": inp.relation,
-            "direction": inp.direction,
-            "max_nodes": inp.max_nodes,
-            "max_depth": inp.max_depth,
-            **({"refresh_id": inp.refresh_id} if inp.refresh_id else {}),
+    from ..beads import BeadsError
+    from ..contexts import source_revision
+    from ..results import ProtocolError
+
+    if inp.refresh_id is not None:
+        raise ProtocolError(
+            "unsupported_capability",
+            "Native campaign evidence reads owners directly; refresh generations are unsupported",
+        )
+    components: dict[str, Any] = {}
+    failures: dict[str, str] = {}
+    for name, selector in (("tasks", inp.at), ("baseline", inp.baseline)):
+        if name == "baseline" and selector is None:
+            continue
+        try:
+            value = await anyio.to_thread.run_sync(
+                lambda selector=selector: runtime.beads.campaign_closure(
+                    project,
+                    inp.roots,
+                    at=selector.owner_value() if selector else None,
+                    relation=inp.relation,
+                    direction=inp.direction,
+                    max_nodes=inp.max_nodes,
+                    max_depth=inp.max_depth,
+                )
+            )
+        except BeadsError as exc:
+            components[name] = {"status": "unavailable", "reason": str(exc)}
+            failures[name] = str(exc)
+            continue
+        owner = value["owner_product"]
+        complete = (owner.get("closure") or {}).get("complete") is True
+        components[name] = {
+            "status": "available" if complete else "degraded",
+            "source_ref": f"{project_ref(project)}/task-authority",
+            "source_revision": owner.get("revision"),
+            "coverage": {
+                "complete": complete,
+                "scope": "explicit roots and native closure",
+            },
+            "data": value,
+        }
+        if not complete:
+            failures[name] = (
+                "Native closure is incomplete; an exact campaign denominator is unknown"
+            )
+    # AgentCTL has a current bounded observation, not an as-of task-history API.
+    if inp.at is not None or inp.baseline is not None:
+        components["agentctl"] = {
+            "status": "unavailable",
+            "coverage": {"complete": False, "scope": "historical job evidence"},
+            "reason": "AgentCTL does not supply an as-of job observation for task revisions",
+        }
+        failures["agentctl"] = components["agentctl"]["reason"]
+    else:
+        try:
+            page = await anyio.to_thread.run_sync(
+                lambda: runtime._job("job.list", {"project_id": project, "limit": 20})
+            )
+            components["agentctl"] = {
+                "status": "degraded" if page.get("truncated") else "available",
+                "source_ref": "sinnix://gateway/actions/jobs.list",
+                "source_revision": source_revision(page),
+                "revision_kind": "observation",
+                "coverage": {
+                    "complete": not bool(page.get("truncated")),
+                    "scope": "current retained project jobs",
+                },
+                "data": page,
+            }
+            if page.get("truncated"):
+                failures["agentctl"] = (
+                    "Retained job page is bounded; follow the native cursor"
+                )
+        except (ProtocolError, OSError) as exc:
+            components["agentctl"] = {"status": "unavailable", "reason": str(exc)}
+            failures["agentctl"] = str(exc)
+    data = {
+        "schema": "sinnix.native-campaign.v1",
+        "roots": inp.roots,
+        "components": components,
+        "delivery": {
+            "state": "unknown",
+            "reason": "Task closure and job success do not independently verify delivery",
         },
-        deadline_at=inp.deadline_at,
+        "acceptance": {
+            "state": "unknown",
+            "reason": "No independent acceptance assessment is supplied by these owners",
+        },
+        "scope_delta": {
+            "state": "unknown",
+            "reason": "Native observations are retained separately; no historical completeness is inferred",
+        },
+    }
+    product = OwnerProduct(
+        owner="beads",
+        availability=(
+            "degraded"
+            if any(c["status"] != "unavailable" for c in components.values())
+            else "unavailable"
+        ),
+        data=data,
+        source_ref=f"{project_ref(project)}/task-authority",
+        reason="Closure and retained job evidence are observations; delivery and acceptance remain unknown",
+        component_failures=failures,
     )
     return CampaignResult(project=project, product=product)
 
@@ -240,8 +333,8 @@ ACTIONS = (
     Action(
         name="campaign.progress",
         family=VerbFamily.QUERY,
-        owner="lynchpin",
-        summary="Compare explicit campaign closure and historical scope with owner-backed delivery and acceptance evidence.",
+        owner="beads",
+        summary="Read explicit campaign closure and retained job evidence without inferring delivery or acceptance.",
         Input=CampaignInput,
         Output=CampaignResult,
         handler=_campaign,

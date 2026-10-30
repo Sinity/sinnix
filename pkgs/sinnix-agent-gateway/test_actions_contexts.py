@@ -17,27 +17,19 @@ def test_compose_input_binds_target_to_intent():
         ComposeInput.model_validate({"intent": "incident", "job": {"task_id": 1}})
 
 
-@pytest.mark.parametrize(
-    "intent",
-    [
-        "project.trajectory",
-        "verification.regression",
-    ],
-)
-def test_project_context_preserves_owner_components_and_observes_each_time(
+@pytest.mark.parametrize("intent", ["project.trajectory", "verification.regression"])
+def test_project_context_preserves_native_components_and_unknown_acceptance(
     tmp_path, monkeypatch, intent
 ):
-    server, runtime, _ = make_server(tmp_path, monkeypatch, with_git=True)
-    product = {
-        "components": [
-            {"name": "tasks", "status": "unavailable", "reason": "owner offline"}
-        ],
-        "coverage": {"complete": False},
-        "counts": {"exact": None},
-    }
-    runtime.mcp_broker = Broker(
-        {"ok": True, "data": product, "meta": {"source_mode": "owner_snapshots"}}
+    server, runtime, fake = make_server(tmp_path, monkeypatch, with_git=True)
+    monkeypatch.setattr(
+        runtime.beads,
+        "task_authority_status",
+        lambda p: {"revision": "tasks", "summary": {"closed_issues": 1}},
     )
+    fake.responses["job.list"] = {"jobs": [DONE], "truncated": False}
+    runtime.mcp_broker = Broker(failure=True)
+    snapshots = []
     for _ in range(2):
         response = call(
             server,
@@ -46,12 +38,16 @@ def test_project_context_preserves_owner_components_and_observes_each_time(
         )
         assert response["result"]["outcome"] == "ok", response
         value = response["data"]
-        assert value["components"][0]["data"]["data"] == product
+        parts = {x["name"]: x for x in value["components"]}
+        assert parts["beads"]["data"]["summary"]["closed_issues"] == 1
+        assert parts["agentctl"]["data"]["jobs"] == [DONE]
+        assert parts["acceptance"]["status"] == "unavailable"
+        assert value["availability"] == "degraded"
         saved = runtime.results.read(value["snapshot_ref"].rsplit("/", 1)[1])["rows"][0]
-        assert saved["components"][0]["data"]["data"] == product
-    assert len(runtime.mcp_broker.calls) == 2
-    assert runtime.mcp_broker.calls[0][2]["action"] == "project_context"
-    assert runtime.mcp_broker.calls[0][2]["intent"] == intent
+        assert saved["components"][2]["data"]["jobs"] == [DONE]
+        snapshots.append(value["snapshot_ref"])
+    assert len(set(snapshots)) == 2
+    assert not runtime.mcp_broker.calls
 
 
 def test_job_review_preserves_native_receipt_and_incident_uses_observe(
@@ -133,48 +129,13 @@ def test_job_review_rejects_another_launch(tmp_path, monkeypatch):
     assert "wrong output" not in str(response)
 
 
-def test_oversized_orientation_uses_owner_projection_and_retains_exact_snapshot(
-    tmp_path, monkeypatch
-):
-    import json
-    from functools import partial
-
-    import test_actions_jobs
-    from sinnix_agent_gateway.config import GatewayConfig
-    from sinnix_agent_gateway.contexts import canonical_bytes
-
+def test_oversized_native_context_retains_exact_snapshot(tmp_path, monkeypatch):
+    server, runtime, fake = make_server(tmp_path, monkeypatch, with_git=True)
+    payload = {"jobs": [{"output": "界" * 200000}], "truncated": False}
+    fake.responses["job.list"] = payload
     monkeypatch.setattr(
-        test_actions_jobs,
-        "GatewayConfig",
-        partial(GatewayConfig, max_result_bytes=16384),
+        runtime.beads, "task_authority_status", lambda p: {"revision": "tasks"}
     )
-    server, runtime, _ = make_server(tmp_path, monkeypatch, with_git=True)
-    projection = {
-        "product": "project_context_compact",
-        "outcome": "partial",
-        "components": [
-            {
-                "name": "tasks",
-                "status": "available",
-                "full_data_pointer": "/components/0/data",
-                "sections": {
-                    "work": {
-                        "items": [{"id": "fixture-1"}],
-                        "observed_count": 100,
-                        "omitted_count": 99,
-                    }
-                },
-            }
-        ],
-    }
-    product = {
-        "outcome": "partial",
-        "components": [
-            {"name": "tasks", "data": {"description": "original bytes " * 20000}}
-        ],
-        "presentation": projection,
-    }
-    runtime.mcp_broker = Broker({"ok": True, "data": product})
     response = call(
         server,
         "context.compose",
@@ -182,63 +143,11 @@ def test_oversized_orientation_uses_owner_projection_and_retains_exact_snapshot(
     )
     assert response["result"]["outcome"] == "ok", response
     value = response["data"]
-    assert "truncated" not in value
-    assert len(canonical_bytes(value)) <= 16384 - 4096
-    assert len(json.dumps(response, ensure_ascii=False).encode()) <= 16384
-    component = value["components"][0]
-    assert component["presentation"] == "compact"
-    assert component["data"]["data"] == projection
-    assert value["availability"] == "degraded"
-    assert runtime.mcp_broker.calls[0][2]["budget_bytes"] == 8192
+    component = next(x for x in value["components"] if x["name"] == "agentctl")
+    assert component["data"] is None and component["inline_omitted"]
+    assert component["status"] == component["presentation"] == "unavailable"
     saved = runtime.results.read(value["snapshot_ref"].rsplit("/", 1)[1])["rows"][0]
-    assert saved["components"][0]["data"]["data"] == product
-    # Retrieve the same immutable observation through the public route.
-    from sinnix_agent_gateway import server as server_module
-    from sinnix_agent_gateway.actions import audit
-    from test_actions_jobs import OWNED
-
-    monkeypatch.setattr(server_module, "ALL_ACTIONS", (*OWNED, *audit.ACTIONS))
-    from sinnix_agent_gateway.app import create_server
-
-    server = create_server(runtime.config)
-    page = call(server, "results.get", {"ref": value["snapshot_ref"]})
-    assert page["result"]["outcome"] == "ok", page
-
-
-@pytest.mark.parametrize(
-    "presentation",
-    [
-        None,
-        {
-            "product": "project_context_compact",
-            "outcome": "unavailable",
-            "components": [],
-        },
-    ],
-)
-def test_unusable_oversized_orientation_is_explicitly_unavailable(
-    tmp_path, monkeypatch, presentation
-):
-    server, runtime, _ = make_server(tmp_path, monkeypatch, with_git=True)
-    product = {"components": [{"data": "界" * 200000}], "presentation": presentation}
-    runtime.mcp_broker = Broker({"ok": True, "data": product})
-    response = call(
-        server,
-        "context.compose",
-        {"intent": "project.trajectory", "project": {"project": "fixture"}},
-    )
-    assert response["result"]["outcome"] == "ok", response
-    assert response["data"]["availability"] == "unavailable"
-    component = response["data"]["components"][0]
-    assert component["status"] == "unavailable"
-    assert component["presentation"] == "unavailable"
-    assert component["inline_omitted"]
-    assert component["data"] is None
-    saved = runtime.results.read(response["data"]["snapshot_ref"].rsplit("/", 1)[1])[
-        "rows"
-    ][0]
-    assert saved["components"][0]["status"] == "available"
-    assert saved["components"][0]["data"]["data"] == product
+    assert saved["components"][2]["data"] == payload
 
 
 def test_projects_context_preserves_native_components_and_bounds_large_pages(

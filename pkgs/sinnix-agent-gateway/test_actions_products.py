@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import anyio
 import pytest
@@ -30,6 +31,14 @@ class Broker:
         return {"structuredContent": self.data}
 
 
+async def owner_fixture(runtime, _input):
+    return SimpleNamespace(
+        product=await products.owner_product(
+            runtime, "fixture-owner", "fixture-read", {}
+        )
+    )
+
+
 @pytest.mark.parametrize(
     "owner_data",
     [
@@ -43,7 +52,7 @@ def test_owner_string_return_is_decoded_from_sdk_structured_wrapper(
     _, runtime, _ = make_server(tmp_path, monkeypatch)
     runtime.mcp_broker = Broker({"result": json.dumps(owner_data)})
     result = anyio.run(
-        products._campaign,
+        owner_fixture,
         runtime,
         products.CampaignInput(project={"project": "fixture"}, roots=["fixture-1"]),
     )
@@ -96,31 +105,6 @@ def test_runtime_projection_keeps_requested_and_observed_evidence_separate():
     assert job.binding.attempt == 2
 
 
-def test_mcp_product_response_is_a_principal_scoped_immutable_result(
-    tmp_path, monkeypatch
-):
-    _, runtime, _ = make_server(tmp_path, monkeypatch)
-    runtime.mcp_broker = Broker()
-    monkeypatch.setattr(server_module, "ALL_ACTIONS", products.ACTIONS)
-    server = create_server(runtime.config)
-    response = call(
-        server,
-        "campaign.progress",
-        {"project": {"project": "fixture"}, "roots": ["fixture-1"]},
-    )
-    assert response["result"]["outcome"] == "ok", response
-    assert response["result"]["principal"] == "operator"
-    snapshot = runtime.results.read(response["result"]["result_id"])
-    assert snapshot["data"] == response["data"]
-    runtime.mcp_broker.data["usage"]["tokens"] = 500
-    assert (
-        runtime.results.read(response["result"]["result_id"])["data"]["product"][
-            "data"
-        ]["usage"]["tokens"]
-        is None
-    )
-
-
 @pytest.mark.parametrize(
     "data",
     [
@@ -135,7 +119,7 @@ def test_owner_refusal_is_unavailable(tmp_path, monkeypatch, data):
     _, runtime, _ = make_server(tmp_path, monkeypatch)
     runtime.mcp_broker = Broker(data)
     result = anyio.run(
-        products._campaign,
+        owner_fixture,
         runtime,
         products.CampaignInput(project={"project": "fixture"}, roots=["fixture-1"]),
     )
@@ -143,22 +127,30 @@ def test_owner_refusal_is_unavailable(tmp_path, monkeypatch, data):
     assert result.product.data == data
 
 
-def test_campaign_owner_acquires_history_and_preserves_incomplete_scope(
+def test_native_campaign_pins_history_without_current_job_evidence(
     tmp_path, monkeypatch
 ):
-    _, runtime, _ = make_server(tmp_path, monkeypatch)
-    owner = {
-        "closure": {
-            "nodes": [{"id": "fixture-1", "status": "closed"}],
-            "complete": False,
-        },
-        "baseline": {"temporal": {"resolved_revision": "older"}},
-        "scope_delta": {"closed": ["fixture-1"], "complete": False},
-        "items": [{"task_status": "closed", "evidence_state": "unknown"}],
-    }
-    runtime.mcp_broker = Broker(
-        {"ok": True, "data": owner, "meta": {"owner": "lynchpin"}}
-    )
+    _, runtime, fake = make_server(tmp_path, monkeypatch)
+    calls = []
+
+    def closure(project, roots, **kwargs):
+        calls.append((project, roots, kwargs))
+        return {
+            "owner_product": {
+                "revision": kwargs["at"],
+                "closure": {"complete": False},
+                "items": [
+                    {
+                        "id": "fixture-1",
+                        "status": "closed",
+                        "notes": "reported delivered",
+                    }
+                ],
+            }
+        }
+
+    monkeypatch.setattr(runtime.beads, "campaign_closure", closure)
+    runtime.mcp_broker = Broker(failure=True)
     result = anyio.run(
         products._campaign,
         runtime,
@@ -169,87 +161,40 @@ def test_campaign_owner_acquires_history_and_preserves_incomplete_scope(
             baseline={"revision": "older"},
         ),
     )
-    assert result.product.data == owner
-    assert runtime.mcp_broker.calls[0][2] == {
-        "action": "campaign_progress",
-        "project": "fixture",
-        "roots": ["fixture-1"],
+    assert [x[2]["at"] for x in calls] == ["newer", "older"]
+    assert calls[0][2] == {
         "at": "newer",
-        "baseline": "older",
         "relation": "blocks",
         "direction": "prerequisites",
         "max_nodes": 500,
         "max_depth": 50,
     }
-    assert len(runtime.mcp_broker.calls) == 1
-
-
-def test_context_owner_failure_is_persisted_as_unavailable(tmp_path, monkeypatch):
-    _, runtime, _ = make_server(tmp_path, monkeypatch)
-    runtime.mcp_broker = Broker(failure=True)
-    result = anyio.run(
-        contexts._compose,
-        runtime,
-        contexts.ComposeInput(
-            intent="verification.regression", project={"project": "fixture"}
-        ),
-    )
-    assert result.components[0].status == "unavailable"
+    data = result.product.data
     assert (
-        runtime.results.read(result.snapshot_ref.rsplit("/", 1)[1])["rows"][0]["intent"]
-        == "verification.regression"
+        data["components"]["tasks"]["data"]["owner_product"]["items"][0]["status"]
+        == "closed"
     )
+    assert data["delivery"]["state"] == data["acceptance"]["state"] == "unknown"
+    assert data["components"]["agentctl"]["status"] == "unavailable"
+    assert not fake.calls and not runtime.mcp_broker.calls
 
 
 @pytest.mark.parametrize("intent", ["verification.regression", "project.trajectory"])
-@pytest.mark.parametrize("outcome", ["partial", "unavailable"])
-def test_historical_context_owner_contract_preserves_partial_and_unknown(
-    tmp_path, monkeypatch, intent, outcome
+def test_native_historical_context_refuses_without_explicit_task_scope(
+    tmp_path, monkeypatch, intent
 ):
-    _, runtime, _ = make_server(tmp_path, monkeypatch)
-    owner_data = {
-        "product": intent.replace(".", "_"),
-        "outcome": outcome,
-        "sources": {"agentctl": {"coverage": "retained_history"}},
-        "temporal": {"known_at": None, "watermark": None},
-        "counts": {"exact": None},
-        "gaps": ["retained history is incomplete"],
-    }
-    runtime.mcp_broker = Broker(
-        {"ok": True, "data": owner_data, "meta": {"source_mode": "owner_snapshots"}}
-    )
-    result = anyio.run(
-        contexts._compose,
-        runtime,
-        contexts.ComposeInput(
-            intent=intent,
-            project={"project": "fixture"},
-            refresh_id="fixture-generation",
-        ),
-    )
-    sent = runtime.mcp_broker.calls[0][2]
-    assert sent == {
-        "action": "project_context",
-        "intent": intent,
-        "project": "fixture",
-        "roots": [],
-        "at": None,
-        "refresh_id": "fixture-generation",
-        "budget_bytes": 56000,
-    }
-    component = result.components[0]
-    # `partial` is a named gap, not an available answer: flattening it to
-    # `available` is what let a gap-shaped context reach a caller as
-    # authoritative. Breaks if the gateway's unavailability set goes back to
-    # deciding only reachable/unreachable.
-    assert component.status == ("degraded" if outcome == "partial" else "unavailable")
-    if outcome == "partial":
-        assert component.data["data"] == owner_data
-        assert component.data["data"]["counts"]["exact"] is None
-    assert (
-        runtime.results.read(result.snapshot_ref.rsplit("/", 1)[1])["rows"][0]["intent"]
-        == intent
-    )
+    from sinnix_agent_gateway.results import ProtocolError
+
+    _, runtime, fake = make_server(tmp_path, monkeypatch)
+    with pytest.raises(ProtocolError, match="historical selectors"):
+        anyio.run(
+            contexts._compose,
+            runtime,
+            contexts.ComposeInput(
+                intent=intent, project={"project": "fixture"}, at={"revision": "older"}
+            ),
+        )
+    assert not fake.calls
 
 
 def test_lynchpin_envelope_preserves_metadata_and_inner_unavailability(
@@ -342,7 +287,7 @@ def test_an_owner_terminal_outcome_survives_the_gateway(
         }
     )
     result = anyio.run(
-        products._campaign,
+        owner_fixture,
         runtime,
         products.CampaignInput(project={"project": "fixture"}, roots=["fixture-1"]),
     )
@@ -362,7 +307,7 @@ def test_zero_rows_without_a_declared_outcome_are_not_inferred_empty(
     _, runtime, _ = make_server(tmp_path, monkeypatch)
     runtime.mcp_broker = Broker({"sessions": [], "coverage": {"complete": True}})
     result = anyio.run(
-        products._campaign,
+        owner_fixture,
         runtime,
         products.CampaignInput(project={"project": "fixture"}, roots=["fixture-1"]),
     )
@@ -382,7 +327,7 @@ def test_component_failures_are_carried_and_make_the_answer_degraded(
         {"recent_related_sessions": [], "component_failures": failures}
     )
     result = anyio.run(
-        products._campaign,
+        owner_fixture,
         runtime,
         products.CampaignInput(project={"project": "fixture"}, roots=["fixture-1"]),
     )
@@ -392,55 +337,158 @@ def test_component_failures_are_carried_and_make_the_answer_degraded(
     assert "session_lineage" in (product.reason or "")
 
 
-def test_a_composed_context_carries_the_owner_state_and_its_failures(
+def test_native_campaign_current_receipts_do_not_promote_acceptance(
     tmp_path, monkeypatch
 ):
-    """The composed context is where the erased label was observed. Breaks if
-    `_compose` stops propagating the product's state or its component failures
-    into the returned component."""
-    _, runtime, _ = make_server(tmp_path, monkeypatch)
-    failures = {"assertion_guidance": "OperationalError: database is locked"}
-    runtime.mcp_broker = Broker(
-        {"sessions": [], "component_failures": failures, "outcome": {"state": "empty"}}
+    _, runtime, fake = make_server(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        runtime.beads,
+        "campaign_closure",
+        lambda *a, **kw: {
+            "owner_product": {
+                "revision": "tasks",
+                "closure": {"complete": True},
+                "items": [
+                    {"id": "fixture-1", "status": "closed", "notes": "reported success"}
+                ],
+            }
+        },
     )
+    fake.responses["job.list"] = {
+        "jobs": [DONE],
+        "truncated": True,
+        "next_cursor": "retained-next",
+    }
+    result = anyio.run(
+        products._campaign,
+        runtime,
+        products.CampaignInput(project={"project": "fixture"}, roots=["fixture-1"]),
+    )
+    assert result.product.data["components"]["agentctl"]["data"]["jobs"] == [DONE]
+    assert (
+        result.product.data["components"]["agentctl"]["data"]["next_cursor"]
+        == "retained-next"
+    )
+    assert result.product.data["acceptance"]["state"] == "unknown"
+    assert result.product.availability == "degraded"
+
+
+def test_native_campaign_action_retains_exact_immutable_observation(
+    tmp_path, monkeypatch
+):
+    _, runtime, fake = make_server(tmp_path, monkeypatch)
+    owner = {
+        "revision": "task-revision",
+        "closure": {"complete": True},
+        "items": [
+            {"id": "fixture-1", "status": "closed", "notes": "reported delivery"}
+        ],
+    }
+    monkeypatch.setattr(
+        runtime.beads, "campaign_closure", lambda *a, **kw: {"owner_product": owner}
+    )
+    fake.responses["job.list"] = {"jobs": [DONE], "truncated": False}
+    monkeypatch.setattr(server_module, "ALL_ACTIONS", products.ACTIONS)
+    server = create_server(runtime.config)
+    response = call(
+        server,
+        "campaign.progress",
+        {"project": {"project": "fixture"}, "roots": ["fixture-1"]},
+    )
+    assert response["result"]["outcome"] == "ok", response
+    assert response["result"]["owner"] == "beads"
+    expected = response["data"]
+    owner["items"][0]["notes"] = "later report"
+    saved = runtime.results.read(response["result"]["result_id"])
+    assert saved["data"] == expected
+    assert (
+        saved["data"]["product"]["data"]["components"]["tasks"]["data"][
+            "owner_product"
+        ]["items"][0]["notes"]
+        == "reported delivery"
+    )
+
+
+def test_task_owner_failure_keeps_native_job_evidence_and_unknown_scope(
+    tmp_path, monkeypatch
+):
+    from sinnix_agent_gateway.beads import BeadsError
+
+    _, runtime, fake = make_server(tmp_path, monkeypatch)
+
+    def unavailable(*a, **kw):
+        raise BeadsError("configured authority unavailable")
+
+    monkeypatch.setattr(runtime.beads, "campaign_closure", unavailable)
+    fake.responses["job.list"] = {"jobs": [DONE], "truncated": False}
+    result = anyio.run(
+        products._campaign,
+        runtime,
+        products.CampaignInput(project={"project": "fixture"}, roots=["fixture-1"]),
+    )
+    assert result.product.data["components"]["tasks"]["status"] == "unavailable"
+    assert result.product.data["components"]["agentctl"]["data"]["jobs"] == [DONE]
+    assert result.product.data["scope_delta"]["state"] == "unknown"
+    assert result.product.data["acceptance"]["state"] == "unknown"
+    assert "tasks" in result.product.component_failures
+
+
+@pytest.mark.parametrize("intent", ["verification.regression", "project.trajectory"])
+def test_explicit_context_roots_use_same_historical_native_closure(
+    tmp_path, monkeypatch, intent
+):
+    _, runtime, fake = make_server(tmp_path, monkeypatch)
+    calls = []
+
+    def closure(project, roots, **kwargs):
+        calls.append((project, roots, kwargs["at"]))
+        return {
+            "owner_product": {
+                "revision": kwargs["at"],
+                "closure": {"complete": True},
+                "items": [],
+            }
+        }
+
+    monkeypatch.setattr(runtime.beads, "campaign_closure", closure)
     result = anyio.run(
         contexts._compose,
         runtime,
         contexts.ComposeInput(
-            intent="campaign.progress",
+            intent=intent,
             project={"project": "fixture"},
             roots=["fixture-1"],
+            at={"revision": "current"},
+            baseline={"revision": "baseline"},
         ),
     )
-    component = result.components[0]
-    assert component.status == "degraded"
-    assert component.component_failures == failures
+    assert calls == [
+        ("fixture", ["fixture-1"], "current"),
+        ("fixture", ["fixture-1"], "baseline"),
+    ]
+    assert result.components[0].data["data"]["acceptance"]["state"] == "unknown"
+    assert not fake.calls
 
 
-def test_a_composed_context_is_held_to_the_budget_it_declares(tmp_path, monkeypatch):
-    """`total_budget_bytes` was declared and never enforced, which is why a
-    262 KB budget returned a 4 MB result. Breaks if the bound is removed: the
-    returned envelope exceeds the number it reports as its own budget."""
-    import dataclasses
+def test_all_native_owners_unavailable_is_not_an_empty_campaign(tmp_path, monkeypatch):
+    from sinnix_agent_gateway.beads import BeadsError
+    from sinnix_agent_gateway.results import ProtocolError
 
     _, runtime, _ = make_server(tmp_path, monkeypatch)
-    runtime.config = dataclasses.replace(runtime.config, max_result_bytes=4_096)
-    payload = {"sessions": [], "evidence": "x" * 64_000}
-    runtime.mcp_broker = Broker(payload)
+
+    def tasks(*args, **kwargs):
+        raise BeadsError("task owner offline")
+
+    def jobs(*args, **kwargs):
+        raise ProtocolError("unavailable", "retained jobs offline")
+
+    monkeypatch.setattr(runtime.beads, "campaign_closure", tasks)
+    monkeypatch.setattr(runtime, "_job", jobs)
     result = anyio.run(
-        contexts._compose,
+        products._campaign,
         runtime,
-        contexts.ComposeInput(
-            intent="campaign.progress",
-            project={"project": "fixture"},
-            roots=["fixture-1"],
-        ),
+        products.CampaignInput(project={"project": "fixture"}, roots=["fixture-1"]),
     )
-    assert result.total_budget_bytes == 4_096
-    assert len(result.model_dump_json().encode()) <= 4_096
-    assert result.components[0].inline_omitted is True
-    assert result.components[0].data is None
-    # The complete observation is still readable at the snapshot ref: bounding
-    # the in-band copy must not lose the evidence.
-    snapshot = runtime.results.read(result.snapshot_ref.rsplit("/", 1)[1])
-    assert snapshot["rows"][0]["components"][0]["data"]["data"] == payload
+    assert result.product.availability == "unavailable"
+    assert set(result.product.component_failures) == {"tasks", "agentctl"}
+    assert result.product.data["acceptance"]["state"] == "unknown"

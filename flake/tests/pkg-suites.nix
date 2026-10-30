@@ -62,10 +62,6 @@
             cp runtime-import-before.json runtime-import-after.json "$out/"
             printf '%s\n' "$RUNTIME_PACKAGE" > "$out/runtime"
           '';
-      lynchpinContract = builtins.path {
-        path = "${inputs.lynchpin}/lynchpin/mcp/project_contracts.py";
-        name = "lynchpin-project-contracts.py";
-      };
       gatewaySuite =
         pytestArgs:
         pythonSuite {
@@ -83,7 +79,6 @@
               inputs.polylogue-rewrite.packages.${pkgs.stdenv.hostPlatform.system}.polylogue
             }/bin/polylogue"
             export SINNIX_GATEWAY_TEST_EXECUTABLE="${sinnixScriptRegistry.packageSet.sinnix-agent-gateway}/bin/sinnix-agent-gateway"
-            python generate_owner_inputs.py --lynchpin ${lynchpinContract} --check
             ${sinnixScriptRegistry.packageSet.beads}/bin/bd owner schema --json > "$TMPDIR/beads-owner-schema.json"
             python generate_beads_inputs.py "$TMPDIR/beads-owner-schema.json" --check
           '';
