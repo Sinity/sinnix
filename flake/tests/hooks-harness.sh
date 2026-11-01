@@ -8,11 +8,10 @@ settings=$2
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
 mkdir -p "$test_root/bin" "$test_root/home"
-ln -s /run/current-system/sw/bin/jq "$test_root/bin/jq"
-ln -s /run/current-system/sw/bin/timeout "$test_root/bin/timeout"
-ln -s /run/current-system/sw/bin/bash "$test_root/bin/bash"
-for tool in cat date dirname mkdir mktemp rm sleep; do
-  ln -s "/run/current-system/sw/bin/$tool" "$test_root/bin/$tool"
+# A PATH holding only basic tools, taken from wherever this test runs (the
+# build sandbox has no /run/current-system).
+for tool in bash cat date dirname jq mkdir mktemp rm sleep timeout; do
+  ln -s "$(command -v "$tool")" "$test_root/bin/$tool"
 done
 
 jq -e . "$settings" >/dev/null
