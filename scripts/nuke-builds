@@ -22,9 +22,6 @@ SYSTEM_UNITS=(
   "sinex-backfill-*.service"
 )
 
-USER_UNITS=(
-  "polylogue-live.service"
-)
 
 # Build tools and compilers (exact process names)
 BUILD_PROCS=(
@@ -43,40 +40,17 @@ LSP_PROCS=(
 
 BACKGROUND_PROCS=(
   "borg" "borgmatic" "btrbk"
-  "polylogue"
 )
 
 ALL_PROCS=("${BUILD_PROCS[@]}" "${LSP_PROCS[@]}" "${BACKGROUND_PROCS[@]}")
 
 stop_units() {
-  local scope="$1"
-  shift
   local -a units=("$@")
-  local -a systemctl_cmd=()
-
-  if [ "${#units[@]}" -eq 0 ]; then
-    return
-  fi
-
-  if [ "$scope" = "system" ]; then
-    systemctl_cmd=(systemctl)
-  elif [ "${EUID:-$(id -u)}" -eq 0 ]; then
-    local target_user target_uid
-    target_user="${SUDO_USER:-sinity}"
-    target_uid="$(id -u "$target_user" 2>/dev/null || true)"
-    if [ -z "$target_uid" ] || [ ! -d "/run/user/$target_uid" ]; then
-      return
-    fi
-    systemctl_cmd=(runuser -u "$target_user" -- env "XDG_RUNTIME_DIR=/run/user/$target_uid" systemctl --user)
-  else
-    systemctl_cmd=(systemctl --user)
-  fi
-
-  timeout 2s "${systemctl_cmd[@]}" stop --no-block "${units[@]}" 2>/dev/null || true
+  timeout 2s systemctl stop --no-block "${units[@]}" 2>/dev/null || true
   sleep 0.5
-  timeout 2s "${systemctl_cmd[@]}" kill --kill-who=all --signal=TERM "${units[@]}" 2>/dev/null || true
+  timeout 2s systemctl kill --kill-who=all --signal=TERM "${units[@]}" 2>/dev/null || true
   sleep 1
-  timeout 2s "${systemctl_cmd[@]}" kill --kill-who=all --signal=KILL "${units[@]}" 2>/dev/null || true
+  timeout 2s systemctl kill --kill-who=all --signal=KILL "${units[@]}" 2>/dev/null || true
 }
 
 notify() {
@@ -87,9 +61,10 @@ notify() {
 
 echo "Emergency load shedding..."
 
-stop_units user "${USER_UNITS[@]}"
+# Live product services (polylogue-live, sinexd, capture producers) are never
+# shed: stopping them loses capture, and they are not build work.
 if [ "${EUID:-$(id -u)}" -eq 0 ]; then
-  stop_units system "${SYSTEM_UNITS[@]}"
+  stop_units "${SYSTEM_UNITS[@]}"
 fi
 
 killed=0
