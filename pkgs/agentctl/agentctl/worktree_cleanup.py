@@ -1108,9 +1108,19 @@ def clean(
     }
 
 
-def clean_published(config: Config) -> list[dict[str, Any]]:
-    """The existing queue maintenance also closes completed native checkouts."""
+def clean_published(
+    config: Config, *, budget_seconds: float | None = None
+) -> list[dict[str, Any]]:
+    """The existing queue maintenance also closes completed native checkouts.
+
+    ``budget_seconds`` bounds the whole pass so it ends inside its unit's
+    start timeout; unfinished checkouts are deferred, not failed.
+    """
+    import time
+
     from .native_worktrees import clean_native
+
+    deadline = None if budget_seconds is None else time.monotonic() + budget_seconds
 
     catalog = config.catalog()
     outcomes = []
@@ -1120,7 +1130,10 @@ def clean_published(config: Config) -> list[dict[str, Any]]:
             continue
         try:
             outcomes.append(
-                {"project": project.project_id, **clean_native(config, project)}
+                {
+                    "project": project.project_id,
+                    **clean_native(config, project, deadline=deadline),
+                }
             )
         except (CleanupError, WorktrunkError, PueueError, OSError, ValueError) as error:
             outcomes.append({"project": project.project_id, "error": str(error)})

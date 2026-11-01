@@ -261,7 +261,19 @@ def _target_users(config, registry, roots):
     }
 
 
-def clean_native(config, project, selected=None) -> dict[str, Any]:
+#: Candidates admitted to one cleanup pass per project. The holder census and
+#: preservation scale with the batch; the rest wait for the next pass.
+CLEANUP_BATCH = 40
+
+
+def clean_native(
+    config, project, selected=None, *, deadline: float | None = None
+) -> dict[str, Any]:
+    """Retire completed native checkouts in one bounded batch.
+
+    ``deadline`` (a ``time.monotonic()`` value) stops admitting removals once
+    reached; deferred checkouts are reported and retried on the next pass.
+    """
     removed, kept, retained = [], [], []
     with project_locked(config, project.project_id):
         registry = worktrunk.worktrunk_list(project.root)
@@ -343,6 +355,12 @@ def clean_native(config, project, selected=None) -> dict[str, Any]:
                 continue
             qualified.append((path, tree, head))
         candidates = qualified
+        if selected is None and len(candidates) > CLEANUP_BATCH:
+            kept.extend(
+                {"branch": str(path), "reason": "deferred to the next cleanup batch"}
+                for path, _, _ in candidates[CLEANUP_BATCH:]
+            )
+            candidates = candidates[:CLEANUP_BATCH]
 
         def census():
             roots = [path for path, _, _ in candidates] + [
@@ -391,6 +409,11 @@ def clean_native(config, project, selected=None) -> dict[str, Any]:
             return {"removed": removed, "kept": kept, "artifacts": retained}
         for path, tree, head in candidates:
             name = (tree.branch if tree else None) or str(path)
+            if deadline is not None and time.monotonic() >= deadline:
+                kept.append(
+                    {"branch": name, "reason": "deferred; cleanup time budget spent"}
+                )
+                continue
             current = next((item for item in registry if item.path == path), None)
             if tree and (
                 current is None or current.locked or current.branch != tree.branch

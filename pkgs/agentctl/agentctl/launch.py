@@ -16,6 +16,7 @@ import subprocess
 import time
 import uuid
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Sequence, TextIO
@@ -639,12 +640,16 @@ def start_operation(
     binding: Mapping[str, Any] | None = None,
     idempotency_key: str | None = None,
     fresh: bool = False,
+    priority: int | None = None,
 ) -> dict[str, Any]:
     """Launch an operation; an idempotency key makes a repeated launch return the same job.
 
     `fresh` runs a cached operation even when a matching job exists; its
-    receipts still serve later requests.
+    receipts still serve later requests. `priority` replaces the operation's
+    declared queue priority for this job, e.g. to run the landing path first.
     """
+    if priority is not None:
+        operation = replace(operation, priority=priority)
     if idempotency_key is None:
         return _start_operation(
             config,

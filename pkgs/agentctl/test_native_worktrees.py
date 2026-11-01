@@ -556,3 +556,29 @@ def test_tagged_ignored_tool_cache_is_disposable(owned):
     (output / "CACHEDIR.TAG").write_bytes(native.CACHE_TAG)
     (output / "compiler-state").write_bytes(b"derived cache")
     assert clean(owned)["removed"] == ["candidate"]
+
+
+def test_spent_time_budget_defers_removal_to_the_next_pass(owned):
+    import time
+
+    config, project, path = owned
+    cache(path)
+    result = native.clean_native(config, project, deadline=time.monotonic() - 1)
+    assert result["removed"] == []
+    assert result["kept"] == [
+        {"branch": "candidate", "reason": "deferred; cleanup time budget spent"}
+    ]
+    assert path.exists()
+    assert clean(owned)["removed"] == ["candidate"]
+
+
+def test_candidates_beyond_one_batch_are_deferred(owned, monkeypatch):
+    config, project, path = owned
+    cache(path)
+    monkeypatch.setattr(native, "CLEANUP_BATCH", 0)
+    result = clean(owned)
+    assert result["removed"] == []
+    assert result["kept"] == [
+        {"branch": str(path), "reason": "deferred to the next cleanup batch"}
+    ]
+    assert path.exists()

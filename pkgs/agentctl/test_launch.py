@@ -2300,3 +2300,13 @@ def test_cached_operation_answers_from_a_cleaned_queue_entry(
     state["tree"] = "c" * 40
     other = launch.start_operation(config, project, project.operation("verify"))
     assert other.get("reused") is not True and len(fake_pueue.added) == 2
+
+
+def test_a_job_priority_overrides_the_declared_one(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    project = load_project_adapter(project_root)
+    launch.start_operation(config, project, project.operation("verify"), priority=50)
+    assert fake_pueue.added[-1]["priority"] == 50
+    launch.start_operation(config, project, project.operation("verify"))
+    assert fake_pueue.added[-1]["priority"] == 0

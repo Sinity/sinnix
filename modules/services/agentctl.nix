@@ -268,7 +268,10 @@ mkServiceModule {
           # pueued keeps every finished task in memory until it is cleaned;
           # nothing cleaned them, and the daemon grew to 1.2 GB over 3.7 days.
           # Results and receipts stay readable through agentctl afterwards.
-          execStart = "${scriptPkgs.agentctl}/bin/agentctl job clean --all-terminal --worktrees";
+          # Each pass retires at most one batch per project and stops admitting
+          # removals after 45 minutes, inside the start timeout; deferred
+          # checkouts go in the next pass.
+          execStart = "${scriptPkgs.agentctl}/bin/agentctl job clean --all-terminal --worktrees --budget-seconds 2700";
           # The worktree holder census reads hidden process working
           # directories through the host's noninteractive sudo wrapper.
           path = [ "/run/wrappers" ];

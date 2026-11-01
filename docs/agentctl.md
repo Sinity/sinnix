@@ -26,7 +26,7 @@ never cancels a job, and a queue cleanup retains its historical artifacts.
 | Verb                                                                 | Does                                                                                                                                                 |
 | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `project list \| get [p] \| operations [p]`                          | the configured descriptors                                                                                                                           |
-| `job start [p] <op> [--workspace P] [--wait] [--if-idle] [--fresh] [-- args…]` | queue an operation in its pool, label `<p>:<op>`; `--if-idle` skips it while the same label is queued or running; `--fresh` runs a cached operation even when a matching job exists |
+| `job start [p] <op> [--workspace P] [--wait] [--if-idle] [--fresh] [--priority N] [-- args…]` | queue an operation in its pool, label `<p>:<op>`; `--if-idle` skips it while the same label is queued or running; `--fresh` runs a cached operation even when a matching job exists; `--priority` replaces the declared priority for this job (e.g. to run the landing path first) |
 | `job list [--project p] [--active] [--all]`                          | job rows, newest first (40 unless `--all`)                                                                                                           |
 | `job snapshot [--limit N]`                                           | group state and counts plus bounded job rows, unfinished first                                                                                       |
 | `job get \| logs \| result \| cancel \| retry \| wait <id>`          | one job by pueue task id, plus `--job-id` to follow it across a reorder; `--attempt` selects a retry; `logs`/`result` page with `--offset`/`--limit` |
@@ -321,7 +321,10 @@ Keep a functional checkout reserved between jobs with Git's existing lock:
 Release it with `git worktree unlock` when ownership ends. Cleanup also preserves
 pre-rewrite branches and active target aliases.
 
-The existing daily maintenance runs `job clean --all-terminal --worktrees`.
+The existing daily maintenance runs `job clean --all-terminal --worktrees --budget-seconds 2700`:
+each pass admits at most 40 candidate checkouts per project and stops admitting
+removals when the budget is spent; deferred checkouts are reported and retried
+on the next pass.
 Queue results and worktree outcomes are reported separately, including kept
 paths and failures. Without `--worktrees`, job-clean JSON remains unchanged.
 

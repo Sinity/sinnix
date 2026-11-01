@@ -1037,7 +1037,7 @@ def test_queue_maintenance_reports_worktree_outcome_separately(
         if failure
         else [{"project": "fixture", "removed": ["candidate"], "kept": []}]
     )
-    monkeypatch.setattr(cli.worktree_cleanup, "clean_published", lambda _: result)
+    monkeypatch.setattr(cli.worktree_cleanup, "clean_published", lambda _, **__: result)
     code = cli.main(["job", "clean", "--all-terminal", "--worktrees", "--json"])
     observed = json.loads(capsys.readouterr().out)
     assert observed["jobs"] == jobs and observed["queue_cleanup"] == "completed"

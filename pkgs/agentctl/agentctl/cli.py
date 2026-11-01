@@ -182,6 +182,14 @@ def parser() -> argparse.ArgumentParser:
         help="caller key that makes a repeated launch return the same job",
     )
     start.add_argument(
+        "--priority",
+        type=int,
+        choices=range(-100, 101),
+        metavar="-100..100",
+        help="queue priority for this job instead of the operation's declared one; "
+        "higher starts first within the pool",
+    )
+    start.add_argument(
         "--fresh",
         action="store_true",
         help='run even when an operation declaring cache = "tree+environment" '
@@ -249,6 +257,11 @@ def parser() -> argparse.ArgumentParser:
         "--worktrees",
         action="store_true",
         help="also retire published checkouts after queue cleanup",
+    )
+    clean.add_argument(
+        "--budget-seconds",
+        type=float,
+        help="with --worktrees, stop admitting checkout removals after this long",
     )
     _output_arguments(clean)
     wait = job_verbs.add_parser("wait")
@@ -398,6 +411,7 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             idempotency_key=arguments.idempotency_key,
             extra_argv=(*rest[1:], *getattr(arguments, "extra", [])),
             fresh=arguments.fresh,
+            priority=arguments.priority,
         )
         if arguments.wait:
             started = job_queries.wait(
@@ -493,7 +507,9 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
                     file=sys.stderr,
                     flush=True,
                 )
-                worktrees = worktree_cleanup.clean_published(config)
+                worktrees = worktree_cleanup.clean_published(
+                    config, budget_seconds=arguments.budget_seconds
+                )
                 failed = any("error" in row for row in worktrees)
                 out.write(
                     {
