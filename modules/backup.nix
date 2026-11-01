@@ -771,8 +771,6 @@ let
     "home/sinity/.local/share/uv"
     # Agent CLI installs: npm trees and source-built recovery copies are
     # reinstalled by the bootstrap; the ledgers beside them stay covered.
-    "home/sinity/.local/state/claude-code/npm"
-    "home/sinity/.local/state/claude-code/npm-recovery"
     "home/sinity/.npm/_npx"
     "home/sinity/.local/share/nvim/mason"
     "home/sinity/.local/share/hyprland/logs"
@@ -844,6 +842,10 @@ let
     "state/containers"
     # Codex installs its app-server releases here; it re-fetches them.
     "state/codex/home/packages"
+    # Claude Code's npm tree and preserved install attempts; the bootstrap
+    # reinstalls from the locked tarball, and the ledgers beside them stay.
+    "state/claude/state/npm"
+    "state/claude/state/npm-recovery"
     # Scratch trees, declared unbacked in /realm/INVENTORY.md: TMPDIR and job
     # scratch under tmp/, agent checkouts under worktrees/ whose commits live
     # in their origin repositories. Neither self-describes as a cache, so both
@@ -929,8 +931,6 @@ let
       "home/sinity/.hermes/hermes-agent/venv"
       "home/sinity/.hermes/hermes-agent/.venv"
       "home/sinity/.local/share/uv"
-      "home/sinity/.local/state/claude-code/npm"
-      "home/sinity/.local/state/claude-code/npm-recovery"
       "home/sinity/.npm/_npx"
       "home/sinity/.local/share/nvim/mason"
       "home/sinity/.local/share/hyprland/logs"
@@ -957,6 +957,10 @@ let
     "state/containers"
     # Codex installs its app-server releases here; it re-fetches them.
     "state/codex/home/packages"
+    # Claude Code's npm tree and preserved install attempts; the bootstrap
+    # reinstalls from the locked tarball, and the ledgers beside them stay.
+    "state/claude/state/npm"
+    "state/claude/state/npm-recovery"
     "tmp"
     "worktree"
     "worktrees"

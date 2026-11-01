@@ -277,6 +277,9 @@ mkFeatureModule {
           # No_COW applies to files created after it is set; existing
           # databases are copied in, never moved, so they pick it up.
           "h /realm/state/codex/sqlite - - - - +C"
+          "d /realm/state/claude 0700 ${user} users -"
+          "d /realm/state/claude/config 0700 ${user} users -"
+          "d /realm/state/claude/state 0755 ${user} users -"
         ];
         # Codex's sessions and SQLite state took most of the root SSD's
         # fsync-driven writes, so its home lives on Realm (plain directories
@@ -290,12 +293,28 @@ mkFeatureModule {
           ];
           depends = [ "/realm" ];
         };
+        # Claude Code's transcripts, logs and npm installs follow for the same
+        # reason. Switching needs every Claude process stopped first.
+        fileSystems."/home/${user}/.config/claude" = {
+          device = "/realm/state/claude/config";
+          fsType = "none";
+          options = [
+            "bind"
+            "nofail"
+          ];
+          depends = [ "/realm" ];
+        };
+        fileSystems."/home/${user}/.local/state/claude-code" = {
+          device = "/realm/state/claude/state";
+          fsType = "none";
+          options = [
+            "bind"
+            "nofail"
+          ];
+          depends = [ "/realm" ];
+        };
         sinnix.persistence.home = {
           directories = [
-            {
-              directory = ".config/claude";
-              mode = "0700";
-            }
             # Clodex stores only mutable model registry and non-secret OAuth
             # recovery metadata here. Credentials use the encrypted local
             # credential helper below.
@@ -316,7 +335,6 @@ mkFeatureModule {
             }
             # npm installs survive impermanence cold boots so agents do not
             # re-download on every activation.
-            ".local/state/claude-code"
             ".local/state/codex"
             ".local/state/pi"
             ".local/state/gemini"
