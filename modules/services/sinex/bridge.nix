@@ -159,6 +159,15 @@ in
       };
     };
 
+    # The session producer exits when a frame goes unacknowledged; under build
+    # I/O load on the /realm NVMe that happens, and three failures in ten
+    # minutes left it dead for days (2026-10-29, 2026-11-01). It keeps
+    # retrying; its spool holds unacknowledged frames across restarts.
+    systemd.user.services.sinex-session = {
+      unitConfig.StartLimitIntervalSec = lib.mkForce 0;
+      serviceConfig.RestartSec = lib.mkForce "10s";
+    };
+
     systemd.services = {
       postgresql = {
         unitConfig.RequiresMountsFor = [ root ];

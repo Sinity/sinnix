@@ -234,6 +234,10 @@ mkServiceModule {
                 unit = {
                   requires = [ "lynchpin-local-attrs.service" ];
                   after = [ "lynchpin-local-attrs.service" ];
+                  # The timer runs these; an activation that started one waited
+                  # for its queued AgentCTL job behind the build pools (a 42 min
+                  # switch on 2026-11-01).
+                  restartIfChanged = false;
                 };
                 inherit (job) timer;
               }
