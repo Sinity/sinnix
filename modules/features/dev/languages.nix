@@ -10,6 +10,23 @@ mkFeatureModule {
     "languages"
   ];
   description = "Programming language toolchains";
+  extraOptions.cargoCache = {
+    maxIdleDays = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 14;
+      description = "Remove a Cargo target not selected or built for this many days.";
+    };
+    minIdleHours = lib.mkOption {
+      type = lib.types.ints.unsigned;
+      default = 2;
+      description = "Never remove a target selected or built within this many hours.";
+    };
+    maxFilesystemUsePercent = lib.mkOption {
+      type = lib.types.ints.between 1 100;
+      default = 90;
+      description = "While the cache filesystem is fuller than this, remove idle targets, least recently used first.";
+    };
+  };
   subFeatures = {
     nix = {
       description = "Nix language tooling (nixfmt, nixd, nix-diff)";
@@ -88,6 +105,33 @@ mkFeatureModule {
             chmod 0700 "$CARGO_CACHE_ROOT"
           '';
         };
+        # Targets are build outputs keyed by checkout path; without eviction
+        # every short-lived worktree leaves one behind.
+        systemd.user =
+          (lib.sinnix.mkScheduledJob
+            {
+              inherit config;
+              unitName = "sinnix-cargo-target-evict";
+              description = "Evict removed, idle and least recently used Cargo targets";
+            }
+            {
+              manager = "user";
+              resourceClass = "background";
+              serviceConfig.TimeoutStartSec = "1h";
+              environment = {
+                SINNIX_CARGO_CACHE_ROOT = cargoCacheRoot;
+                SINNIX_CARGO_MAX_IDLE_SECONDS = toString (cfg.cargoCache.maxIdleDays * 86400);
+                SINNIX_CARGO_MIN_IDLE_SECONDS = toString (cfg.cargoCache.minIdleHours * 3600);
+                SINNIX_CARGO_MAX_FILESYSTEM_USE_PERCENT = toString cfg.cargoCache.maxFilesystemUsePercent;
+              };
+              execStart = "${scriptPkgs.sinnix-cargo-target-evict}/bin/sinnix-cargo-target-evict";
+              timer = {
+                intervalSec = 3600;
+                persistent = true;
+                description = "Hourly Cargo target eviction";
+              };
+            }
+          ).systemd.user;
         home-manager.users.${user}.home = {
           packages = [ cargoTarget ];
           # Short-lived checkouts otherwise retain a second compiler cache in

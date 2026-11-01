@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Evict Cargo targets whose checkout is gone, idle beyond the age budget, or least recently used under filesystem pressure
+# runtimeInputs: bash coreutils findutils gawk util-linux
+set -euo pipefail
+
+# Budgets come from deployment config (sinnix.features.dev.languages.cargoCache).
+cache_root="${SINNIX_CARGO_CACHE_ROOT:-/realm/state/cache/cargo}"
+max_idle_seconds="${SINNIX_CARGO_MAX_IDLE_SECONDS:?}"
+min_idle_seconds="${SINNIX_CARGO_MIN_IDLE_SECONDS:?}"
+max_use_percent="${SINNIX_CARGO_MAX_FILESYSTEM_USE_PERCENT:?}"
+
+dir="$cache_root/$(id -u)"
+[ -d "$dir" ] || exit 0
+
+# sinnix-cargo-target keeps each target at <dir>/<hash>/target, where hash is
+# derived from the checkout path, and writes that path to <dir>/<hash>/checkout
+# on every selection. The marker's mtime is the target's last selection.
+hash_of() { printf '%s' "$1" | sha256sum | cut -c1-32; }
+
+last_used() {
+  local entry="$1" newest=0 m p
+  for p in "$entry/checkout" "$entry/target" "$entry"/target/*/ "$entry"/target/*/deps \
+    "$entry"/target/*/*/deps; do
+    [ -e "$p" ] || continue
+    m="$(stat -c %Y "$p")"
+    [ "$m" -gt "$newest" ] && newest="$m"
+  done
+  printf '%s\n' "$newest"
+}
+
+use_percent() {
+  df --output=pcent "$cache_root" | awk 'NR == 2 { sub("%", ""); print $1 }'
+}
+
+# A target is removed only while none of its Cargo build locks is held. The
+# entry is renamed under the primary lock, so a build that starts afterwards
+# selects a fresh target instead of writing into one being deleted.
+evict() {
+  local entry="$1" reason="$2" lock trash
+  while IFS= read -r lock; do
+    if ! flock --nonblock "$lock" true; then
+      echo "busy, kept: $entry" >&2
+      return 1
+    fi
+  done < <(find "$entry/target" -maxdepth 3 -name .cargo-lock 2>/dev/null)
+  trash="$dir/.evicting.$(basename "$entry")"
+  lock="$entry/target/debug/.cargo-lock"
+  if [ -e "$lock" ]; then
+    flock --nonblock "$lock" mv -T -- "$entry" "$trash" || return 1
+  else
+    mv -T -- "$entry" "$trash"
+  fi
+  rm -rf -- "$trash"
+  echo "evicted ($reason): $(basename "$entry")"
+}
+
+# An interrupted run leaves only renamed entries, which nothing selects.
+for trash in "$dir"/.evicting.*; do
+  [ -e "$trash" ] && rm -rf -- "$trash"
+done
+
+now="$(date +%s)"
+lru=()
+for entry in "$dir"/*/; do
+  entry="${entry%/}"
+  name="$(basename "$entry")"
+  [[ "$name" =~ ^[0-9a-f]{32}$ ]] || continue
+  idle=$((now - $(last_used "$entry")))
+  checkout=""
+  [ -f "$entry/checkout" ] && checkout="$(head -n 1 "$entry/checkout")"
+  if [ -n "$checkout" ] && [ "$(hash_of "$checkout")" = "$name" ] \
+    && [ ! -e "$checkout/.git" ]; then
+    # The checkout is gone; a later checkout at the same path selects the
+    # same hash and rewrites the marker first, so a recent selection wins.
+    [ "$idle" -ge "$min_idle_seconds" ] && evict "$entry" "checkout removed" || true
+    continue
+  fi
+  if [ "$idle" -ge "$max_idle_seconds" ]; then
+    evict "$entry" "idle $((idle / 86400))d" || true
+    continue
+  fi
+  [ "$idle" -ge "$min_idle_seconds" ] && lru+=("$idle $entry")
+done
+
+# Under filesystem pressure, the least recently used idle targets go first.
+# Reflinked targets share extents, so the filesystem's own usage, read after
+# each committed removal, is the measure; per-target sizes would overstate it.
+if [ "$(use_percent)" -gt "$max_use_percent" ] && [ "${#lru[@]}" -gt 0 ]; then
+  while IFS= read -r line; do
+    [ "$(use_percent)" -gt "$max_use_percent" ] || break
+    evict "${line#* }" "filesystem above ${max_use_percent}%" || continue
+    sync -f "$cache_root"
+  done < <(printf '%s\n' "${lru[@]}" | sort -rn)
+fi

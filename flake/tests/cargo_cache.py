@@ -1,15 +1,18 @@
 """Run cache provisioning and selection with synthetic Git checkouts and Btrfs."""
 
+import fcntl
+import hashlib
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
-PROVISION, SELECTOR, DIRENV = map(Path, sys.argv[1:4])
-del sys.argv[1:4]
+PROVISION, SELECTOR, DIRENV, EVICT = map(Path, sys.argv[1:5])
+del sys.argv[1:5]
 
 
 class CargoCache(unittest.TestCase):
@@ -252,7 +255,9 @@ class CargoCache(unittest.TestCase):
         self.assertEqual(
             (target / "debug" / "deps" / "libdep.rlib").read_bytes(), b"compiled"
         )
-        self.assertEqual([p.name for p in target.parent.iterdir()], ["target"])
+        self.assertEqual(
+            sorted(p.name for p in target.parent.iterdir()), ["checkout", "target"]
+        )
         # An existing target is never replaced.
         (target / "debug" / "deps" / "libdep.rlib").write_bytes(b"rebuilt")
         self.assertEqual(select_in(self.root / "lane"), target)
@@ -270,20 +275,34 @@ class CargoCache(unittest.TestCase):
             f'exec "{shutil.which("cp")}" "${{args[@]}}"\n'
         )
         (self.bin / "cp").chmod(0o755)
-        git = ["git", "-C", str(self.checkout), "-c", "user.name=Fixture",
-               "-c", "user.email=fixture@example.invalid"]
+        git = [
+            "git",
+            "-C",
+            str(self.checkout),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+        ]
         (self.checkout / "Cargo.lock").write_text("old resolution\n")
         subprocess.run([*git, "add", "Cargo.lock"], check=True)
         subprocess.run([*git, "commit", "-qm", "old"], check=True)
 
         def worktree(name):
             path = self.root / name
-            subprocess.run([*git, "worktree", "add", "-q", "--detach", str(path)], check=True)
+            subprocess.run(
+                [*git, "worktree", "add", "-q", "--detach", str(path)], check=True
+            )
             return path
 
         def select_in(path):
-            result = subprocess.run(["timeout", "5s", "bash", str(SELECTOR)], cwd=path,
-                                    env=self.env, capture_output=True, text=True)
+            result = subprocess.run(
+                ["timeout", "5s", "bash", str(SELECTOR)],
+                cwd=path,
+                env=self.env,
+                capture_output=True,
+                text=True,
+            )
             self.assertEqual(result.returncode, 0, result.stderr)
             return Path(result.stdout.strip())
 
@@ -295,7 +314,9 @@ class CargoCache(unittest.TestCase):
 
         baseline = worktree("baseline")
         warm(baseline, "libold.rlib")
-        subprocess.run([*git, "config", "sinnix.baselineCheckout", str(baseline)], check=True)
+        subprocess.run(
+            [*git, "config", "sinnix.baselineCheckout", str(baseline)], check=True
+        )
         (self.checkout / "Cargo.lock").write_text("new resolution\n")
         subprocess.run([*git, "commit", "-qam", "new"], check=True)
         warm(worktree("idle-lane"), "libnew.rlib")
@@ -308,7 +329,9 @@ class CargoCache(unittest.TestCase):
         # The newest same-lock target was busy, so the next one seeded it.
         self.assertTrue((target / "debug" / "deps" / "libnew.rlib").exists())
         self.assertFalse((target / "debug" / "deps" / "libbusy.rlib").exists())
-        self.assertEqual([p.name for p in target.parent.iterdir()], ["target"])
+        self.assertEqual(
+            sorted(p.name for p in target.parent.iterdir()), ["checkout", "target"]
+        )
 
         # No worktree shares an edited lock: the baseline seeds it.
         other = worktree("edited-lane")
@@ -352,7 +375,9 @@ class CargoCache(unittest.TestCase):
             self.assertNotEqual(target, seed)
             self.assertTrue((target / "CACHEDIR.TAG").exists())
             self.assertFalse((target / "debug" / "deps" / "active.rlib").exists())
-            self.assertEqual([p.name for p in target.parent.iterdir()], ["target"])
+            self.assertEqual(
+                sorted(p.name for p in target.parent.iterdir()), ["checkout", "target"]
+            )
         self.assertEqual(
             (seed / "debug" / "deps" / "active.rlib").read_bytes(), b"in progress"
         )
@@ -428,6 +453,87 @@ class CargoCache(unittest.TestCase):
         '''
         self.run_bash(script)
         self.assertFalse(self.cache.exists())
+
+    def test_selection_records_its_checkout_for_eviction(self):
+        self.provision()
+        target = Path(self.select().stdout.strip())
+        marker = target.parent / "checkout"
+        self.assertEqual(marker.read_text(), f"{self.checkout.resolve()}\n")
+
+    def make_target(self, checkout, *, idle_hours, marked=True):
+        name = hashlib.sha256(str(checkout).encode()).hexdigest()[:32]
+        entry = self.cache / str(os.getuid()) / name
+        (entry / "target" / "debug" / "deps").mkdir(parents=True)
+        (entry / "target" / "debug" / ".cargo-lock").touch()
+        if marked:
+            (entry / "checkout").write_text(f"{checkout}\n")
+        stamp = time.time() - idle_hours * 3600
+        for path in [entry, *entry.rglob("*")]:
+            os.utime(path, (stamp, stamp))
+        return entry
+
+    def evict(self, *, use_percent_per_target=0, max_use_percent=90):
+        # Filesystem use is ten points per remaining target, so eviction under
+        # pressure can be observed stopping once usage falls to the budget.
+        (self.bin / "df").write_text(
+            f"#!{shutil.which('bash')}\nset -eu\n"
+            f'n=$(find "{self.cache}/{os.getuid()}" -mindepth 1 -maxdepth 1 -name "????????????????????????????????" | wc -l)\n'
+            f'printf "Use%%\\n%s%%\\n" "$((n * {use_percent_per_target}))"\n'
+        )
+        (self.bin / "df").chmod(0o755)
+        env = dict(
+            self.env,
+            SINNIX_CARGO_MAX_IDLE_SECONDS=str(72 * 3600),
+            SINNIX_CARGO_MIN_IDLE_SECONDS=str(2 * 3600),
+            SINNIX_CARGO_MAX_FILESYSTEM_USE_PERCENT=str(max_use_percent),
+        )
+        return self.run_bash(f'bash "{EVICT}"', env=env)
+
+    def test_eviction_removes_targets_of_removed_and_long_idle_checkouts(self):
+        self.provision()
+        live = self.checkout.resolve()
+        removed = self.root / "removed"
+        kept = self.make_target(live, idle_hours=24)
+        orphan = self.make_target(removed, idle_hours=3)
+        recent_orphan = self.make_target(self.root / "just-removed", idle_hours=1)
+        stale = self.make_target(live / "stale", idle_hours=100, marked=False)
+        busy = self.make_target(self.root / "busy", idle_hours=3)
+        lock = (busy / "target" / "debug" / ".cargo-lock").open()
+        self.addCleanup(lock.close)
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        output = self.evict().stdout
+        self.assertTrue(kept.exists())
+        self.assertFalse(orphan.exists())
+        self.assertTrue(recent_orphan.exists())
+        self.assertFalse(stale.exists())
+        self.assertTrue(busy.exists())
+        self.assertIn("checkout removed", output)
+        self.assertEqual(
+            [
+                p.name
+                for p in (self.cache / str(os.getuid())).iterdir()
+                if p.name.startswith(".")
+            ],
+            [],
+        )
+
+    def test_pressure_evicts_least_recently_used_idle_targets_first(self):
+        self.provision()
+        live = self.checkout.resolve()
+        oldest = self.make_target(live / "a", idle_hours=50)
+        older = self.make_target(live / "b", idle_hours=40)
+        newer = self.make_target(live / "c", idle_hours=30)
+        active = self.make_target(live / "d", idle_hours=1)
+        for path in (oldest, older, newer):
+            subprocess.run(
+                ["git", "init", "-q", (path / "checkout").read_text().strip()],
+                check=True,
+            )
+        self.evict(use_percent_per_target=10, max_use_percent=20)
+        self.assertFalse(oldest.exists())
+        self.assertFalse(older.exists())
+        self.assertTrue(newer.exists())
+        self.assertTrue(active.exists())
 
 
 if __name__ == "__main__":

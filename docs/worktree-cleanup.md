@@ -46,7 +46,25 @@ and `.rustc_info.json` are always omitted before copying. Build-script output di
 Disabled incremental state and checkout-specific compiler probes are regenerated.
 Without reflinks or an idle warm source, the target starts empty. The selector writes the target's
 `CACHEDIR.TAG` (Cargo tags only a target directory it creates, and this one
-exists first), so worktree cleanup can retire it with its checkout.
+exists first), and on every selection rewrites `checkout` beside the target
+with the checkout path. That marker's mtime is the target's last selection.
+
+The hourly `sinnix-cargo-target-evict` user service removes targets in the
+background resource class. A target is idle for the newest of its marker,
+target and profile `deps/` mtimes, and is never removed while any of its
+Cargo build locks is held or within `minIdleHours` of use. It removes:
+
+- a target whose marked checkout no longer has `.git`;
+- a target idle longer than `maxIdleDays` (unmarked targets fall under this
+  rule only);
+- while the cache filesystem is fuller than `maxFilesystemUsePercent`, idle
+  targets least recently used first, rereading usage after each committed
+  removal. Targets share reflinked extents, so the filesystem's usage, not a
+  per-target size, measures what removal frees.
+
+The budgets are `sinnix.features.dev.languages.cargoCache` options; hosts set
+their own. A target is renamed under its build lock before deletion, so a
+build that starts later selects a fresh target.
 
 Provisioning and target selection do not migrate warm targets or release old
 snapshot references. Before activating a new cache root, inspect its existing

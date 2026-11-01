@@ -100,6 +100,9 @@ if [ ! -e "$target" ]; then
   done
 fi
 mkdir -p "$target"
+# sinnix-cargo-target-evict reads the checkout from this marker, and its mtime
+# as the last selection; rewriting it on every selection keeps both current.
+printf '%s\n' "$checkout" >"$(dirname "$target")/checkout"
 # Cargo tags only a target directory it creates itself, and this one exists
 # before Cargo runs. Worktree cleanup retires only a tagged target.
 if [ ! -e "$target/CACHEDIR.TAG" ]; then

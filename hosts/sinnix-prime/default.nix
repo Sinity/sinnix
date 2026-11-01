@@ -31,6 +31,13 @@
   # isDesktop=true machine role. Keep only host-specific choices here.
   sinnix.features.dev.editors.vscode.enable = true;
   sinnix.features.dev.editors.antigravity.enable = true;
+  # Agent lanes create a Cargo target per short-lived worktree (36 on
+  # 2026-11-01). Each costs ~5 GB beyond its reflinked seed, so idle targets
+  # go after three days and earlier while Realm is fuller than 88%.
+  sinnix.features.dev.languages.cargoCache = {
+    maxIdleDays = 3;
+    maxFilesystemUsePercent = 88;
+  };
 
   sinnix.persistence.enable = true;
   sinnix.services = {
