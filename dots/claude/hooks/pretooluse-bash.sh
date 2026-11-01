@@ -230,7 +230,7 @@ fi
 # ten minutes. Then it re-issues the loop, and every round re-reads the
 # whole context. Across lanes on 2026-10-24..26 that was 2,462 requests and
 # about 1.07 billion cached input tokens. Wait in the background instead:
-# `agentctl job wait <id>` with run_in_background, or a Monitor; the harness
+# `agentctl job wait <task> --job-id <job_id>` with run_in_background, or a Monitor; the harness
 # wakes the agent when it finishes. A background loop is allowed, and so is a
 # foreground one that carries `# poll-ok: <reason>` for a short, bounded poll
 # with no completion event to wait on.
@@ -238,7 +238,7 @@ RUN_IN_BACKGROUND=$(echo "$INPUT" | jq -r '.tool_input.run_in_background // fals
 if [[ $RUN_IN_BACKGROUND != true ]] && ! echo "$CMD" | grep -qE '#[[:space:]]*poll-ok:[[:space:]]*[^[:space:]]'; then
   # The sleep must sit inside the loop body: between `do` and the next `done`.
   if printf '%s' "$CMD_NO_HEREDOC" | tr '\n' ' ' | grep -qP '(^|[;&|({\s'"'"'"])(until|while|for)\s.*?[;\s]do\s(?:(?!\bdone\b).)*\bsleep\s+[0-9]'; then
-    emit_deny "Foreground polling loop blocked: every round re-reads the whole context. Run 'agentctl job wait <id>' (or the command you are waiting on) with run_in_background, or use Monitor, and do other work or end the turn until the notification arrives. If a short, bounded foreground poll is genuinely needed, add a comment '# poll-ok: <reason>' to the command."
+    emit_deny "Foreground polling loop blocked: every round re-reads the whole context. Run 'agentctl job wait <task> --job-id <job_id>' (or the command you are waiting on) with run_in_background, or use Monitor, and do other work or end the turn until the notification arrives. If a short, bounded foreground poll is genuinely needed, add a comment '# poll-ok: <reason>' to the command."
     exit 0
   fi
 fi

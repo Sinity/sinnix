@@ -534,6 +534,13 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         out.write(job, out.job_line(job))
         return EXIT_OK
     if verb == "wait":
+        if arguments.job_id is None:
+            # The queue reuses a cancelled task's number, so a bare number can
+            # name another caller's job by the time the wait begins.
+            raise JobError(
+                "job wait needs --job-id (the job_id that job start printed); "
+                "a task number alone can address a different job once the queue reuses it"
+            )
         waited = job_queries.wait(
             arguments.task_id,
             timeout_seconds=arguments.timeout_seconds,

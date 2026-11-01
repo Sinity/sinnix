@@ -171,7 +171,9 @@ operator action use explicit alarm paths.
 `job cancel` removes a queued task. For a running one it writes the cancel
 marker, stops the unit and kills the task. `--actor` and `--reason` are
 recorded with the request. `--expected-attempt <n>` refuses if a newer retry
-has started. `job wait` follows a job across queue moves and resolves retained
+has started. `job wait` requires `--job-id` (the id `job start` prints): the queue
+reuses a cancelled task's number, so a bare number can name another caller's job.
+It follows the job across queue moves and resolves retained
 results after the queue entry is cleaned. An expired wait exits 4 without
 cancelling.
 

@@ -56,7 +56,9 @@ def test_job_start_get_logs_and_wait_round_trip(
     assert json.loads(capsys.readouterr().out)[0]["label"] == "fixture:check"
 
     fake_pueue.finish_when_waited(1, lambda fake: fake.succeed(1))
-    assert cli.main(["--json", "job", "wait", "1"]) == 0
+    assert cli.main(["job", "wait", "1"]) == cli.EXIT_REFUSED
+    assert "needs --job-id" in capsys.readouterr().err
+    assert cli.main(["--json", "job", "wait", "1", "--job-id", started["job_id"]]) == 0
     assert json.loads(capsys.readouterr().out)["phase"] == "succeeded"
 
     assert cli.main(["job", "get", "1"]) == 0
@@ -894,7 +896,7 @@ def test_wait_reports_elapsed_age_after_blocking(
         }
 
     monkeypatch.setattr(cli.job_queries, "wait", wait)
-    assert cli.main(["job", "wait", "1"]) == cli.EXIT_JOB_NOT_SUCCEEDED
+    assert cli.main(["job", "wait", "1", "--job-id", "fixture-job"]) == cli.EXIT_JOB_NOT_SUCCEEDED
     text = capsys.readouterr().out
     assert "(10m) (wait timed out)" in text
 
