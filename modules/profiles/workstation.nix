@@ -52,6 +52,15 @@ let
       fi
     '';
   };
+  # One line per measured drive: "<model>|<cost model>|<qos>".
+  blockCostTable = pkgs.writeText "sinnix-block-cost" (
+    lib.concatMapStrings (
+      name:
+      "${name}|${config.sinnix.machine.blockCost.${name}.model}|${
+        config.sinnix.machine.blockCost.${name}.qos
+      }\n"
+    ) (lib.attrNames config.sinnix.machine.blockCost)
+  );
   iocostInit = pkgs.writeShellApplication {
     name = "sinnix-iocost-init";
     runtimeInputs = [
@@ -76,9 +85,23 @@ let
           echo "mq-deadline" > "$dev_path/queue/scheduler" || true
         fi
 
-        # Auto selects/adapts predefined profiles and virtual rates; it is not
-        # a measured per-device calibration of the cost-model coefficients.
-        printf '%s enable=1 ctrl=auto\n' "$major_minor" > /sys/fs/cgroup/io.cost.qos || true
+        # A drive with measured parameters (sinnix.machine.blockCost) gets
+        # its cost model and latency targets. Without latency targets IOCost
+        # never sees a deep NVMe queue as saturated: the virtual rate climbs
+        # past what the drive sustains and every weight becomes inert.
+        # Other devices keep the kernel's automatic profile.
+        drive=""
+        [ -f "$dev_path/device/model" ] && drive=$(tr -d '[:space:]' < "$dev_path/device/model")
+        entry=""
+        [ -n "$drive" ] && entry=$(grep -F "$drive|" ${blockCostTable} | head -n 1 || true)
+        if [ -n "$entry" ]; then
+          model=$(echo "$entry" | cut -d'|' -f2)
+          qos=$(echo "$entry" | cut -d'|' -f3)
+          printf '%s ctrl=user model=linear %s\n' "$major_minor" "$model" > /sys/fs/cgroup/io.cost.model
+          printf '%s enable=1 ctrl=user %s\n' "$major_minor" "$qos" > /sys/fs/cgroup/io.cost.qos
+        else
+          printf '%s enable=1 ctrl=auto\n' "$major_minor" > /sys/fs/cgroup/io.cost.qos || true
+        fi
       done
     '';
   };

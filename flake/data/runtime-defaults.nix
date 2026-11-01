@@ -233,6 +233,17 @@ rec {
       MemoryHigh = "4G";
       MemoryMax = "8G";
     };
+    # The live record: Sinex's database, daemon, NATS and session producer,
+    # and Polylogue's live daemon. A producer frame waits on sinexd's commit
+    # with a 30 s deadline, so these outrank the desktop and every build for
+    # the disk instead of yielding like capture lanes. On 2026-11-01 a build
+    # wave held PostgreSQL commits at 11 s p95 (17 s max) while it ran at
+    # weight 20 and IO priority 7, and the session producer died twice. Their
+    # steady I/O is small and IOCost lends an idle share away, so the high
+    # slice weight costs the rest of the host nothing while they are quiet.
+    live = mkClass "The live record and its database" {
+      Slice = "live.slice";
+    };
     capture = mkClass "Long-running capture daemons" {
       Nice = 10;
       IOSchedulingClass = "best-effort";
@@ -248,13 +259,20 @@ rec {
       # Input and other critical system services share this accounted ancestor.
       system = {
         IOAccounting = true;
-        # memory.low is limited by every ancestor, so a service's own
-        # protection (Sinex PostgreSQL's below) only counts if this slice
-        # carries some. Without it, user.slice's 12G low (which recursive
-        # protection also hands to the agents inside it) made system
-        # services the first thing host reclaim took: on 2026-10-27
-        # PostgreSQL held 1.3G resident with 3.1G of shared buffers swapped
-        # and 5.4M anonymous refaults in 3.5 hours.
+      };
+      # The live class's system units (Sinex PostgreSQL, sinexd, NATS, the
+      # journald capture). Above user.slice (400) and system-critical (300)
+      # for the disk; see the live class.
+      live = {
+        IOAccounting = true;
+        CPUWeight = 400;
+        IOWeight = 500;
+        # memory.low is limited by every ancestor, so PostgreSQL's own
+        # protection only counts if this slice carries some. Without it,
+        # user.slice's 12G low (which recursive protection also hands to the
+        # agents inside it) made system services the first thing host
+        # reclaim took: on 2026-10-27 PostgreSQL held 1.3G resident with 3.1G
+        # of shared buffers swapped and 5.4M anonymous refaults in 3.5 hours.
         MemoryLow = "6G";
       };
       # memory.min and memory.low are limited by every ancestor. This
@@ -397,6 +415,13 @@ rec {
         # Offer command scopes (not coordinator sessions) to oomd's swap ranking.
         ManagedOOMSwap = "kill";
         TasksMax = 8192;
+      };
+      # The live class's user units (the session producer, Polylogue's live
+      # daemon), above the desktop slices (300) and far above agent (25).
+      live = {
+        IOAccounting = true;
+        CPUWeight = 200;
+        IOWeight = 500;
       };
       app = {
         IOAccounting = true;

@@ -29,6 +29,30 @@ in
       description = "Whether this host runs the desktop stack.";
     };
 
+    machine.blockCost = mkOption {
+      type = types.attrsOf (
+        types.submodule {
+          options = {
+            model = mkOption {
+              type = types.str;
+              description = "Linear cost-model coefficients for io.cost.model: rbps, rseqiops, rrandiops, wbps, wseqiops, wrandiops.";
+            };
+            qos = mkOption {
+              type = types.str;
+              description = "Latency targets and virtual-rate bounds for io.cost.qos: rpct, rlat, wpct, wlat, min, max.";
+            };
+          };
+        }
+      );
+      default = { };
+      description = ''
+        Measured IOCost parameters keyed by the drive's model string
+        (/sys/block/<dev>/device/model). A listed drive gets this cost model
+        and latency-driven QoS; every other device keeps the kernel's
+        automatic profile.
+      '';
+    };
+
     paths = mkOption {
       type = types.submodule (
         { config, ... }:

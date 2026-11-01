@@ -109,10 +109,9 @@ mkServiceModule {
           lib.stringToCharacters (builtins.substring 0 32 (builtins.hashString "sha256" extensionDir))
         );
 
-      # The capture class supplies CPU and IO yielding, but no slice placement.
-      # Keep this background daemon outside the user manager's default
-      # app.slice so it does not inherit the desktop's IO protection. Override
-      # the class's memory bounds: start-up peaked at 15.6 GB on
+      # The live class places the daemon in the user manager's live.slice,
+      # ahead of the desktop and agent work for the disk. Memory bounds are
+      # its own: start-up peaked at 15.6 GB on
       # 2026-10-27, and at 16:09 that day host OOM pressure killed it.
       # 6G high / 9G max / 2G swap trades slower start-up under reclaim for a
       # host that stays up, until Polylogue's ingest bounds memory by work in
@@ -122,7 +121,6 @@ mkServiceModule {
         unit = "polylogue-live.service";
         manager = "user";
         overrides = {
-          Slice = "background.slice";
           MemoryHigh = "6G";
           MemoryMax = "9G";
           MemorySwapMax = "2G";
@@ -203,7 +201,7 @@ mkServiceModule {
       sinnix.runtime.units.polylogue-live = {
         unit = "polylogue-live.service";
         manager = "user";
-        resourceClass = "capture";
+        resourceClass = "live";
         notifyOnFailure = true;
         operatorRestart = true;
       };

@@ -113,8 +113,8 @@ in
               case "$wrapper" in */bin/polylogue) ;; *) exit 1 ;; esac
               jq -e 'index("default.target") != null' <<<"$wantedBy" >/dev/null
               jq -e '
-                .Slice == "background.slice" and .IOWeight == 20 and
-                .Nice == 10 and .IOSchedulingPriority == 7 and
+                .Slice == "live.slice" and (has("IOWeight") | not) and
+                (has("Nice") | not) and (has("IOSchedulingPriority") | not) and
                 .MemoryHigh == "6G" and .MemoryMax == "9G" and
                 .MemorySwapMax == "2G"
               ' <<<"$servicePolicy" >/dev/null

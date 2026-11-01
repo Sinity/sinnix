@@ -69,6 +69,19 @@ let
 in
 {
   sinnix.backup.genomeRoot = "${neoOuterRealm}/content/genome";
+
+  # The /realm NVMe (Crucial P3 4 TB, QLC, 87% full). Coefficients from fio on
+  # a No_COW 4 GiB file on /realm (O_DIRECT, 20 s each: 4M at depth 16 for
+  # bytes, 4k at depth 64 for IOPS), taken 2026-11-01 under a build wave, so
+  # they are a floor; the QoS lets the virtual rate rise to 6x while
+  # latencies hold. Writes are what the drive cannot sustain (24 MB/s
+  # direct 4M writes once its SLC cache is spent). With the kernel's
+  # automatic SSD profile and no latency targets the virtual rate sat at
+  # 243% while I/O pressure stayed above 80%, so no weight took effect.
+  sinnix.machine.blockCost.CT4000P3SSD8 = {
+    model = "rbps=1171981054 rseqiops=14123 rrandiops=26675 wbps=24114864 wseqiops=2633 wrandiops=924";
+    qos = "rpct=90.00 rlat=10000 wpct=90.00 wlat=50000 min=50.00 max=600.00";
+  };
   services = {
     # The 12 TB genome HDD is idle apart from snapshot cuts and the nightly
     # drain; it parks after 10 idle minutes instead of spinning (and

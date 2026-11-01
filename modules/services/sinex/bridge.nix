@@ -118,37 +118,53 @@ in
     sinnix.runtime.units = {
       sinexd = {
         unit = "sinexd.service";
-        resourceClass = "capture";
+        resourceClass = "live";
+        resources = {
+          MemoryHigh = "6G";
+          MemoryMax = "8G";
+        };
         notifyOnFailure = true;
         operatorRestart = false;
       };
       sinex-nats = {
         unit = "sinex-nats.service";
-        resourceClass = "capture";
+        resourceClass = "live";
+        resources = {
+          MemoryHigh = "6G";
+          MemoryMax = "8G";
+        };
         notifyOnFailure = true;
         operatorRestart = false;
       };
       sinex-capture-journald = {
         unit = "sinex-capture-journald.service";
-        resourceClass = "capture";
+        resourceClass = "live";
+        resources = {
+          MemoryHigh = "6G";
+          MemoryMax = "8G";
+        };
         notifyOnFailure = true;
         operatorRestart = false;
       };
       # PostgreSQL serves only Sinex on this host.
       postgresql = {
         unit = "postgresql.service";
-        resourceClass = "ordinary";
+        resourceClass = "live";
         resources = {
-          Nice = 8;
-          IOSchedulingClass = "best-effort";
-          IOSchedulingPriority = 7;
-          IOWeight = 20;
           MemoryHigh = "8G";
           # Shared buffers (4GB) plus working memory stay resident when the
           # host reclaims; swapping them turns every buffer hit into a
-          # swap-in. Needs system.slice's MemoryLow (runtime-defaults.nix).
+          # swap-in. Needs live.slice's MemoryLow (runtime-defaults.nix).
           MemoryLow = "5G";
         };
+        notifyOnFailure = true;
+        operatorRestart = false;
+      };
+      # The session producer waits on sinexd's acknowledgment of each frame.
+      sinex-session = {
+        unit = "sinex-session.service";
+        manager = "user";
+        resourceClass = "live";
         notifyOnFailure = true;
         operatorRestart = false;
       };
@@ -165,7 +181,15 @@ in
     # retrying; its spool holds unacknowledged frames across restarts.
     systemd.user.services.sinex-session = {
       unitConfig.StartLimitIntervalSec = lib.mkForce 0;
-      serviceConfig.RestartSec = lib.mkForce "10s";
+      serviceConfig =
+        lib.sinnix.mkRuntimeServiceConfig {
+          runtimeInventory = config.sinnix.runtime.inventory;
+          unit = "sinex-session.service";
+          manager = "user";
+        }
+        // {
+          RestartSec = lib.mkForce "10s";
+        };
     };
 
     systemd.services = {
@@ -173,8 +197,7 @@ in
         unitConfig.RequiresMountsFor = [ root ];
         serviceConfig = runtimeServiceConfig "postgresql.service" // {
           # With 16GB of WAL between 30-minute checkpoints, the shutdown and
-          # end-of-recovery checkpoints write gigabytes at IO priority 7 on
-          # the QLC drive. Under the module's 120 s, an activation on
+          # end-of-recovery checkpoints write gigabytes on the QLC drive. Under the module's 120 s, an activation on
           # 2026-10-27 killed the shutdown checkpoint, then killed the
           # recovery checkpoint at start and left the unit start-limit-hit.
           TimeoutSec = lib.mkForce 1800;
