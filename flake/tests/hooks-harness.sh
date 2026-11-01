@@ -100,8 +100,8 @@ done
 test -z "$(PATH="$test_root/bin" run_hook "$hooks_dir/sessionstart-context.sh" '{"source":"startup"}')"
 
 # A hung Sinex status is cut off by its timeout and drops only its part.
-cat >"$test_root/bin/sinexctl" <<'EOF'
-#!/usr/bin/env bash
+cat >"$test_root/bin/sinexctl" <<EOF
+#!$test_root/bin/bash
 sleep 3
 EOF
 chmod +x "$test_root/bin/sinexctl"
@@ -109,14 +109,14 @@ test -z "$(PATH="$test_root/bin" SINEX_SESSIONSTART_RECALL_TIMEOUT_SECS=1 \
   run_hook "$hooks_dir/sessionstart-context.sh" '{"source":"startup"}')"
 
 # One block, the brief first: a stub Polylogue brief and a stub Sinex source.
-cat >"$test_root/bin/polylogue" <<'EOF'
-#!/usr/bin/env bash
+cat >"$test_root/bin/polylogue" <<EOF
+#!$test_root/bin/bash
 cat >/dev/null
 printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"BRIEF"}}'
 EOF
-cat >"$test_root/bin/sinexctl" <<'EOF'
-#!/usr/bin/env bash
-printf '{"sources":[{"binding":"fixture","last_event":"%s"}]}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+cat >"$test_root/bin/sinexctl" <<EOF
+#!$test_root/bin/bash
+printf '{"sources":[{"binding":"fixture","last_event":"%s"}]}\n' "\$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 EOF
 chmod +x "$test_root/bin/polylogue" "$test_root/bin/sinexctl"
 block=$(PATH="$test_root/bin" run_hook "$hooks_dir/sessionstart-context.sh" '{"source":"startup"}' |
