@@ -1,6 +1,7 @@
 {
   "cleanupPeriodDays": 99999,
   "env": {
+    "DISABLE_AUTOUPDATER": "1",
     "ENABLE_PROMPT_CACHING_1H": "1"
   },
   "permissions": {
