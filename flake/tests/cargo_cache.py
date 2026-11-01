@@ -501,7 +501,10 @@ class CargoCache(unittest.TestCase):
         lock = (busy / "target" / "debug" / ".cargo-lock").open()
         self.addCleanup(lock.close)
         fcntl.flock(lock, fcntl.LOCK_EX)
+        seeding = self.cache / str(os.getuid()) / ("f" * 32)
+        (seeding / "target.seed.fixture").mkdir(parents=True)
         output = self.evict().stdout
+        self.assertTrue(seeding.exists())
         self.assertTrue(kept.exists())
         self.assertFalse(orphan.exists())
         self.assertTrue(recent_orphan.exists())

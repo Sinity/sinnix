@@ -20,7 +20,8 @@ hash_of() { printf '%s' "$1" | sha256sum | cut -c1-32; }
 
 last_used() {
   local entry="$1" newest=0 m p
-  for p in "$entry/checkout" "$entry/target" "$entry"/target/*/ "$entry"/target/*/deps \
+  # The entry's own mtime covers a target still being seeded into staging.
+  for p in "$entry" "$entry/checkout" "$entry/target" "$entry"/target/*/ "$entry"/target/*/deps \
     "$entry"/target/*/*/deps; do
     [ -e "$p" ] || continue
     m="$(stat -c %Y "$p")"
