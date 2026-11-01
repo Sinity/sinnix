@@ -19,7 +19,7 @@ from agentctl import run as run_module
 from agentctl.config import Config, load_config
 from agentctl.job_queries import JobError
 from agentctl.launch_input import write_input
-from agentctl.projects import load_project_adapter
+from agentctl.projects import ProjectConfigError, load_project_adapter
 from agentctl.pueue import PueueError, PueueGroupError, Task
 from agentctl.run import (
     CANCELLED_EXIT_CODE,
@@ -208,6 +208,49 @@ def test_cached_operation_reuses_an_active_and_completed_exact_receipt(
         "dirty": False,
     }
     assert written["environment_receipt"]["digest"].startswith("sha256:")
+
+
+def test_cached_operation_matches_the_tree_across_commits_and_fresh_reruns(
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    descriptor = project_root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            '[operations.verify]\ndescription = "Fixture typed verification"',
+            '[operations.verify]\ndescription = "Fixture typed verification"\ncache = "tree+environment"',
+        )
+    )
+    state = {"head": "a" * 40}
+    monkeypatch.setattr(
+        launch,
+        "_git",
+        lambda path, *arguments: (
+            state["head"]
+            if arguments == ("rev-parse", "HEAD")
+            else "b" * 40
+            if arguments == ("rev-parse", "HEAD^{tree}")
+            else ""
+        ),
+    )
+    project = load_project_adapter(project_root)
+    first = launch.start_operation(config, project, project.operation("verify"))
+    fake_pueue.succeed(first["task_id"])
+    _write_execution_attempt(
+        config, fake_pueue.task(first["task_id"]), "a" * 40, "b" * 40
+    )
+    # A rebased or recommitted head with the identical tree builds the same thing.
+    state["head"] = "c" * 40
+    again = launch.start_operation(config, project, project.operation("verify"))
+    assert again["task_id"] == first["task_id"] and again["reused"] is True
+
+    forced = launch.start_operation(
+        config, project, project.operation("verify"), fresh=True
+    )
+    assert forced["task_id"] != first["task_id"]
+    assert len(fake_pueue.added) == 2
 
 
 def _write_execution_attempt(config: Config, task: Task, head: str, tree: str) -> None:
@@ -2198,3 +2241,62 @@ def test_planned_cgroup_covers_inactive_slices(tmp_path, monkeypatch, parent):
         )["status"]
         == "unresolved"
     )
+
+
+def test_operation_priority_orders_the_queue_and_is_validated(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    descriptor = project_root / ".agentctl" / "project.toml"
+    original = descriptor.read_text()
+    marker = '[operations.verify]\ndescription = "Fixture typed verification"'
+    descriptor.write_text(original.replace(marker, marker + "\npriority = 10"))
+    project = load_project_adapter(project_root)
+    launch.start_operation(config, project, project.operation("verify"))
+    assert fake_pueue.added[-1]["priority"] == 10
+    assert project.operation("verify").catalog_row()["priority"] == 10
+    for invalid in ("true", "101", '"high"'):
+        descriptor.write_text(original.replace(marker, marker + f"\npriority = {invalid}"))
+        with pytest.raises(ProjectConfigError):
+            load_project_adapter(project_root)
+
+
+def test_cached_operation_answers_from_a_cleaned_queue_entry(
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    descriptor = project_root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            '[operations.verify]\ndescription = "Fixture typed verification"',
+            '[operations.verify]\ndescription = "Fixture typed verification"\ncache = "tree+environment"',
+        )
+    )
+    state = {"tree": "b" * 40}
+    monkeypatch.setattr(
+        launch,
+        "_git",
+        lambda path, *arguments: (
+            "a" * 40
+            if arguments == ("rev-parse", "HEAD")
+            else state["tree"]
+            if arguments == ("rev-parse", "HEAD^{tree}")
+            else ""
+        ),
+    )
+    project = load_project_adapter(project_root)
+    first = launch.start_operation(config, project, project.operation("verify"))
+    fake_pueue.succeed(first["task_id"])
+    _write_execution_attempt(
+        config, fake_pueue.task(first["task_id"]), "a" * 40, "b" * 40
+    )
+    fake_pueue.remove([first["task_id"]])
+
+    again = launch.start_operation(config, project, project.operation("verify"))
+    assert again["reused"] is True and again["job_id"] == first["job_id"]
+    assert len(fake_pueue.added) == 1
+
+    state["tree"] = "c" * 40
+    other = launch.start_operation(config, project, project.operation("verify"))
+    assert other.get("reused") is not True and len(fake_pueue.added) == 2

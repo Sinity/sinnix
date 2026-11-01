@@ -217,11 +217,13 @@ def add(
     working_directory: Path,
     after: Sequence[int] = (),
     stashed: bool = False,
+    priority: int = 0,
 ) -> int:
     """Enqueue one command and return the task id pueue assigned it.
 
     ``after`` lists the tasks this one waits for; ``stashed`` adds it held, to
-    be released later by :func:`enqueue`.
+    be released later by :func:`enqueue`. Within a group pueue starts a
+    higher ``priority`` first.
     """
     if not command:
         raise PueueError("pueue add requires a command")
@@ -243,6 +245,8 @@ def add(
         arguments.extend(["--after", str(dependency)])
     if stashed:
         arguments.append("--stashed")
+    if priority:
+        arguments.extend(["--priority", str(priority)])
     arguments.append("--")
     arguments.extend(command)
     try:

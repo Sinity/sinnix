@@ -182,6 +182,12 @@ def parser() -> argparse.ArgumentParser:
         help="caller key that makes a repeated launch return the same job",
     )
     start.add_argument(
+        "--fresh",
+        action="store_true",
+        help='run even when an operation declaring cache = "tree+environment" '
+        "already has a matching active or successful job",
+    )
+    start.add_argument(
         "--if-idle",
         action="store_true",
         help="start nothing while the same operation is queued or running "
@@ -391,6 +397,7 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             workspace=arguments.workspace,
             idempotency_key=arguments.idempotency_key,
             extra_argv=(*rest[1:], *getattr(arguments, "extra", [])),
+            fresh=arguments.fresh,
         )
         if arguments.wait:
             started = job_queries.wait(

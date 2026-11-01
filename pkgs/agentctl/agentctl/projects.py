@@ -81,8 +81,11 @@ _OPERATION_FIELDS = frozenset(
         "unit_properties",
         "cap",
         "max_io_pressure",
+        "priority",
     }
 )
+#: Queue order within a pool: pueue starts higher values first.
+PRIORITY_RANGE = range(-100, 101)
 
 #: Which tree an operation runs in; `checkout.py` states what each means.
 CHECKOUT_KINDS = frozenset({"any", "default"})
@@ -219,6 +222,9 @@ class ProjectOperation:
     # Refuse to start while host I/O `full avg60` exceeds this percentage,
     # for measurements whose numbers would be invalid under load.
     max_io_pressure: float | None = None
+    # Within its pool a higher priority starts first, so short checks are not
+    # queued behind long test runs.
+    priority: int = 0
 
     def catalog_row(self) -> dict[str, Any]:
         return {
@@ -236,6 +242,7 @@ class ProjectOperation:
             "unit_properties": list(self.unit_properties),
             "cap": self.cap,
             "max_io_pressure": self.max_io_pressure,
+            "priority": self.priority,
         }
 
 
@@ -468,6 +475,17 @@ def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation
                 f"operations.{name}.max_io_pressure must be a percentage between 0 and 100"
             )
         fields["max_io_pressure"] = float(limit)
+    if "priority" in definition:
+        priority = definition["priority"]
+        if (
+            not isinstance(priority, int)
+            or isinstance(priority, bool)
+            or priority not in PRIORITY_RANGE
+        ):
+            raise ProjectConfigError(
+                f"operations.{name}.priority must be an integer from -100 to 100"
+            )
+        fields["priority"] = priority
     return ProjectOperation(
         name=name,
         description=description,

@@ -26,7 +26,7 @@ never cancels a job, and a queue cleanup retains its historical artifacts.
 | Verb                                                                 | Does                                                                                                                                                 |
 | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `project list \| get [p] \| operations [p]`                          | the configured descriptors                                                                                                                           |
-| `job start [p] <op> [--workspace P] [--wait] [--if-idle] [-- args…]` | queue an operation in its pool, label `<p>:<op>`; `--if-idle` skips it while the same label is queued or running                                     |
+| `job start [p] <op> [--workspace P] [--wait] [--if-idle] [--fresh] [-- args…]` | queue an operation in its pool, label `<p>:<op>`; `--if-idle` skips it while the same label is queued or running; `--fresh` runs a cached operation even when a matching job exists |
 | `job list [--project p] [--active] [--all]`                          | job rows, newest first (40 unless `--all`)                                                                                                           |
 | `job snapshot [--limit N]`                                           | group state and counts plus bounded job rows, unfinished first                                                                                       |
 | `job get \| logs \| result \| cancel \| retry \| wait <id>`          | one job by pueue task id, plus `--job-id` to follow it across a reorder; `--attempt` selects a retry; `logs`/`result` page with `--offset`/`--limit` |
@@ -455,10 +455,11 @@ generation; reboot remains a separate action.
 | `timeout_seconds`     | 1 to 28,800, or 0 for no limit; default 3,600                                                            |
 | `arguments`           | `none`, or `required` when the caller must pass a selector after `--`                                    |
 | `checkout`            | `any` (the caller's `--workspace` or the project root) or `default` (the project root only)              |
-| `cache`               | `none`, or `tree+environment` to reuse a matching active or completed job                                |
+| `cache`               | `none`, or `tree+environment` to answer a request from an active or successful job with the same clean content tree, environment and arguments, in any checkout of the project and at any commit; after the queue entry is cleaned, its retained outcome still answers (`<state_dir>/results/` maps each request key to its newest job) |
 | `scratch`             | `none`, `tmpfs` or `nvme`                                                                                |
 | `cap`                 | a host-declared cross-pool cap (`caps`) the job holds a place under while its unit runs                  |
 | `max_io_pressure`     | refuse to start (exit 125) while host I/O `full avg60` exceeds this percentage; for measurements         |
+| `priority`            | -100 to 100, default 0: within its pool pueue starts a higher priority first, so short compile checks pass queued test runs |
 | `admission`           | `{ memory_mib }`: the expected footprint, exported as `AGENTCTL_ADMISSION_MEMORY_MIB`. It is not a limit |
 | `unit_properties`     | resource limits for the unit, e.g. `["MemoryMax=3G", "IOReadBandwidthMax=/realm 20M"]`                   |
 

@@ -1005,3 +1005,25 @@ def test_call_deadline_bounds_every_call_inside_the_block(monkeypatch):
         pueue._run(["status"], timeout=3)
     pueue.groups_status()
     assert seen == [8, 3, pueue.CALL_TIMEOUT_SECONDS]
+
+
+def test_add_passes_a_priority_before_the_command(
+    stub_pueue: Path, tmp_path: Path
+) -> None:
+    pueue.add(
+        group="fixture",
+        label="fixture:compile",
+        command=("agentctl-run", "input.json"),
+        working_directory=tmp_path,
+        priority=10,
+    )
+    pueue.add(
+        group="fixture",
+        label="fixture:test",
+        command=("agentctl-run", "input.json"),
+        working_directory=tmp_path,
+    )
+    first, second = _calls(stub_pueue)
+    at = first.index("--priority")
+    assert first[at + 1] == "10" and at < first.index("--")
+    assert "--priority" not in second

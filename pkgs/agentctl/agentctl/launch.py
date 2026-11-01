@@ -23,6 +23,7 @@ from typing import Any, Callable, Iterator, Mapping, Sequence, TextIO
 from . import artifacts, batch_history, cgroups, gitcmd, job_queries, pools, pueue
 from .config import Config
 from .launch_input import scratch_path, write_input
+from sinnix_lib.atomic import atomic_publish
 from .limits import CALL_TIMEOUT_SECONDS, SHORT_ID, SYSTEMCTL_TIMEOUT_SECONDS
 from .projects import AdmissionEnvelope, ProjectAdapter, ProjectOperation
 from .pueue import PueueError, PueueGroupError, Task
@@ -93,14 +94,25 @@ def _environment_receipt(
     return {"digest": "sha256:" + hashlib.sha256(encoded).hexdigest()}
 
 
+def _same_tree(recorded: object, requested: Mapping[str, Any]) -> bool:
+    return (
+        isinstance(recorded, Mapping)
+        and recorded.get("dirty") is False
+        and requested.get("dirty") is False
+        and isinstance(recorded.get("tree"), str)
+        and recorded.get("tree") == requested.get("tree")
+    )
+
+
 def _matching_task(
     config: Config,
     project: ProjectAdapter,
     operation: ProjectOperation,
-    working_directory: Path,
     tree_receipt: Mapping[str, Any],
     environment_receipt: Mapping[str, str],
 ) -> Task | None:
+    # The key is the content tree, not the checkout or the commit: another
+    # worktree, or another commit with the same tree, builds the same thing.
     label = label_for(project.project_id, operation.name)
     for task in sorted(pueue.tasks().values(), key=lambda item: item.task_id):
         if task.label != label:
@@ -109,8 +121,7 @@ def _matching_task(
         if launch_input is None:
             continue
         if (
-            launch_input.get("working_directory") != str(working_directory)
-            or launch_input.get("tree_receipt") != dict(tree_receipt)
+            not _same_tree(launch_input.get("tree_receipt"), tree_receipt)
             or launch_input.get("environment_receipt") != dict(environment_receipt)
         ):
             continue
@@ -124,7 +135,59 @@ def _matching_task(
             is not None
         ):
             return task
-    return None
+    return _retained_match(config, label, tree_receipt, environment_receipt)
+
+
+def _result_key_path(
+    config: Config,
+    label: str,
+    tree_receipt: Mapping[str, Any],
+    environment_receipt: Mapping[str, str],
+) -> Path:
+    key = json.dumps(
+        [label, tree_receipt.get("tree"), environment_receipt.get("digest")]
+    ).encode()
+    return config.state_dir / "results" / hashlib.sha256(key).hexdigest()
+
+
+def _record_result_key(
+    config: Config,
+    label: str,
+    tree_receipt: Mapping[str, Any],
+    environment_receipt: Mapping[str, str],
+    job_id: str,
+) -> None:
+    """Point the request key at its newest job, so a later identical request
+    finds the job after its queue entry is cleaned."""
+    path = _result_key_path(config, label, tree_receipt, environment_receipt)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_publish(path, job_id.encode(), fsync=False, mode=0o600)
+
+
+def _retained_match(
+    config: Config,
+    label: str,
+    tree_receipt: Mapping[str, Any],
+    environment_receipt: Mapping[str, str],
+) -> Task | None:
+    path = _result_key_path(config, label, tree_receipt, environment_receipt)
+    raw = job_queries.read_bounded(path, 256)
+    job_id = raw.decode("ascii", errors="replace").strip() if raw else ""
+    if not job_queries.JOB_ID.fullmatch(job_id):
+        return None
+    try:
+        task = job_queries.read_task(config, -1, job_id)
+    except job_queries.JobError:
+        return None
+    if task.label != label or (task.status != "Archived" and not task.terminal):
+        # A live queue entry was already considered by the queue scan.
+        return None
+    return (
+        task
+        if successful_cached_attempt(config, task, tree_receipt, environment_receipt)
+        is not None
+        else None
+    )
 
 
 def successful_cached_attempt(
@@ -137,9 +200,11 @@ def successful_cached_attempt(
 
     The enqueue-time tree and environment describe what was requested. The
     attempt receipt describes what the wrapper observed around execution; both
-    must agree before a terminal task can satisfy a cached request.
+    must agree before a terminal task can satisfy a cached request. A job whose
+    queue entry was cleaned is judged by its retained outcome alone.
     """
-    if not task.terminal or not task.succeeded:
+    archived = task.status == "Archived"
+    if not archived and (not task.terminal or not task.succeeded):
         return None
     launch_path = job_queries.launch_input_path(task)
     launch_input = job_queries.read_launch_input(config, task)
@@ -149,7 +214,7 @@ def successful_cached_attempt(
         or (
             environment_receipt is not None
             and (
-                launch_input.get("tree_receipt") != dict(tree_receipt)
+                not _same_tree(launch_input.get("tree_receipt"), tree_receipt)
                 or launch_input.get("environment_receipt") != dict(environment_receipt)
             )
         )
@@ -213,7 +278,6 @@ def successful_cached_attempt(
         if all(
             isinstance(observation, Mapping)
             and observation.get("status") == "observed"
-            and observation.get("head") == tree_receipt.get("head")
             and observation.get("tree") == tree_receipt.get("tree")
             and observation.get("dirty") is False
             for observation in observations
@@ -249,6 +313,7 @@ def enqueue(
     before_enqueue: Callable[[str], None] | None = None,
     idempotency_key: str | None = None,
     request_digest: str | None = None,
+    priority: int = 0,
 ) -> dict[str, Any]:
     """Write the launch input, add the pueue task, return the job view.
 
@@ -331,6 +396,7 @@ def enqueue(
                 working_directory=working_directory,
                 after=after,
                 stashed=stashed or hold is not None,
+                priority=priority,
             )
         except PueueGroupError:
             if not (idempotency_key is not None and after):
@@ -572,8 +638,13 @@ def start_operation(
     extra_argv: Sequence[str] = (),
     binding: Mapping[str, Any] | None = None,
     idempotency_key: str | None = None,
+    fresh: bool = False,
 ) -> dict[str, Any]:
-    """Launch an operation; an idempotency key makes a repeated launch return the same job."""
+    """Launch an operation; an idempotency key makes a repeated launch return the same job.
+
+    `fresh` runs a cached operation even when a matching job exists; its
+    receipts still serve later requests.
+    """
     if idempotency_key is None:
         return _start_operation(
             config,
@@ -582,6 +653,7 @@ def start_operation(
             workspace=workspace,
             extra_argv=extra_argv,
             binding=binding,
+            fresh=fresh,
         )
     job_id = _idempotent_job_id(idempotency_key)
     config.inputs_dir.mkdir(parents=True, exist_ok=True)
@@ -657,6 +729,7 @@ def _start_operation(
     binding: Mapping[str, Any] | None = None,
     idempotency_key: str | None = None,
     request_digest: str | None = None,
+    fresh: bool = False,
 ) -> dict[str, Any]:
     working_directory = _working_directory(project, operation, workspace)
     if operation.arguments == "required" and not any(
@@ -684,11 +757,10 @@ def _start_operation(
             environment_receipt = _environment_receipt(
                 project, operation, environment, extra_argv
             )
-            existing = _matching_task(
+            existing = None if fresh else _matching_task(
                 config,
                 project,
                 operation,
-                working_directory,
                 tree_receipt,
                 environment_receipt,
             )
@@ -725,6 +797,7 @@ def _start_operation(
         unit_properties=operation.unit_properties,
         cap=operation.cap,
         max_io_pressure=operation.max_io_pressure,
+        priority=operation.priority,
         job_id=job_id,
         binding=binding,
         idempotency_key=idempotency_key,
@@ -736,6 +809,14 @@ def _start_operation(
         started["tree_receipt"] = tree_receipt
     if environment_receipt is not None:
         started["environment_receipt"] = environment_receipt
+    if tree_receipt is not None and environment_receipt is not None:
+        _record_result_key(
+            config,
+            label_for(project.project_id, operation.name),
+            tree_receipt,
+            environment_receipt,
+            started["job_id"],
+        )
     return started
 
 
