@@ -56,14 +56,7 @@ let
         RAWLOG_FILE
         ;
       LYNCHPIN_LOCAL_ROOT = "${config.environment.variables.LYNCHPIN_REPO_ROOT}/.lynchpin";
-    }
-    // lib.filterAttrs (
-      name: _:
-      builtins.elem name [
-        "LYNCHPIN_CHISEL_CACHE_ROOT"
-        "LYNCHPIN_CHISEL_SCRATCH_ROOT"
-      ]
-    ) config.environment.variables;
+    };
   };
   mcpPolylogueBin = pkgs.writeShellScriptBin "mcp-polylogue" ''
     set -euo pipefail

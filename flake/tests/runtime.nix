@@ -603,11 +603,11 @@ in
           [
             {
               assertion =
-                lib.hasInfix "/bin/agentctl job start --if-idle lynchpin converge --wait" service.ExecStart
+                lib.hasInfix "/bin/agentctl job start --if-idle lynchpin capture_webhistory --wait" service.ExecStart
                 && lib.hasInfix "/bin/sinnix-fs maintain admission" service.ExecCondition
-                && service.TimeoutStartSec == "4h"
+                && service.TimeoutStartSec == "1h"
                 && surface.resourceClass == "ordinary";
-              message = "the Lynchpin timer must fire (coalesce) the bounded convergence operation";
+              message = "the Lynchpin timer must fire (coalesce) the bounded browser-history capture";
             }
             {
               assertion =

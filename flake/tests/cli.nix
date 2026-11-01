@@ -187,7 +187,6 @@ in
               [[ "$SINEX_ROOT" = /fixture/sinex/repo ]]
               [[ "$POLYLOGUE_ROOT" = /fixture/polylogue/repo ]]
               [[ "$RAWLOG_FILE" = /fixture/journal/raw-log.md ]]
-              [[ "$LYNCHPIN_CHISEL_CACHE_ROOT" = /fixture/cache ]]
               [[ "$1" = -m && "$2" = lynchpin.mcp.cli && "$3" = fixture-argument ]]
             '';
             wrappers = import ../../modules/features/dev/agents/mcp-tools.nix {
@@ -199,7 +198,6 @@ in
                   SINEX_ROOT = "/fixture/sinex/repo";
                   POLYLOGUE_ROOT = "/fixture/polylogue/repo";
                   RAWLOG_FILE = "/fixture/journal/raw-log.md";
-                  LYNCHPIN_CHISEL_CACHE_ROOT = "/fixture/cache";
                 };
                 sinnix.services.polylogue.dataDir = "/fixture/archive";
               };
@@ -223,27 +221,8 @@ in
           assert home.home.sessionVariables.LYNCHPIN_PYTHON == "${runtime}/bin/lynchpin-python";
           assert lib.any (package: toString package == toString runtime) home.home.packages;
           pkgs.runCommand "cli-lynchpin-host-storage" { } ''
-            unset LYNCHPIN_CHISEL_CACHE_ROOT LYNCHPIN_CHISEL_SCRATCH_ROOT
-            export LYNCHPIN_REPO_ROOT="$TMPDIR/repo"
-            export LYNCHPIN_LOCAL_ROOT="$TMPDIR/local"
-            export LYNCHPIN_FILESYSTEM_LAYOUT=${../../pkgs/sinnix-lib/sinnix_lib/filesystem-layout.json}
-            ${runtime}/bin/lynchpin-python - <<'EOF'
-            from lynchpin.core.config import get_config
-            cfg = get_config()
-            assert str(cfg.chisel_cache()) == ${builtins.toJSON host.environment.variables.LYNCHPIN_CHISEL_CACHE_ROOT}
-            assert str(cfg.chisel_scratch()) == ${builtins.toJSON host.environment.variables.LYNCHPIN_CHISEL_SCRATCH_ROOT}
-            EOF
-            export LYNCHPIN_CHISEL_CACHE_ROOT="$TMPDIR/explicit-cache"
-            export LYNCHPIN_CHISEL_SCRATCH_ROOT="$TMPDIR/explicit-scratch"
-            ${runtime}/bin/lynchpin-python - <<'EOF'
-            import os
-            from lynchpin.core.config import get_config
-            cfg = get_config()
-            assert str(cfg.chisel_cache()) == os.environ["LYNCHPIN_CHISEL_CACHE_ROOT"]
-            assert str(cfg.chisel_scratch()) == os.environ["LYNCHPIN_CHISEL_SCRATCH_ROOT"]
-            os.environ["AGENTCTL_SCRATCH"] = os.environ["TMPDIR"] + "/job"
-            assert str(cfg.chisel_scratch()) == os.environ["AGENTCTL_SCRATCH"] + "/chisel"
-            EOF
+            test -x ${runtime}/bin/lynchpin-python
+            test -x ${runtime}/bin/lynchpin-mcp
             touch "$out"
           '';
         cli-lynchpin-python-runtime =
@@ -272,7 +251,7 @@ in
               import duckdb
               import lynchpin
               import lynchpin.sources.activitywatch
-              import lynchpin.sources.chisel_excerpts
+              import lynchpin.sources.activitywatch_raw
               assert sys.version_info[:2] == (3, 14)
               assert "site-packages" in lynchpin.__file__
               assert Path(shutil.which("polylogue")).resolve() == Path(os.environ["EXPECTED_POLYLOGUE"]).resolve()

@@ -101,7 +101,6 @@ let
           "files"
           "commits"
           "github"
-          "snapshots"
         ]
         ++ readActions "lynchpin_evidence" [
           "coverage"

@@ -1,15 +1,13 @@
 # Lynchpin substrate service
 #
 # Makes the lynchpin-mcp binary available on PATH and sets env vars for
-# ergonomic CLI use. Host entry points also bind Chisel cache and scratch
-# defaults for sessions without those variables, preserving explicit overrides.
+# ergonomic CLI use.
 # No persistent daemon — the MCP server is invoked on
 # demand by AI agent runtimes via the stdio transport registered in
 # mcp-registry.nix.
 #
-# A daily oneshot queues one bounded convergence operation. pueue owns the
-# pool, logs and cancellation; the operation returns only after
-# materialization, verification, and publication.
+# A daily oneshot queues the bounded browser-history capture. pueue owns the
+# pool, logs and cancellation. Other Lynchpin products refresh on read.
 #
 # Enable with:
 #   sinnix.services.lynchpin.enable = true;
@@ -65,39 +63,13 @@ mkServiceModule {
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
       machineTelemetryLakeRoot = "${config.sinnix.paths.machineRoot}/analysis";
       localRoot = "${cfg.repoRoot}/.lynchpin";
-      chiselEnvironment = {
-        LYNCHPIN_CHISEL_CACHE_ROOT = "${config.sinnix.paths.stateRoot}/cache/chisel";
-        LYNCHPIN_CHISEL_SCRATCH_ROOT = "${config.sinnix.paths.realmRoot}/tmp/work/lynchpin-chisel";
-      };
-      # Existing sessions do not acquire newly declared login variables.
-      # Bind defaults at the host entry points, retaining explicit overrides.
-      hostRuntime =
-        pkgs.runCommand "lynchpin-host-runtime"
-          {
-            nativeBuildInputs = [ pkgs.makeWrapper ];
-          }
-          ''
-            mkdir -p "$out/bin"
-            ${lib.concatStringsSep "\n" (
-              lib.mapAttrsToList
-                (name: package: ''
-                  makeWrapper ${package}/bin/${name} "$out/bin/${name}" \
-                    ${lib.escapeShellArgs (
-                      lib.concatLists (
-                        lib.mapAttrsToList (key: value: [
-                          "--set-default"
-                          key
-                          value
-                        ]) chiselEnvironment
-                      )
-                    )}
-                '')
-                {
-                  lynchpin-python = scriptPkgs.lynchpin-python;
-                  lynchpin-mcp = scriptPkgs.lynchpin-cli;
-                }
-            )}
-          '';
+      # One stable host path for the two entry points agents and the dev shell
+      # call, independent of which store paths the packages occupy.
+      hostRuntime = pkgs.runCommand "lynchpin-host-runtime" { } ''
+        mkdir -p "$out/bin"
+        ln -s ${scriptPkgs.lynchpin-python}/bin/lynchpin-python "$out/bin/lynchpin-python"
+        ln -s ${scriptPkgs.lynchpin-cli}/bin/lynchpin-mcp "$out/bin/lynchpin-mcp"
+      '';
       localHotDirs = [
         "cache"
         "enrich"
@@ -107,16 +79,21 @@ mkServiceModule {
         dir: lib.escapeShellArg "${localRoot}/${dir}"
       ) localHotDirs;
 
-      # Both units queue one bounded lynchpin operation and differ only in
-      # operation name, deadline, cadence, and what they keep fresh. One table
-      # so a unit cannot be scheduled without the surface that gives it failure
+      # Each unit queues one bounded lynchpin operation. One table so a unit
+      # cannot be scheduled without the surface that gives it failure
       # notification, resource placement, and a place in the health sweep.
+      # The keylog refresh timer is gone: its product is a cache every reader
+      # rebuilds on request (`agentctl job start lynchpin refresh_keylog`).
       materializeJobs = {
         lynchpin-materialize = {
-          description = "Materialize and publish Lynchpin substrate";
-          operation = "converge";
-          timeoutStartSec = "4h";
-          rationale = "Bounded daily source convergence and complete substrate publication.";
+          # Only the browser-history capture still has a scheduled consumer;
+          # every other Lynchpin product refreshes when a reader asks for it.
+          # `converge` stays a declared on-demand operation.
+          description = "Capture recent browser history for Lynchpin";
+          operation = "capture_webhistory";
+          # Covers the queue wait plus the operation's own 30 min budget.
+          timeoutStartSec = "1h";
+          rationale = "Daily bounded browser-history capture before Chrome expires visits.";
           # The webhistory lane belongs to the unit that actually fills it. It
           # used to be declared in capture-registry.nix against a
           # `sinnix-capture-webhistory` unit that does not exist, which is how a
@@ -135,28 +112,9 @@ mkServiceModule {
             }
           ];
           timer = {
-            description = "Daily lynchpin analysis materialization";
+            description = "Daily Lynchpin browser-history capture";
             inherit (cfg.materializationTimer) onCalendar;
             randomizedDelaySec = toString cfg.materializationTimer.randomizedDelaySec;
-            persistent = true;
-          };
-        };
-        lynchpin-keylog-materialize = {
-          description = "Refresh Lynchpin keylog analysis";
-          operation = "refresh_keylog";
-          # The unit waits for the queued job, so its deadline covers the
-          # queue as well as the job's own 30 min budget. At 10 min it failed
-          # (and notified) whenever builds held the normal pool: on 2026-10-27
-          # refreshes doing 2-21 s of work waited 9-17 min to start and later
-          # succeeded. --if-idle keeps a long wait from stacking duplicates,
-          # and the timer cannot refire while the unit is still waiting.
-          timeoutStartSec = "1h";
-          rationale = "Quarter-hourly keylog analysis refresh over already-captured input.";
-          timer = {
-            description = "Quarter-hour Lynchpin keylog analysis refresh";
-            onCalendar = "*-*-* *:00/15:00";
-            # Off the quarter-hour instant every other 15-minute job shares.
-            randomizedDelaySec = "10min";
             persistent = true;
           };
         };
@@ -167,9 +125,7 @@ mkServiceModule {
         system.build.lynchpinRuntime = hostRuntime;
         environment.systemPackages = [ hostRuntime ];
 
-        environment.variables = chiselEnvironment // {
-          LYNCHPIN_MCP_PROVIDED = "1";
-        };
+        environment.variables.LYNCHPIN_MCP_PROVIDED = "1";
 
         systemd.tmpfiles.rules = [
           "d ${config.sinnix.paths.capturePaths.webhistory} 0700 ${config.sinnix.user.name} users -"
@@ -229,7 +185,6 @@ mkServiceModule {
                   ExecCondition = "${scriptPkgs.sinnix-fs}/bin/sinnix-fs maintain admission --volume ${config.sinnix.paths.realmRoot}";
                   Group = "users";
                   TimeoutStartSec = job.timeoutStartSec;
-                  Environment = lib.mapAttrsToList (name: value: "${name}=${value}") chiselEnvironment;
                 };
                 unit = {
                   requires = [ "lynchpin-local-attrs.service" ];

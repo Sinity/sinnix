@@ -123,24 +123,7 @@ local function agentLines()
   return lines
 end
 
--- ## Signals: ambient product, AFK anchor, receipts ##
-
-local function ambientLines()
-  local health = sourceHealth("ambient-intelligence")
-  local ambient = stateValue("ambient_intelligence")
-  if type(ambient) == "table" then
-    local fragmentation = ambient.fragmentation or {}
-    local anomalies = ambient.anomalies or {}
-    local chores = ambient.chores or {}
-    return {
-      "Ambient: fragmentation " .. text(fragmentation.risk) .. ", " .. tostring(#anomalies) .. " anomalies, " .. tostring(#chores) .. " chores",
-    }
-  end
-  if health ~= nil then
-    return { "Ambient: " .. text(health.status) .. " -- " .. text(health.degradation) }
-  end
-  return { "Ambient: unavailable (no ambient-intelligence source in snapshot)" }
-end
+-- ## Signals: AFK anchor, receipts ##
 
 local function anchorText()
   local anchor = stateValue("session_anchor")
@@ -281,8 +264,7 @@ render = function()
   for _, line in ipairs(agentLines()) do table.insert(agents, line) end
   table.insert(rows, infoSection("Agents", agents))
   table.insert(rows, workSection())
-  local signals = ambientLines()
-  table.insert(signals, anchorText())
+  local signals = { anchorText() }
   table.insert(signals, receiptText())
   table.insert(rows, infoSection("Signals", signals))
   table.insert(rows, ui.row({ gap = 6 }, {

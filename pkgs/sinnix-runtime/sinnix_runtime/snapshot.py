@@ -24,7 +24,6 @@ class SnapshotBuilder:
         state_path: Path | None = None,
         max_events: int = 256,
         section_source: Callable[[str], dict[str, Any]] | None = None,
-        ambient_source: Callable[[], dict[str, Any]] | None = None,
         agent_jobs_source: Callable[[], dict[str, Any]] | None = None,
         clodex_usage_source: Callable[[], tuple[dict[str, Any], dict[str, Any]]]
         | None = None,
@@ -38,7 +37,6 @@ class SnapshotBuilder:
         self.sequence = self._load_state()
         self.previous_health: dict[str, str] = {}
         self._snapshot: dict[str, Any] = {}
-        self.ambient_source = ambient_source
         self.agent_jobs_source = agent_jobs_source
         self.clodex_usage_source = clodex_usage_source
         self.anchor_event_path: Path | None = None
@@ -121,7 +119,6 @@ class SnapshotBuilder:
                 report[key] = old_state[key]
                 health["observed_at"] = old_sections.get(key, {}).get("observed_at")
         self.sequence += 1
-        ambient, ambient_health = self._ambient_snapshot(observed_at)
         anchor = self._anchor_snapshot(observed_at)
         hyprland = self._hyprland_snapshot()
         snapshot = {
@@ -136,13 +133,11 @@ class SnapshotBuilder:
                     if self.clodex_usage_source is not None
                     else {}
                 ),
-                "ambient-intelligence": ambient_health,
             },
             "state": {
                 **report,
                 "agentctl": agent_jobs,
                 **({"clodex": clodex} if self.clodex_usage_source is not None else {}),
-                "ambient_intelligence": ambient,
                 "session_anchor": anchor,
                 "hyprland_automation": hyprland,
             },
@@ -152,7 +147,6 @@ class SnapshotBuilder:
         for key, health in (
             ("agentctl", agent_jobs_health),
             ("clodex", clodex_health),
-            ("ambient_intelligence", ambient_health),
         ):
             snapshot["sections"][key] = {
                 **health,
@@ -299,35 +293,6 @@ class SnapshotBuilder:
                 pass
         self.anchor = expire_anchor(self.anchor, now)
         return self.anchor
-
-    def _ambient_snapshot(
-        self, observed_at: str
-    ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
-        if self.ambient_source is None:
-            return None, {
-                "status": "disabled",
-                "source": "lynchpin-ambient-intelligence",
-                "observed_at": observed_at,
-                "freshness": "unknown",
-                "degradation": "no product configured",
-            }
-        try:
-            value = self.ambient_source()
-            return value, {
-                "status": "healthy",
-                "source": "lynchpin-ambient-intelligence",
-                "observed_at": observed_at,
-                "freshness": "current",
-                "degradation": None,
-            }
-        except Exception as error:
-            return None, {
-                "status": "unavailable",
-                "source": "lynchpin-ambient-intelligence",
-                "observed_at": observed_at,
-                "freshness": "unknown",
-                "degradation": str(error)[:240],
-            }
 
     def observe(self, section: str) -> dict[str, Any]:
         """Detailed read through the observation owner; never called by refresh."""

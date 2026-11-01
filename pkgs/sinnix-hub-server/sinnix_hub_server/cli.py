@@ -11,7 +11,6 @@ from sinnix_runtime import capabilities, health
 from sinnix_runtime import inventory as runtime_inventory
 from sinnix_runtime.actions import ActionService
 from sinnix_runtime.agent_jobs import AgentCtlClient
-from sinnix_runtime.ambient import product_source
 from sinnix_runtime.client import UnixConnection
 from sinnix_runtime.clodex_usage import clodex_usage
 from sinnix_runtime.snapshot import SnapshotBuilder, observe_section
@@ -155,16 +154,6 @@ def main() -> None:
     )
     parser.add_argument("--state-dir", type=Path, default=Path("/realm/state/hub"))
     parser.add_argument("--interval", type=float, default=10.0)
-    parser.add_argument(
-        "--ambient-product",
-        type=Path,
-        default=Path(
-            os.environ.get(
-                "SINNIX_AMBIENT_PRODUCT",
-                "/realm/project/shared/analysis/lynchpin/ambient_intelligence.json",
-            )
-        ),
-    )
     parser.add_argument("--anchor-events", type=Path, default=None)
     parser.add_argument("--hyprland-events", type=Path, default=None)
     parser.add_argument(
@@ -226,7 +215,6 @@ def main() -> None:
         lambda: observe_section("current"),
         layer.sequence_path,
         section_source=observe_section,
-        ambient_source=product_source(args.ambient_product),
         agent_jobs_source=agentctl.snapshot,
         clodex_usage_source=lambda: clodex_usage(args.clodex_usage),
     )

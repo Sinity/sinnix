@@ -72,7 +72,7 @@ mkServiceModule {
           };
           Service = {
             Type = "simple";
-            ExecStart = "${hubServer}/bin/sinnix-hub-server --runtime-dir %t --state-dir ${stateDir} --inventory /etc/sinnix/runtime-inventory.json --clodex-usage /home/${userName}/.clodex/logs/inference-requests.jsonl --ambient-product /realm/project/shared/analysis/lynchpin/ambient_intelligence.json --anchor-events %t/sinnix/afk-resume.json --hyprland-events %t/sinnix/hyprland-events --agentctl ${scriptPkgs.agentctl}/bin/agentctl --interval ${toString cfg.intervalSeconds} --feedback-dir ${cfg.feedbackDir}${
+            ExecStart = "${hubServer}/bin/sinnix-hub-server --runtime-dir %t --state-dir ${stateDir} --inventory /etc/sinnix/runtime-inventory.json --clodex-usage /home/${userName}/.clodex/logs/inference-requests.jsonl --anchor-events %t/sinnix/afk-resume.json --hyprland-events %t/sinnix/hyprland-events --agentctl ${scriptPkgs.agentctl}/bin/agentctl --interval ${toString cfg.intervalSeconds} --feedback-dir ${cfg.feedbackDir}${
               lib.optionalString (cfg.hubManifest != null) " --hub-manifest ${cfg.hubManifest}"
             }${
               lib.optionalString (

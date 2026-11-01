@@ -18,7 +18,7 @@ SNAPSHOT_HEALTHY: dict[str, Any] = {
     "observed_at": "2026-08-18T00:00:00Z",
     "sources": {
         "sinnix-observe": {"status": "healthy"},
-        "ambient-intelligence": {"status": "unavailable"},
+        "clodex": {"status": "unavailable"},
     },
     "state": {
         "systemd_units": [
@@ -101,7 +101,7 @@ def test_system_verdict_reports_attention_when_units_or_sources_are_bad() -> Non
     status, summary = hub_status.system_verdict(units, degraded)
     assert status == "attention"
     assert "1 unit failed" in summary
-    assert "ambient-intelligence" in summary
+    assert "clodex" in summary
 
 
 def test_system_verdict_healthy_when_nothing_is_wrong() -> None:
@@ -287,7 +287,7 @@ def test_render_human_includes_every_populated_section() -> None:
     text = hub_status.render_human(data)
     assert "FAILED      sinnix-capture-kitty-scrollback.service (user)" in text
     assert "ACTIVATING  sinnix-midflight.service (system)" in text
-    assert "SOURCE DOWN ambient-intelligence" in text
+    assert "SOURCE DOWN clodex" in text
     assert "Acknowledged outages (1" in text
     assert "sinex (sinex.service)" in text
     assert "Capture/health lanes: 1/3 healthy" in text

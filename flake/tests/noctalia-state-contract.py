@@ -57,7 +57,7 @@ def snapshot_state_keys(hub_root: Path) -> set[str]:
                     and isinstance(target.slice.value, str)
                 ):
                     keys.add(target.slice.value)
-        # `{**report, "ambient_intelligence": ..., ...}` -- the state dict.
+        # `{**report, "agentctl": ..., ...}` -- the state dict.
         if isinstance(node, ast.Dict) and any(key is None for key in node.keys):
             spreads_report = any(
                 key is None and isinstance(value, ast.Name) and value.id == "report"

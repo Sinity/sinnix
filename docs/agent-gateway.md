@@ -177,8 +177,7 @@ Use focused gateway source reads and diffs for local questions. Choose checkout
 export for broad static analysis or cross-file edits in a tool sandbox. Extract
 `HEAD.zip`, apply `working-tree.patch`, then extract selected `extras.zip` when
 reconstructing the exported working tree. Live tests and runtime investigation
-remain host-side through declared operations. Chisel is optional enrichment for
-analytical projections combining code with history and other evidence.
+remain host-side through declared operations.
 
 `mcp.servers` preserves the broker's native catalog rows and adds probe timing
 and diagnostic artifact references. The gateway does not maintain a second

@@ -49,8 +49,7 @@ Consumer census (2026-10-27): searches for `fs-index`, `files.jsonl`,
   synthetic scanner inputs and database readers, updated with the publisher.
 - `modules/services/fs-index.nix`: invokes the scan command and registers
   its state directory; it reads no table format.
-- No gateway or Lynchpin fs-index table reader. Lynchpin's Chisel
-  `metrics/files.jsonl` and `structure/graph_nodes.jsonl` are separate outputs.
+- No gateway or Lynchpin fs-index table reader.
   `/realm/project/lynchpin/repo` is absent on this host.
 
 A synthetic test compares streamed tables with file-fed scans and sums Linux

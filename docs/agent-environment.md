@@ -106,7 +106,7 @@ Servers: context7, github, lynchpin, polylogue, sinex.
 | `handoff` | "Leave or resume a handoff when stopping mid-work, before compaction, passing work to another agent, or re-entering after one: job IDs, worktrees, Git and PR state, next action." |
 | `html-report` | Produce self-contained interactive HTML reports, reviews, censuses, dashboards, plans, incident timelines, or comparisons for human readers. |
 | `investigate` | Diagnose a bug, regression, flaky test, performance problem, incident, or missing artifact, or verify a contested claim, through reproduction, measurement, and preserved evidence. |
-| `lynchpin` | Query or develop Lynchpin evidence sources, materialization, DuckDB substrate generations, graphs, analyses, Chisel reports, Polylogue boundaries, and MCP evidence products. |
+| `lynchpin` | Query or develop Lynchpin evidence sources, materialization, DuckDB substrate generations, graphs, analyses, Polylogue boundaries, and MCP evidence products. |
 | `orchestrate` | "Coordinate several agents on one goal: task groups, model choice, native agents, isolated worktrees, integration, verification, and publication." |
 | `polylogue` | "Query past AI sessions through Polylogue, or develop Polylogue itself: ingestion, provenance, queries, CLI, MCP, daemon behavior, and verification." |
 | `prompting` | "Write, rewrite, or diagnose prompts: dispatch prompts for subagents, prompts for external or browser models, prompt portfolios and templates, or enhancing the user's rough request." |

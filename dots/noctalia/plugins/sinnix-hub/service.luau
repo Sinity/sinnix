@@ -11,7 +11,6 @@ local STREAM_PATH = ENDPOINT .. "/v1/events"
 -- the few receipts the panel summarises.
 local SNAPSHOT_STATE_KEYS = table.concat({
   "agentctl",
-  "ambient_intelligence",
   "live_pressure",
   "runtime_inventory",
   "session_anchor",

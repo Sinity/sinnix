@@ -1,6 +1,6 @@
 ---
 name: lynchpin
-description: Query or develop Lynchpin evidence sources, materialization, DuckDB substrate generations, graphs, analyses, Chisel reports, Polylogue boundaries, and MCP evidence products.
+description: Query or develop Lynchpin evidence sources, materialization, DuckDB substrate generations, graphs, analyses, Polylogue boundaries, and MCP evidence products.
 ---
 
 # Lynchpin
@@ -29,13 +29,14 @@ descriptor first.
 
 Promotion is atomic and generation-coherent. Full promotion rebuilds all
 history; incremental promotion uses current canonical products and freshness
-logic. Chisel builds the configured cross-project report portfolio.
+logic. The daily timer runs only the bounded browser-history capture; every
+other product refreshes when a reader asks for it.
 
 ## Boundaries
 
 AI-session ingestion and interpretation belong to Polylogue. Lynchpin does not
-read its archives, products or live status. Git and Chisel may inspect its source
-repository like any registered project.
+read its archives, products or live status. Git may inspect its source repository
+like any registered project.
 
 Lint, type checks, and tests run as Lynchpin's declared operations
 (`agentctl job start lynchpin lint` or `check`), never inside an agent's own
