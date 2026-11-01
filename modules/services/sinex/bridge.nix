@@ -37,10 +37,18 @@ let
   # for a read-only connection, which never writes the database; readAnyFile
   # reads files but cannot write them. The sinex user gets write access to
   # both for each database a SQLite source reads, and by default ACL to those
-  # the program creates next (the default mask must not cut that entry down);
-  # the database itself stays read-only to it. It gets no write access to the
-  # directory, so sinexd never creates a file there: while the program is
-  # closed and its index absent, the source reports the database unavailable.
+  # the program creates next. SQLite creates the index and log with the
+  # database's own permission bits, and on a file with an ACL the group bits
+  # are the mask, so a database whose group bits lack write (Atuin's is 0654)
+  # gives every index it recreates a mask that cuts the sinex entry to
+  # read-only, and reads then fail with "attempt to write a readonly
+  # database". Each rule therefore sets the mask: on the database so the files
+  # created from it keep the entry writable, and on the index and log so
+  # activation repairs ones created before. The mask grants nothing by itself;
+  # the database stays read-only to sinex and to the group. Sinex gets no
+  # write access to the directory, so sinexd never creates a file there:
+  # while the program is closed and its index absent, the source reports the
+  # database unavailable.
   sqlitePaths = lib.concatMap (
     source:
     let
@@ -51,10 +59,10 @@ let
   # `-`: an index that does not exist yet (a database not in WAL mode, or a
   # program not running) is not an activation failure.
   sqliteIndexRules = lib.concatMap (path: [
-    "a+- ${path} - - - - u:${config.services.sinex.user}:r"
+    "a+- ${path} - - - - u:${config.services.sinex.user}:r,m::rw"
     "a+- ${dirOf path} - - - - d:u:${config.services.sinex.user}:rw,d:m::rwx"
-    "a+- ${path}-shm - - - - u:${config.services.sinex.user}:rw"
-    "a+- ${path}-wal - - - - u:${config.services.sinex.user}:rw"
+    "a+- ${path}-shm - - - - u:${config.services.sinex.user}:rw,m::rw"
+    "a+- ${path}-wal - - - - u:${config.services.sinex.user}:rw,m::rw"
   ]) sqlitePaths;
   runtimeServiceConfig =
     unit:
