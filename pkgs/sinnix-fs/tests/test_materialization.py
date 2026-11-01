@@ -903,3 +903,26 @@ def test_failed_stream_producer_preserves_current_without_leaking_pipes(
     assert set(Path("/proc/self/fd").iterdir()) == descriptors
     assert fs.resolve_generation(index) == previous
     assert fs.validate_generation(previous)
+
+
+def test_a_reader_that_stops_reports_its_own_error(tmp_path):
+    import os
+
+    fs = load_script()
+    reader, writer = os.pipe()
+
+    def produce():
+        os.close(reader)
+        with os.fdopen(writer, "w", encoding="utf-8") as stream:
+            for _ in range(100_000):
+                stream.write("x" * 1024 + "\n")
+
+    result = fs.run_duckdb_file(
+        tmp_path / "inventory.duckdb",
+        "SELECT * FROM no_such_table;",
+        "fixture",
+        produce,
+        pass_fds=(reader,),
+    )
+    assert result.returncode != 0
+    assert "no_such_table" in result.stderr

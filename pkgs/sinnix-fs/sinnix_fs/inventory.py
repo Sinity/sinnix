@@ -104,6 +104,12 @@ def run_duckdb_file(
             try:
                 producer()
                 stdout, stderr = process.communicate()
+            except BrokenPipeError:
+                # DuckDB stopped reading: its own exit status and stderr say
+                # why, and the caller reports them instead of the bare pipe.
+                stdout, stderr = process.communicate()
+                if process.returncode == 0:
+                    raise
             except BaseException:
                 process.kill()
                 process.communicate()
