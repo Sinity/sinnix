@@ -702,6 +702,17 @@ let
           fi
           btrfs subvolume delete "$old_path"
           exec 8<&-
+          # The btrfs cleaner frees a deleted snapshot after `delete` returns.
+          # Nineteen queued at once kept the shared NVMe at 48-78% I/O full
+          # for minutes, and PostgreSQL acknowledgements missed producer
+          # deadlines. Free one snapshot at a time and let I/O pressure
+          # settle (up to five minutes) before releasing the next.
+          btrfs subvolume sync ${lib.escapeShellArg snapshotDir} "$expected_id"
+          for _ in $(seq 60); do
+            io_full="$(${pkgs.gawk}/bin/awk '/^full/ { sub("avg10=", "", $2); print int($2) }' /proc/pressure/io)"
+            [ "''${io_full:-0}" -lt 10 ] && break
+            sleep 5
+          done
         done <<< "$prune_plan"
       fi
     '';
