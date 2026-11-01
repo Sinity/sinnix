@@ -161,12 +161,10 @@ in
             diff -u claude-writer-lanes codex-writer-lanes
             require_row $'PreToolUse\tclaude-code' claude-writers claude-pretool
             require_row $'PostToolUse\tclaude-code' claude-writers claude-posttool
-            require_row $'SessionStart\tclaude-code' claude-writers claude-sessionstart
             require_row $'Stop\tclaude-code' claude-writers claude-stop
             require_row $'UserPromptSubmit\tclaude-code' claude-writers claude-prompt
             require_row $'PreToolUse\tcodex' codex-writers codex-pretool
             require_row $'PostToolUse\tcodex' codex-writers codex-posttool
-            require_row $'SessionStart\tcodex' codex-writers codex-sessionstart
             require_row $'Stop\tcodex' codex-writers codex-stop
             require_row $'UserPromptSubmit\tcodex' codex-writers codex-prompt
 
@@ -225,15 +223,16 @@ in
             # The shared session-start script (which also carries Polylogue's
             # SessionStart lane) is configured independently for both
             # clients, so this verifies the intended cross-client agreement.
-            for command in sessionstart-context.sh; do
-              for file in "$claudeHooks" "$codexHooks"; do
-                jq -e --arg needle "$command" '
-                  [.hooks[][].hooks[]?.command] | any(contains($needle))
-                ' "$file" >/dev/null || {
-                  echo "Hook command '$command' is absent from $file but required on both clients" >&2
-                  exit 1
-                }
-              done
+            # It names its harness, as a direct `polylogue hook` row would.
+            for pair in "$claudeHooks claude-code" "$codexHooks codex"; do
+              set -- $pair
+              jq -e --arg harness "$2" '
+                [.hooks.SessionStart[].hooks[]?.command]
+                | any(endswith("/sessionstart-context.sh " + $harness))
+              ' "$1" >/dev/null || {
+                echo "SessionStart in $1 does not run sessionstart-context.sh $2" >&2
+                exit 1
+              }
             done
             touch "$out"
           '';
