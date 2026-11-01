@@ -260,7 +260,7 @@ in
                   taskAuthority = {
                     workspace = "${cfg.paths.stateRoot}/tasks/sinex-next/.beads";
                     projectUuid = "9a23622c-4af5-4f3a-99d9-467edd816653";
-                    database = "${cfg.paths.stateRoot}/tasks/sinex-next/.beads/embeddeddolt";
+                    database = "${cfg.paths.stateRoot}/tasks/sinex-next/.beads/dolt";
                     publicationPolicy = "dolt-sync";
                   };
                 };
