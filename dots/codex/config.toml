@@ -4,9 +4,13 @@
 # .system skills remain private to Codex.
 # MCP servers are merged from the registry into the generated system config.
 # Bare codex uses that default; local and DeepSeek keep backend-specific files.
-# Diagnostic SQLite and opt-in TUI logs use Realm at process startup.
-# Session and resumable SQLite state keep their default Codex home.
+# Codex state lives on Realm, off the wear-limited root SSD: ~/.codex is
+# bound from /realm/state/codex/home, and the SQLite databases (state, thread
+# history, queue, goals, memories) use a No_COW directory beside it, which
+# keeps their page rewrites from fragmenting into extents. Diagnostic logs
+# have their own directory.
 log_dir = "/realm/state/codex/logs"
+sqlite_home = "/realm/state/codex/sqlite"
 
 model = "gpt-6-luna"
 model_reasoning_effort = "high"

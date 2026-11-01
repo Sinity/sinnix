@@ -70,6 +70,16 @@ let
       runtimeInventory = config.sinnix.runtime.inventory;
       inherit unit;
     };
+  # The default start limit (three failures in ten minutes) left the session
+  # producer dead for days; sinexd and NATS would stop the same way after an
+  # I/O stall or a schema refusal at start while producers keep spooling.
+  # They retry forever, backing off from 10 s to 5 min between attempts.
+  restartForever = {
+    StartLimitIntervalSec = 0;
+    RestartSec = "10s";
+    RestartSteps = 6;
+    RestartMaxDelaySec = "5min";
+  };
 in
 {
   config = lib.mkIf (options.services ? sinex && cfg.enable) {
@@ -122,6 +132,10 @@ in
         resources = {
           MemoryHigh = "6G";
           MemoryMax = "8G";
+          # Its working set stays resident under host reclaim: on 2026-11-01
+          # 726 MB of it sat in swap, on the acknowledgment path of every
+          # producer frame. Fits beside PostgreSQL's 5G in live.slice's 6G.
+          MemoryLow = "1G";
         };
         notifyOnFailure = true;
         operatorRestart = false;
@@ -165,6 +179,8 @@ in
         unit = "sinex-session.service";
         manager = "user";
         resourceClass = "live";
+        # 186 MB of its 235 MB working set was swapped on 2026-11-01.
+        resources.MemoryLow = "256M";
         notifyOnFailure = true;
         operatorRestart = false;
       };
@@ -204,16 +220,27 @@ in
         };
       };
       sinexd = {
-        unitConfig.RequiresMountsFor = [ root ];
+        unitConfig = {
+          RequiresMountsFor = [ root ];
+          StartLimitIntervalSec = lib.mkForce restartForever.StartLimitIntervalSec;
+        };
         serviceConfig = runtimeServiceConfig "sinexd.service" // {
+          RestartSec = lib.mkForce restartForever.RestartSec;
+          inherit (restartForever) RestartSteps RestartMaxDelaySec;
           # A runaway sinexd is killed inside its own unit rather than
           # pushing the workstation into swap.
           MemorySwapMax = "2G";
         };
       };
       sinex-nats = {
-        unitConfig.RequiresMountsFor = [ root ];
-        serviceConfig = runtimeServiceConfig "sinex-nats.service";
+        unitConfig = {
+          RequiresMountsFor = [ root ];
+          StartLimitIntervalSec = lib.mkForce restartForever.StartLimitIntervalSec;
+        };
+        serviceConfig = runtimeServiceConfig "sinex-nats.service" // {
+          RestartSec = lib.mkForce restartForever.RestartSec;
+          inherit (restartForever) RestartSteps RestartMaxDelaySec;
+        };
       };
       sinex-capture-journald = {
         unitConfig.RequiresMountsFor = [ root ];

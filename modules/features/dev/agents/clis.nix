@@ -272,15 +272,28 @@ mkFeatureModule {
         systemd.tmpfiles.rules = [
           "d /realm/state/codex 0700 ${user} users -"
           "d /realm/state/codex/logs 0700 ${user} users -"
+          "d /realm/state/codex/home 0700 ${user} users -"
+          "d /realm/state/codex/sqlite 0700 ${user} users -"
+          # No_COW applies to files created after it is set; existing
+          # databases are copied in, never moved, so they pick it up.
+          "h /realm/state/codex/sqlite - - - - +C"
         ];
+        # Codex's sessions and SQLite state took most of the root SSD's
+        # fsync-driven writes, so its home lives on Realm (plain directories
+        # inside the /realm snapshot, so Borg keeps covering them).
+        fileSystems."/home/${user}/.codex" = {
+          device = "/realm/state/codex/home";
+          fsType = "none";
+          options = [
+            "bind"
+            "nofail"
+          ];
+          depends = [ "/realm" ];
+        };
         sinnix.persistence.home = {
           directories = [
             {
               directory = ".config/claude";
-              mode = "0700";
-            }
-            {
-              directory = ".codex";
               mode = "0700";
             }
             # Clodex stores only mutable model registry and non-secret OAuth

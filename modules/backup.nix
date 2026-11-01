@@ -773,7 +773,6 @@ let
     # reinstalled by the bootstrap; the ledgers beside them stay covered.
     "home/sinity/.local/state/claude-code/npm"
     "home/sinity/.local/state/claude-code/npm-recovery"
-    "home/sinity/.codex/packages"
     "home/sinity/.npm/_npx"
     "home/sinity/.local/share/nvim/mason"
     "home/sinity/.local/share/hyprland/logs"
@@ -843,6 +842,8 @@ let
     # /realm/library and /realm/state, which stay in coverage. If a named
     # volume ever appears here, this exclusion starts dropping real state.
     "state/containers"
+    # Codex installs its app-server releases here; it re-fetches them.
+    "state/codex/home/packages"
     # Scratch trees, declared unbacked in /realm/INVENTORY.md: TMPDIR and job
     # scratch under tmp/, agent checkouts under worktrees/ whose commits live
     # in their origin repositories. Neither self-describes as a cache, so both
@@ -930,7 +931,6 @@ let
       "home/sinity/.local/share/uv"
       "home/sinity/.local/state/claude-code/npm"
       "home/sinity/.local/state/claude-code/npm-recovery"
-      "home/sinity/.codex/packages"
       "home/sinity/.npm/_npx"
       "home/sinity/.local/share/nvim/mason"
       "home/sinity/.local/share/hyprland/logs"
@@ -955,6 +955,8 @@ let
     "state/cache"
     "health/genome/cache"
     "state/containers"
+    # Codex installs its app-server releases here; it re-fetches them.
+    "state/codex/home/packages"
     "tmp"
     "worktree"
     "worktrees"

@@ -166,8 +166,17 @@ in
               assertion = lib.all (rule: builtins.elem rule config.systemd.tmpfiles.rules) [
                 "d /realm/state/codex 0700 ${config.sinnix.user.name} users -"
                 "d /realm/state/codex/logs 0700 ${config.sinnix.user.name} users -"
+                "d /realm/state/codex/home 0700 ${config.sinnix.user.name} users -"
+                "d /realm/state/codex/sqlite 0700 ${config.sinnix.user.name} users -"
+                "h /realm/state/codex/sqlite - - - - +C"
               ];
-              message = "Codex diagnostic logs must have a private, user-owned Realm directory.";
+              message = "Codex home, SQLite state and logs must have private, user-owned Realm directories.";
+            }
+            {
+              assertion =
+                (config.fileSystems."/home/${config.sinnix.user.name}/.codex".device or null)
+                == "/realm/state/codex/home";
+              message = "Codex home must be bound from Realm, off the root SSD.";
             }
             {
               assertion =
@@ -936,7 +945,7 @@ in
             system_config = tomllib.loads(pathlib.Path('${agentToolsCodexConfigSource}').read_text())
             assert system_config['features']['hooks'] is True
             assert system_config['log_dir'] == '/realm/state/codex/logs'
-            assert 'sqlite_home' not in system_config
+            assert system_config['sqlite_home'] == '/realm/state/codex/sqlite'
 
             default = set(system_config['mcp_servers'])
             import json

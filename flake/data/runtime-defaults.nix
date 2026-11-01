@@ -47,6 +47,10 @@ let
     totalMin = appMin + sessionMin + shellMin;
     totalLow = appLow + sessionLow + shellLow;
   };
+  # The user manager's live class (the session producer and Polylogue's live
+  # daemon), in MiB. On 2026-11-01 both were partly swapped out (275 MB of
+  # polylogue-live, 186 MB of the producer) while frames waited on them.
+  userLiveLow = 3072;
   mib = value: "${toString value}M";
 
   surfaceType = surface: if surface.manager == "user" then "user" else surface.kind;
@@ -287,7 +291,8 @@ rec {
         # and Chrome waited in iocost throttling (ioc_rqos_throttle).
         IOWeight = 400;
         MemoryMin = mib desktopMemory.totalMin;
-        MemoryLow = mib desktopMemory.totalLow;
+        # The user manager's live slice is protected only within this.
+        MemoryLow = mib (desktopMemory.totalLow + userLiveLow);
       };
       # Low weights, and per-unit memory limits from each unit's class. A
       # shared 2G ceiling here made every scheduled job reclaim against the
@@ -422,6 +427,7 @@ rec {
         IOAccounting = true;
         CPUWeight = 200;
         IOWeight = 500;
+        MemoryLow = mib userLiveLow;
       };
       app = {
         IOAccounting = true;
