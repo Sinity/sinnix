@@ -891,7 +891,7 @@ in
             jq -e '
               (has("mcpServers") | not) and
               ([.hooks.SessionStart[].hooks[].command]
-                | any(contains("sessionstart-sinex-recall.sh"))) and
+                | any(contains("sessionstart-context.sh"))) and
               ([.hooks.Stop[].hooks[].command]
                 | any(. == "polylogue hook Stop"))
             ' ${
@@ -981,7 +981,7 @@ in
               | any(. == "polylogue hook Stop --harness codex")
             ' "$HOME/.codex/hooks.json" >/dev/null
             jq -e '
-              [.hooks.SessionStart[].hooks[].command] | any(contains("sessionstart-sinex-recall.sh"))
+              [.hooks.SessionStart[].hooks[].command] | any(contains("sessionstart-context.sh"))
             ' "$HOME/.codex/hooks.json" >/dev/null
             ${claudeLaneWrapperChecks}
             grep -Fq 'claude_args+=(--add-dir=' "$HOME/.local/bin/claude"
@@ -1469,26 +1469,6 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/bd-dolt-authority.sh} ${sinnixScriptRegistry.packageSet.beads}/bin/bd
             touch "$out"
           '';
-      contextHandoffFixture =
-        pkgs.runCommand "context-handoff-fixture"
-          {
-            nativeBuildInputs = [
-              pkgs.bash
-              pkgs.coreutils
-              pkgs.git
-              pkgs.gnugrep
-              pkgs.jq
-              pkgs.ripgrep
-            ];
-          }
-          ''
-            writer="$TMPDIR/sinnix-context-handoff"
-            cp ${../../scripts/sinnix-context-handoff} "$writer"
-            chmod +x "$writer"
-            patchShebangs "$writer"
-            ${pkgs.bash}/bin/bash ${../../flake/tests/context-handoff.sh} "$writer"
-            touch "$out"
-          '';
       skillAuthoringFixture =
         pkgs.runCommand "skill-authoring-fixture"
           {
@@ -1686,7 +1666,6 @@ in
         kitty-launch-keep-focus = kittyLaunchKeepFocusFixture;
         bd-safety-hook = bdSafetyHookFixture;
         bd-dolt-authority = bdDoltAuthorityFixture;
-        context-handoff = contextHandoffFixture;
         skill-authoring = skillAuthoringFixture;
         chatgpt-conversations = chatgptConversationsFixture;
         desktop-capture = desktopCaptureFixture;

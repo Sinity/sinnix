@@ -1,5 +1,5 @@
 """`sinnix status`: composition, degrade paths, and the folded
-acknowledged-outages hook contract."""
+session-start outages contract."""
 
 from __future__ import annotations
 

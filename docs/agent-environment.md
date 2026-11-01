@@ -7,62 +7,62 @@
 ### claude (claude)
 
 Tiers: remote-core, recall.
-Servers: context7, github, sinex.
+Servers: context7, github, polylogue, sinex.
 
 ### codex (codex)
 
 Tiers: remote-core, recall.
-Servers: context7, github, sinex.
+Servers: context7, github, polylogue, sinex.
 
 ### codex-local (codex)
 
 Tiers: binary-analysis, remote-core, recall, deep-evidence.
-Servers: context7, github, lynchpin, rea, sinex.
+Servers: context7, github, lynchpin, polylogue, rea, sinex.
 
 ### codex-deepseek (codex)
 
 Tiers: binary-analysis, remote-core, recall, deep-evidence.
-Servers: context7, github, lynchpin, rea, sinex.
+Servers: context7, github, lynchpin, polylogue, rea, sinex.
 
 ### gemini (gemini)
 
 Tiers: binary-analysis, remote-core, recall, deep-evidence.
-Servers: context7, github, lynchpin, rea, sinex.
+Servers: context7, github, lynchpin, polylogue, rea, sinex.
 
 ### antigravity (antigravity)
 
 Tiers: remote-core, recall.
-Servers: context7, github, sinex.
+Servers: context7, github, polylogue, sinex.
 
 ### hermes (hermes)
 
 Tiers: remote-core, recall, deep-evidence.
-Servers: context7, github, lynchpin, sinex.
+Servers: context7, github, lynchpin, polylogue, sinex.
 
 ### hermes-local (hermes)
 
 Tiers: remote-core, recall, deep-evidence.
-Servers: context7, github, lynchpin, sinex.
+Servers: context7, github, lynchpin, polylogue, sinex.
 
 ### hermes-mirror (hermes)
 
 Tiers: remote-core, recall, deep-evidence.
-Servers: context7, github, lynchpin, sinex.
+Servers: context7, github, lynchpin, polylogue, sinex.
 
 ### hermes-oracle (hermes)
 
 Tiers: remote-core, recall, deep-evidence, browser-mcp.
-Servers: context7, firecrawl, github, lynchpin, sinex.
+Servers: context7, firecrawl, github, lynchpin, polylogue, sinex.
 
 ### hermes-research (hermes)
 
 Tiers: remote-core, recall, deep-evidence, browser-mcp.
-Servers: context7, firecrawl, github, lynchpin, sinex.
+Servers: context7, firecrawl, github, lynchpin, polylogue, sinex.
 
 ### hermes-sampler (hermes)
 
 Tiers: remote-core, recall, deep-evidence.
-Servers: context7, github, lynchpin, sinex.
+Servers: context7, github, lynchpin, polylogue, sinex.
 
 ## MCP servers
 
@@ -73,7 +73,7 @@ Servers: context7, github, lynchpin, sinex.
 | `firecrawl` | `browser-mcp` | `stdio` | `mcp-firecrawl` | claude, hermes |
 | `github` | `remote-core` | `stdio` | `mcp-github` | claude, codex, gemini, antigravity, hermes |
 | `lynchpin` | `deep-evidence` | `stdio` | `mcp-lynchpin` | codex, claude, gemini, antigravity, hermes |
-| `polylogue` | `recall` | `stdio` | `mcp-polylogue` |  |
+| `polylogue` | `recall` | `stdio` | `mcp-polylogue` | codex, claude, gemini, antigravity, hermes |
 | `rea` | `binary-analysis` | `stdio` | `rea` | claude, codex, gemini, hermes |
 | `sinex` | `recall` | `stdio` | `mcp-sinex` | codex, claude, gemini, antigravity, hermes |
 

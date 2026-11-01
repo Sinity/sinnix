@@ -105,17 +105,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/realm/project/sinnix/repo/dots/claude/hooks/sessionstart-acknowledged-outages.sh",
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "/realm/project/sinnix/repo/dots/claude/hooks/sessionstart-sinex-recall.sh",
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "polylogue hook SessionStart",
+            "command": "/realm/project/sinnix/repo/dots/claude/hooks/sessionstart-context.sh claude-code",
             "timeout": 10
           }
         ]
@@ -137,8 +127,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sinnix-context-handoff",
-            "timeout": 10
+            "command": "polylogue hook PreCompact",
+            "timeout": 5
           }
         ]
       }

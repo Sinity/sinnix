@@ -299,7 +299,7 @@ def render_human(data: dict[str, Any]) -> str:
 
 
 def render_acknowledged_only(acked: list[dict[str, Any]]) -> str:
-    """Byte-for-byte the sessionstart-acknowledged-outages.sh contract:
+    """The outages part of the session-start context (sessionstart-context.sh):
     empty string (print nothing) when there is nothing acknowledged."""
     if not acked:
         return ""
@@ -351,8 +351,8 @@ def main(argv: list[str] | None = None) -> int:
         "--acknowledged-only",
         action="store_true",
         help=(
-            "Print only the acknowledged-outages block, in the exact format "
-            "sessionstart-acknowledged-outages.sh printed; silent when there "
+            "Print only the acknowledged-outages block that the session-start "
+            "context (sessionstart-context.sh) injects; silent when there "
             "is nothing acknowledged."
         ),
     )

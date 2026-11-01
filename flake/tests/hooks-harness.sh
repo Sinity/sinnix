@@ -11,7 +11,7 @@ mkdir -p "$test_root/bin" "$test_root/home"
 ln -s /run/current-system/sw/bin/jq "$test_root/bin/jq"
 ln -s /run/current-system/sw/bin/timeout "$test_root/bin/timeout"
 ln -s /run/current-system/sw/bin/bash "$test_root/bin/bash"
-for tool in cat date dirname mkdir sleep; do
+for tool in cat date dirname mkdir mktemp rm sleep; do
   ln -s "/run/current-system/sw/bin/$tool" "$test_root/bin/$tool"
 done
 
@@ -97,15 +97,40 @@ for payload in \
   test -z "$(run_hook "$hooks_dir/pretooluse-bash.sh" "$payload")"
 done
 
-test -z "$(PATH="$test_root/bin" run_hook "$hooks_dir/sessionstart-sinex-recall.sh" '{}')"
+# Without Polylogue, Sinnix or Sinex on PATH the session-start block is empty.
+test -z "$(PATH="$test_root/bin" run_hook "$hooks_dir/sessionstart-context.sh" '{"source":"startup"}')"
 
+# A hung Sinex status is cut off by its timeout and drops only its part.
 cat >"$test_root/bin/sinexctl" <<'EOF'
 #!/usr/bin/env bash
 sleep 3
 EOF
 chmod +x "$test_root/bin/sinexctl"
-PATH="$test_root/bin" SINEX_SESSIONSTART_RECALL_TIMEOUT_SECS=1 \
-  HOME="$test_root/home" XDG_STATE_HOME="$test_root/state" \
-  "$hooks_dir/sessionstart-sinex-recall.sh" </dev/null >/dev/null
+test -z "$(PATH="$test_root/bin" SINEX_SESSIONSTART_RECALL_TIMEOUT_SECS=1 \
+  run_hook "$hooks_dir/sessionstart-context.sh" '{"source":"startup"}')"
+
+# One block, the brief first: a stub Polylogue brief and a stub Sinex source.
+cat >"$test_root/bin/polylogue" <<'EOF'
+#!/usr/bin/env bash
+cat >/dev/null
+printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"BRIEF"}}'
+EOF
+cat >"$test_root/bin/sinexctl" <<'EOF'
+#!/usr/bin/env bash
+printf '{"sources":[{"binding":"fixture","last_event":"%s"}]}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+EOF
+chmod +x "$test_root/bin/polylogue" "$test_root/bin/sinexctl"
+block=$(PATH="$test_root/bin" run_hook "$hooks_dir/sessionstart-context.sh" '{"source":"startup"}' |
+  jq -r '.hookSpecificOutput.additionalContext')
+case $block in
+  BRIEF$'\n\n'"Sinex sources"*fixture*) ;;
+  *)
+    echo "session-start block has the wrong order or parts: $block" >&2
+    exit 1
+    ;;
+esac
+# After compaction only the brief comes back.
+test "$(PATH="$test_root/bin" run_hook "$hooks_dir/sessionstart-context.sh" '{"source":"compact"}' |
+  jq -r '.hookSpecificOutput.additionalContext')" = BRIEF
 
 echo 'hooks harness passed'

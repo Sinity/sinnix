@@ -143,8 +143,13 @@ let
         antigravity = { };
         default = { };
       };
-      # Agent clients use the CLI for recall; the gateway opens MCP on demand.
-      clients = [ ];
+      clients = [
+        "codex"
+        "claude"
+        "gemini"
+        "antigravity"
+        "hermes"
+      ];
     };
 
     sinex = {

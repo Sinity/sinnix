@@ -222,9 +222,10 @@ in
             test -z "$(find "$smoke_root/home" "$smoke_root/xdg-data" -mindepth 1 -print -quit)" \
               || { echo 'the hook wrote outside its spool' >&2; exit 1; }
 
-            # The shared context handoff is configured independently for both
+            # The shared session-start script (which also carries Polylogue's
+            # SessionStart lane) is configured independently for both
             # clients, so this verifies the intended cross-client agreement.
-            for command in sinnix-context-handoff; do
+            for command in sessionstart-context.sh; do
               for file in "$claudeHooks" "$codexHooks"; do
                 jq -e --arg needle "$command" '
                   [.hooks[][].hooks[]?.command] | any(contains($needle))

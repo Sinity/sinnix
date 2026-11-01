@@ -1,6 +1,7 @@
-# Codex session-lifecycle hooks (SessionStart/UserPromptSubmit/Stop):
-# session recall, and Polylogue's live hooks (`polylogue hook`): its
-# session-start brief, takeovers of pasted session IDs and live state.
+# Codex session-lifecycle hooks: Polylogue's live hooks (`polylogue hook`)
+# record every event; the shared session-start script injects one block
+# (Polylogue's brief first, then acknowledged outages and recent Sinex
+# sources); a pasted session ID brings its takeover context.
 # Plain helper (not a NixOS module) imported directly by mcp.nix's configFn;
 # the generated file is exposed via the mcp-servers.codexHooksSource option
 # for tests.
@@ -16,11 +17,7 @@ jsonFormat.generate "codex-hooks.json" {
         hooks = [
           {
             type = "command";
-            command = "${dotsRoot}/claude/hooks/sessionstart-sinex-recall.sh";
-          }
-          {
-            type = "command";
-            command = "polylogue hook SessionStart --harness codex";
+            command = "${dotsRoot}/claude/hooks/sessionstart-context.sh codex";
           }
         ];
       }
@@ -40,7 +37,7 @@ jsonFormat.generate "codex-hooks.json" {
         hooks = [
           {
             type = "command";
-            command = "sinnix-context-handoff";
+            command = "polylogue hook PreCompact --harness codex";
           }
         ];
       }
