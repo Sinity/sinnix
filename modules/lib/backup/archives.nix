@@ -178,11 +178,23 @@ in
         fi
 
         archive_name="sinex-blobs-$(date -u +%Y%m%dT%H%M%SZ)"
-        with_borg_lock borg create \
+        # The running store's incoming/ frame bytes and the producer spools
+        # are written while Borg reads them. Modern exit codes give "file
+        # changed while we backed it up" its own status, 100; only that one
+        # warning is accepted, since such a file is a frame not yet recorded
+        # or an appended spool tail, which the producer still holds and the
+        # next archive takes. Any other warning or error fails the unit.
+        create_status=0
+        BORG_EXIT_CODES=modern with_borg_lock borg create \
           --compression auto,zstd,1 \
           --lock-wait ${toString borgLockWaitSec} \
           "::$archive_name" \
-          ${lib.escapeShellArgs sinexStorePaths}
+          ${lib.escapeShellArgs sinexStorePaths} || create_status=$?
+        if [ "$create_status" -eq 100 ]; then
+          echo "sinex blob backup: accepted files that changed while read (live frames and spools)"
+        elif [ "$create_status" -ne 0 ]; then
+          exit "$create_status"
+        fi
         echo "sinex blob backup complete: $archive_name"
 
         # The borg-sinex-blobs-archive capture lane (this surface's
