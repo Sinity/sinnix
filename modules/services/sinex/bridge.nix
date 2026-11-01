@@ -188,6 +188,15 @@ in
         unit = "sinex-dump.service";
         resourceClass = "backup";
         notifyOnFailure = true;
+        # The nightly dump is replaced atomically; a day plus 2h grace.
+        captures = [
+          {
+            name = "sinex-dump";
+            path = "${dumpRoot}/sinex/sinex.dump";
+            eventDriven = true;
+            staleAfterSeconds = 26 * 60 * 60;
+          }
+        ];
       };
     };
 

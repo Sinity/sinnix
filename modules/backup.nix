@@ -97,15 +97,27 @@ let
   borgRepoRootSnapshotsPath = "${borgRepoRoot}/borg-root-snapshots-v1";
   borgRepoSinexBlobsPath = "${borgRepoRoot}/borg-sinex-blobs-v1";
   borgRepoPolylogueStatePath = "${borgRepoRoot}/borg-polylogue-state-v1";
+  borgRepoLiveSmallPath = "${borgRepoRoot}/borg-live-small-v1";
   borgRepoPersist = "file://${borgRepoPersistPath}";
   borgRepoRealm = "file://${borgRepoRealmPath}";
   borgRepoRootSnapshots = "file://${borgRepoRootSnapshotsPath}";
   borgRepoSinexBlobs = "file://${borgRepoSinexBlobsPath}";
   borgRepoPolylogueState = "file://${borgRepoPolylogueStatePath}";
+  borgRepoLiveSmall = "file://${borgRepoLiveSmallPath}";
   borgPassphrasePath = config.sinnix.secrets.paths."borg-passphrase";
   outerRealmMountUnit = "outer\\x2drealm.mount";
   borgLockWaitSec = 60;
   borgCacheDir = "/persist/root/.cache/borg";
+  # The hourly jobs' cache lives on /realm: a Borg cache commit rewrites the
+  # whole chunk index, which hourly on the worn root SSD would add ~14 GB/day.
+  borgHourlyCacheDir = "${realmRoot}/state/cache/borg-hourly";
+  # Producer spools: frames not yet acknowledged by sinexd. The session
+  # producer spools under the operator's home on /persist.
+  sinexSpoolPaths =
+    lib.optional (
+      options.services ? sinex && config.services.sinex.enable
+    ) "${config.services.sinex.stateDir}/spool"
+    ++ [ "${config.users.users.${username}.home}/.local/state/sinex-session/spool" ];
   borgStaleLockMinutes = 120;
   borgGlobalLock = "/run/lock/sinnix-borg.lock";
   sinexTaskAuthority = config.sinnix.projects.entries.sinex.taskAuthority;
@@ -131,14 +143,16 @@ let
     rankingArchivePath
     "library/model/control-vector"
   ];
-  # Nightly archival permits a day between accepted source cuts, plus 12h
-  # grace. A longer preserved backlog must remain visible as stale.
-  borgDataFreshnessMaxAgeSec = (24 + 12) * 60 * 60;
+  # Nightly archival permits a day between accepted source cuts, plus 6h
+  # grace; any backup older than 30h is reported stale (DUR-2).
+  borgDataFreshnessMaxAgeSec = 30 * 60 * 60;
+  # Hourly jobs skip while the nightly coordinator holds the Borg lock (up to
+  # ~2.5h observed), so six hours without an hourly archive is an outage.
+  borgHourlyMaxAgeSec = 6 * 60 * 60;
   borgAcquisitionObservationMaxAgeSec = 3 * 6 * 60 * 60;
   genomeAcquisitionInventory = "${borgDrainStateRoot}/genome.acquisition-inventory.json";
-  # Direct-path archives run nightly in the coordinator. Keep their existing
-  # three-day freshness budget separate from snapshot source age.
-  borgDailyArchiveMaxAgeSec = 3 * 24 * 60 * 60;
+  # Direct-path archives run nightly in the coordinator: a day plus 6h grace.
+  borgDailyArchiveMaxAgeSec = 30 * 60 * 60;
   # Every unit in this module is the same shape: a oneshot a timer wakes,
   # never restarted by activation (a switch mid-drain would abandon a bind
   # mount and a held Borg lock), inside the backup envelope. Only
@@ -1207,6 +1221,42 @@ in
                 }
               ];
             };
+            borgbackup-job-persist-hourly = {
+              unit = "borgbackup-job-persist-hourly.service";
+              resourceClass = "backup";
+              resources = {
+                IOSchedulingClass = "idle";
+                Nice = 19;
+              };
+              notifyOnFailure = true;
+              operatorRestart = false;
+              captures = [
+                {
+                  name = "borg-persist-hourly-archive";
+                  path = "${borgDrainStateRoot}/persist-hourly.last-success";
+                  eventDriven = true;
+                  staleAfterSeconds = borgHourlyMaxAgeSec;
+                }
+              ];
+            };
+            borgbackup-job-live-small = {
+              unit = "borgbackup-job-live-small.service";
+              resourceClass = "backup";
+              resources = {
+                IOSchedulingClass = "idle";
+                Nice = 19;
+              };
+              notifyOnFailure = true;
+              operatorRestart = false;
+              captures = [
+                {
+                  name = "borg-live-small-archive";
+                  path = "${borgDrainStateRoot}/live-small.last-success";
+                  eventDriven = true;
+                  staleAfterSeconds = borgHourlyMaxAgeSec;
+                }
+              ];
+            };
             borgbackup-job-realm = {
               unit = "borgbackup-job-realm.service";
               resourceClass = "backup";
@@ -1460,6 +1510,7 @@ in
           borgRepoRootSnapshots
           borgRepoSinexBlobs
           borgRepoPolylogueState
+          borgRepoLiveSmall
           borgPassphrasePath
           outerRealmMountUnit
           borgLockWaitSec
@@ -1504,6 +1555,29 @@ in
           genomeSnapshots
           ;
         genomeRoot = backupCfg.genomeRoot;
+      })
+      ++ (import ./lib/backup/hourly.nix {
+        inherit
+          pkgs
+          lib
+          realmRoot
+          username
+          sinexSpoolPaths
+          borgRepoPersist
+          borgRepoPersistPath
+          borgRepoLiveSmall
+          borgRepoLiveSmallPath
+          borgPersistSnapshotBind
+          borgDrainStateRoot
+          borgCacheDir
+          borgHourlyCacheDir
+          borgLockWaitSec
+          outerRealmMountUnit
+          persistExcludes
+          mkBackupJob
+          mkBorgCommonScript
+          mkBorgExcludeArgs
+          ;
       })
       ++ (import ./lib/backup/genome.nix {
         inherit

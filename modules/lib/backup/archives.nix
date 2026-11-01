@@ -20,6 +20,7 @@
   borgRepoRootSnapshots,
   borgRepoSinexBlobs,
   borgRepoPolylogueState,
+  borgRepoLiveSmall,
   borgPassphrasePath,
   outerRealmMountUnit,
   borgLockWaitSec,
@@ -119,11 +120,12 @@ let
           borg list --json --lock-wait ${toString borgLockWaitSec} "$repo" > "$run_dir/$name.after.json"
         fi
       }
-      maintain_repo ${lib.escapeShellArg borgRepoPersist} 'persist-*' 'sinnix-prime-persist-*'
+      maintain_repo ${lib.escapeShellArg borgRepoPersist} 'persist-* hourly-persist-*' 'sinnix-prime-persist-*'
       maintain_repo ${lib.escapeShellArg borgRepoRealm} 'realm-* genome-genome.*' 'sinnix-prime-realm-*' 'machine-telemetry-dumps-*'
       maintain_repo ${lib.escapeShellArg borgRepoSinexBlobs} 'sinex-blobs-*'
       maintain_repo ${lib.escapeShellArg borgRepoRootSnapshots} 'root-*'
       maintain_repo ${lib.escapeShellArg borgRepoPolylogueState} 'polylogue-state-*'
+      maintain_repo ${lib.escapeShellArg borgRepoLiveSmall} 'live-small-*'
       if [ "$dry_run" = 0 ]; then
         date +%s > "$marker.tmp"
         mv "$marker.tmp" "$marker"
