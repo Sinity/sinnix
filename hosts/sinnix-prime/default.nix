@@ -127,9 +127,11 @@
     sinex = {
       enable = true;
       # The deployment before the rewrite, kept whole under a dated name:
-      # its PostgreSQL cluster (postgresql/18), its content store and its
-      # runtime state. Its store stays in the sinex-blobs Borg archives.
-      retainedStores = [ "/var/lib/sinex/old-2026-10-26/state/blob-repository" ];
+      # its PostgreSQL cluster (postgresql/18, cleanly shut down), its content
+      # store and its runtime state (spools, event engine state). Nothing
+      # writes it, so the sinex-blobs Borg job archives the whole directory
+      # by plain file copy; the cluster has no other copy.
+      retainedStores = [ "/var/lib/sinex/old-2026-10-26" ];
     };
     polylogue = {
       enable = true;

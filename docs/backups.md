@@ -60,9 +60,10 @@ paths. Neither measurement establishes that a directory is disposable.
 | `/persist`               | btrbk read-only snapshot, archived by the Borg job                     | same as `/realm`                                 | `borg-persist-v1`                  |
 | HDD genome workspace     | dedicated btrbk cut, archived independently of `/realm`                | six-hour cuts only when changed, drained nightly | `borg-realm-v2`, `genome-*` series |
 | The ephemeral root       | snapshot the initrd takes before each wipe                             | nightly coordinator                              | `borg-root-snapshots-v1`           |
-| Sinex content stores     | read in place: the running store and the dated earlier one             | nightly coordinator                              | `borg-sinex-blobs-v1`              |
+| Sinex content stores     | read in place: the running store, its producer spools, and the whole dated earlier deployment (stopped PostgreSQL cluster included) | nightly coordinator | `borg-sinex-blobs-v1` |
 | Sinex database dump      | `pg_dump` into `state/db-dumps/sinex`, archived with `/realm`          | dump daily at midnight                           | `borg-realm-v2`                    |
 | Polylogue state          | hooks archived directly from a read-only snapshot of its subvolume     | nightly coordinator                              | `borg-polylogue-state-v1`          |
+| Polylogue live archive   | `state/polylogue-live` (except `index.db`) inside the `/realm` btrbk snapshot; an atomic snapshot is consistent for Polylogue | same as `/realm` | `borg-realm-v2` |
 | Telemetry database dumps | `--rsyncable` zstd copies in `state/db-dumps/`, archived with `/realm` | dumps before nightly cut, seal Sunday            | `borg-realm-v2`                    |
 
 Left out of the `/realm` archive (`realmExcludes` in `modules/backup.nix`):

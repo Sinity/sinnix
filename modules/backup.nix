@@ -8,8 +8,8 @@
 # Drive           Label            Mount            Purpose
 # ────────────────────────────────────────────────────────────────────────────
 # /dev/nvme0n1p3  SSD_4TB          /realm           Source: projects, data
-# /dev/sdb2       root_btrfs       /persist         Source: system & home state
-# /dev/sda1       outer-realm      /outer-realm     Target: Borg & btrbk archives
+# /dev/sda2       root_btrfs       /persist         Source: system & home state
+# /dev/sdb1       outer-realm      /outer-realm     Target: Borg repositories
 # Note: / is ephemeral — not snapshotted by btrbk (initrd saves pre-wipe states)
 {
   pkgs,
@@ -24,8 +24,15 @@ let
   # Sinex's content stores: the running one, read from its evaluated
   # configuration so a storage move cannot leave Borg reading an old path, and
   # those of earlier deployments kept under dated names. Empty without Sinex.
+  # The producer spools under stateDir hold frames not yet acknowledged; Sinex's
+  # backup contract (docs/operations.md, "What a backup contains") lists them,
+  # and /var/lib/sinex is a separate subvolume outside the realm snapshots.
   sinexStorePaths = lib.optionals (options.services ? sinex && config.services.sinex.enable) (
-    [ config.services.sinex.storeDir ] ++ config.sinnix.services.sinex.retainedStores
+    [
+      config.services.sinex.storeDir
+      "${config.services.sinex.stateDir}/spool"
+    ]
+    ++ config.sinnix.services.sinex.retainedStores
   );
   borgRepoRoot = "${config.sinnix.paths.outerRealm}/backup";
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
@@ -871,6 +878,10 @@ let
     # Polylogue's index.db is "everything parsed and derived", rebuilt from
     # archive.db when deleted (polylogue docs/architecture.md). At 16 GB and
     # rewritten continuously, it was reread by every realm drain.
+    # The rest of state/polylogue-live is a plain directory of the /realm
+    # subvolume, so the drain reads it from an atomic btrbk snapshot while the
+    # daemon runs. Polylogue's docs/operations.md accepts an atomic snapshot of
+    # the archive directory as a consistent backup; no dump step is needed.
     "state/polylogue-live/data/polylogue/index.db"
     "state/polylogue-live/data/polylogue/index.db-wal"
     "state/polylogue-live/data/polylogue/index.db-shm"
