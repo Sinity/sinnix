@@ -270,7 +270,7 @@ in
                   taskAuthority = {
                     workspace = "${cfg.paths.stateRoot}/tasks/polylogue-next/.beads";
                     projectUuid = "d06821b6-158a-4b18-add6-6d26e936a97e";
-                    database = "${cfg.paths.stateRoot}/tasks/polylogue-next/.beads/embeddeddolt";
+                    database = "${cfg.paths.stateRoot}/tasks/polylogue-next/.beads/dolt";
                     publicationPolicy = "dolt-sync";
                   };
                 };
