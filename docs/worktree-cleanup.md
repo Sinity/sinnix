@@ -30,17 +30,21 @@ inherited target through `nix develop --command`. Devkit resolves Cargo's actual
 target for test/report handling. Durable run history, Sinex service/test state
 and independently retained historical binaries keep their current owners.
 
-A checkout's first selection seeds its new target from the repository's
+A checkout's first selection seeds its new target with a reflink copy of a
+warm one, taken while holding Cargo's build lock on the source, so it shares
+extents and Cargo reuses the dependency artifacts. Sources are tried in order:
+up to three other worktrees of the repository whose `Cargo.lock` is identical
+to the new checkout's, most recently built first, then the repository's
 master-baseline checkout (Git config `sinnix.baselineCheckout`, which
-`sinnix-master-baseline` sets): a reflink copy taken while holding Cargo's
-build lock on the source, so it shares extents and Cargo reuses the
-dependency artifacts. With incremental compilation disabled, seeding prunes
+`sinnix-master-baseline` sets). Lanes branch from an integration head that the
+default branch may trail by many dependency changes, so a same-lock lane is
+the warmer seed. A source whose build lock is held is skipped.
+With incremental compilation disabled, seeding prunes
 every profile's `incremental/` tree,
 including cross-compilation profiles. Cargo test scratch in `target/tmp/`
 and `.rustc_info.json` are always omitted before copying. Build-script output directories remain reusable.
 Disabled incremental state and checkout-specific compiler probes are regenerated.
-Without reflinks, a baseline target, or the lock within
-five minutes, the target starts empty. The selector writes the target's
+Without reflinks or an idle warm source, the target starts empty. The selector writes the target's
 `CACHEDIR.TAG` (Cargo tags only a target directory it creates, and this one
 exists first), so worktree cleanup can retire it with its checkout.
 

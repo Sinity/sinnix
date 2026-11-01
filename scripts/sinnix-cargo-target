@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Select an isolated compiler target in the provisioned Realm cache subvolume
-# runtimeInputs: bash coreutils findutils git util-linux
+# runtimeInputs: bash coreutils diffutils findutils git gnused util-linux
 set -euo pipefail
 
 if [ -n "${CARGO_TARGET_DIR:-}" ]; then
@@ -28,35 +28,76 @@ checkout="$(realpath "$checkout")"
 # Different checkouts keep independent writable targets, even on one branch.
 target="$(target_of "$checkout")"
 
-# A new target starts as a copy of the repository's master-baseline target
-# (`sinnix.baselineCheckout`, set by sinnix-master-baseline). Reflinks share
-# the extents, and Cargo reuses dependency artifacts across checkout paths.
-# Cargo's build lock on the source is held for the copy, so no build writes
-# it meanwhile. Seeding is optional: a busy baseline or unavailable reflinks
-# leaves an empty independent target, without delaying shell entry or fmt.
-seed_checkout="$(git config --get sinnix.baselineCheckout || true)"
-if [ ! -e "$target" ] && [ -n "$seed_checkout" ] && [ -d "$seed_checkout" ]; then
-  seed="$(target_of "$(realpath "$seed_checkout")")"
-  if [ "$seed" != "$target" ] && [ -d "$seed/debug" ]; then
-    mkdir -p "$(dirname "$target")"
-    staging="$(mktemp -d "$target.seed.XXXXXX")"
-    trap 'rm -rf -- "$staging"' EXIT
-    # Walk under the source lock. Prune before copying so disabled incremental
-    # state and Cargo test scratch never create destination inodes. rustc's probe cache belongs to
-    # the source checkout/toolchain and is cheap to regenerate.
-    if flock --nonblock "$seed/debug/.cargo-lock" bash -euo pipefail -c '
-      cd "$1"
-      prune=( -path "./tmp" -o -path "./.rustc_info.json" )
-      if [ "$3" = 0 ]; then
-        prune+=( -o -type d -regex "./[^/]+(/[^/]+)?/incremental" )
-      fi
-      find . -regextype posix-extended \( "${prune[@]}" \) -prune -o \
-        \( ! -type d -o -empty \) -exec cp -a --parents --reflink=always --target-directory="$2/" -- {} +
-    ' bash "$seed" "$staging" "${CARGO_INCREMENTAL:-0}" 2>/dev/null \
-      && mv -T "$staging" "$target" 2>/dev/null; then
-      echo "sinnix-cargo-target: seeded $target from $seed_checkout" >&2
+# A new target starts as a reflink copy of a warm one, so Cargo reuses the
+# dependency artifacts (they do not depend on the checkout path). The best
+# seed is another worktree of this repository resolved from the same
+# Cargo.lock: lanes branch from one integration head, which the default
+# branch's baseline may trail by many dependency changes. The most recently
+# built of those comes first; the master-baseline target
+# (`sinnix.baselineCheckout`, set by sinnix-master-baseline) is the fallback.
+# Cargo's build lock on a source is held for its copy, so no build writes it
+# meanwhile; a busy source is skipped. Seeding is optional: with no idle seed
+# or no reflinks the target starts empty, without delaying shell entry.
+seed_from() {
+  local seed="$1"
+  staging="$(mktemp -d "$target.seed.XXXXXX")"
+  # Walk under the source lock. Prune before copying so disabled incremental
+  # state and Cargo test scratch never create destination inodes. rustc's
+  # probe cache belongs to the source checkout/toolchain and is cheap to
+  # regenerate.
+  if flock --nonblock "$seed/debug/.cargo-lock" bash -euo pipefail -c '
+    cd "$1"
+    prune=( -path "./tmp" -o -path "./.rustc_info.json" )
+    if [ "$3" = 0 ]; then
+      prune+=( -o -type d -regex "./[^/]+(/[^/]+)?/incremental" )
     fi
+    find . -regextype posix-extended \( "${prune[@]}" \) -prune -o \
+      \( ! -type d -o -empty \) -exec cp -a --parents --reflink=always --target-directory="$2/" -- {} +
+  ' bash "$seed" "$staging" "${CARGO_INCREMENTAL:-0}" 2>/dev/null \
+    && mv -T "$staging" "$target" 2>/dev/null; then
+    staging=""
+    return 0
   fi
+  rm -rf -- "$staging"
+  staging=""
+  return 1
+}
+staging=""
+trap '[ -z "$staging" ] || rm -rf -- "$staging"' EXIT
+
+if [ ! -e "$target" ]; then
+  candidates=()
+  lock="$checkout/Cargo.lock"
+  if [ -f "$lock" ]; then
+    size="$(stat -c %s "$lock")"
+    while IFS= read -r other; do
+      [ -d "$other" ] || continue
+      other="$(realpath "$other")"
+      [ "$other" != "$checkout" ] && [ -f "$other/Cargo.lock" ] || continue
+      seed="$(target_of "$other")"
+      [ -d "$seed/debug" ] || continue
+      [ "$(stat -c %s "$other/Cargo.lock")" = "$size" ] && cmp -s "$other/Cargo.lock" "$lock" || continue
+      candidates+=("$(stat -c %Y "$seed/debug") $other")
+    done < <(git worktree list --porcelain | sed -n 's/^worktree //p')
+  fi
+  ordered=()
+  if [ "${#candidates[@]}" -gt 0 ]; then
+    while IFS= read -r line; do ordered+=("${line#* }"); done \
+      < <(printf '%s\n' "${candidates[@]}" | sort -rn | head -n 3)
+  fi
+  baseline="$(git config --get sinnix.baselineCheckout || true)"
+  if [ -n "$baseline" ] && [ -d "$baseline" ]; then
+    ordered+=("$(realpath "$baseline")")
+  fi
+  mkdir -p "$(dirname "$target")"
+  for source in ${ordered[@]+"${ordered[@]}"}; do
+    seed="$(target_of "$source")"
+    [ "$seed" != "$target" ] && [ -d "$seed/debug" ] || continue
+    if seed_from "$seed"; then
+      echo "sinnix-cargo-target: seeded $target from $source" >&2
+      break
+    fi
+  done
 fi
 mkdir -p "$target"
 # Cargo tags only a target directory it creates itself, and this one exists

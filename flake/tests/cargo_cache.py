@@ -260,6 +260,63 @@ class CargoCache(unittest.TestCase):
             (target / "debug" / "deps" / "libdep.rlib").read_bytes(), b"rebuilt"
         )
 
+    def test_a_worktree_on_the_same_lock_seeds_before_the_baseline(self):
+        import fcntl
+
+        self.provision()
+        (self.bin / "cp").write_text(
+            f'#!{shutil.which("bash")}\nargs=()\nfor a in "$@"; do '
+            '[ "$a" = --reflink=always ] || args+=("$a"); done\n'
+            f'exec "{shutil.which("cp")}" "${{args[@]}}"\n'
+        )
+        (self.bin / "cp").chmod(0o755)
+        git = ["git", "-C", str(self.checkout), "-c", "user.name=Fixture",
+               "-c", "user.email=fixture@example.invalid"]
+        (self.checkout / "Cargo.lock").write_text("old resolution\n")
+        subprocess.run([*git, "add", "Cargo.lock"], check=True)
+        subprocess.run([*git, "commit", "-qm", "old"], check=True)
+
+        def worktree(name):
+            path = self.root / name
+            subprocess.run([*git, "worktree", "add", "-q", "--detach", str(path)], check=True)
+            return path
+
+        def select_in(path):
+            result = subprocess.run(["timeout", "5s", "bash", str(SELECTOR)], cwd=path,
+                                    env=self.env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return Path(result.stdout.strip())
+
+        def warm(path, artifact):
+            target = select_in(path)
+            (target / "debug" / "deps").mkdir(parents=True, exist_ok=True)
+            (target / "debug" / "deps" / artifact).write_bytes(b"compiled")
+            return target
+
+        baseline = worktree("baseline")
+        warm(baseline, "libold.rlib")
+        subprocess.run([*git, "config", "sinnix.baselineCheckout", str(baseline)], check=True)
+        (self.checkout / "Cargo.lock").write_text("new resolution\n")
+        subprocess.run([*git, "commit", "-qam", "new"], check=True)
+        warm(worktree("idle-lane"), "libnew.rlib")
+        busy = warm(worktree("busy-lane"), "libbusy.rlib")
+        os.utime(busy / "debug", (2_000_000_000, 2_000_000_000))
+
+        with (busy / "debug" / ".cargo-lock").open("w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            target = select_in(worktree("new-lane"))
+        # The newest same-lock target was busy, so the next one seeded it.
+        self.assertTrue((target / "debug" / "deps" / "libnew.rlib").exists())
+        self.assertFalse((target / "debug" / "deps" / "libbusy.rlib").exists())
+        self.assertEqual([p.name for p in target.parent.iterdir()], ["target"])
+
+        # No worktree shares an edited lock: the baseline seeds it.
+        other = worktree("edited-lane")
+        (other / "Cargo.lock").write_text("edited resolution\n")
+        target = select_in(other)
+        self.assertTrue((target / "debug" / "deps" / "libold.rlib").exists())
+        self.assertFalse((target / "debug" / "deps" / "libnew.rlib").exists())
+
     def test_busy_baseline_does_not_block_a_new_target(self):
         import fcntl
 
