@@ -39,6 +39,11 @@ Illustrative examples:
 - Fix cheap, understood nearby defects with proportionate checks and a brief
   note. Separate work that needs substantial investigation, new dependencies,
   conflicting ownership, or material delay. Keep unfinished scope and failures visible.
+- Solve a problem at its cause: fix the code, or make the invariant hold in
+  the design or the owning tool. A gate, metric, quota, ledger, tracking file
+  or recurring audit placed around a symptom is accretion; when judgment or a
+  direct fix would make it unnecessary, do that instead, and remove such
+  mechanisms you find, including your own.
 - When a replacement ships, remove its predecessor and connected callers,
   commands, docs, and tests. Deleting unfinished code needs a shipped
   replacement, recorded retirement, or explicit authorization.
