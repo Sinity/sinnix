@@ -273,7 +273,9 @@ mkServiceModule {
           # directories through the host's noninteractive sudo wrapper.
           path = [ "/run/wrappers" ];
           serviceConfig = {
-            TimeoutStartSec = "5min";
+            # With a working census each candidate's holder scan and removal
+            # take real time on a loaded host; 5 minutes cut the first run off.
+            TimeoutStartSec = "1h";
           };
           timer = {
             onCalendar = "*-*-* 05:10:00";
