@@ -21,7 +21,8 @@ let
       ) config.sinnix.projects.entries
     )
   );
-  eventSpool = "${config.sinnix.paths.stateRoot}/agentctl/events.jsonl";
+  stateDir = "${config.sinnix.paths.stateRoot}/agentctl";
+  eventSpool = "${stateDir}/events.jsonl";
 in
 mkServiceModule {
   name = "agentctl";
@@ -362,6 +363,12 @@ mkServiceModule {
         ];
         systemd.tmpfiles.rules = [
           "d ${taskStateRoot} 0700 ${userName} users -"
+          # Launch inputs, logs, outcomes and typed results of queued jobs.
+          # Owner only: job logs hold whatever a command printed. They live on
+          # Realm rather than the wear-limited root disk, at the path that
+          # agentctl and every recorded launch input name.
+          "d ${stateDir} 0700 ${userName} users -"
+          "L ${config.users.users.${userName}.home}/.local/state/agentctl - - - - ${stateDir}"
         ]
         ++ map (path: "d ${path} 0700 ${userName} users -") taskAuthorityParents;
         # Beads' Dolt chunk files use random I/O.  Mark the per-project
@@ -373,14 +380,6 @@ mkServiceModule {
             ${pkgs.e2fsprogs}/bin/chattr +C ${lib.escapeShellArg path}
           fi
         '') taskAuthorityParents;
-        # Launch inputs, bounded logs and typed results of queued jobs. Owner
-        # only: job logs hold whatever a command printed.
-        sinnix.persistence.home.directories = [
-          {
-            directory = ".local/state/agentctl";
-            mode = "0700";
-          }
-        ];
       }
     ];
 } args

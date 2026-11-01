@@ -503,7 +503,9 @@ unit until terminal state, and cancellation targets its recorded identity.
 `modules/services/agentctl.nix` renders `/etc/sinnix/agentctl.json`:
 `project_roots`, `event_spool`, `state_dir` and `pools`,
 with each pool as `{parallel, ...}`. It installs `agentctl`, `wt`, `pueue` and
-`gh`, persists `~/.local/state/agentctl`, and declares these units:
+`gh`, keeps job state (`~/.local/state/agentctl`, a link to
+`/realm/state/agentctl` beside the event spool) off the root disk, and
+declares these units:
 
 - `agentctl-pressure` (every minute).
 - `agentctl-clean` (daily: removes finished queue tasks, keeping results).
