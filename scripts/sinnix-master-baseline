@@ -36,12 +36,11 @@ if [ ! -e "$checkout" ]; then
 fi
 git -C "$root" config sinnix.baselineCheckout "$checkout"
 
-# The stamp names the head and the job queued for it. A job cancelled before
-# it ran (typically to give its slot to a landing check), lost, or not
-# recorded warmed nothing, so the head is queued again, behind all other
-# work in its pool, which is what a deferral asks for. A launch the host
-# refused would be refused again; it and a passing, failing or timed-out
-# baseline stand until the branch moves.
+# The stamp names the head and the job queued for it. A job that was lost or
+# never recorded warmed nothing, so its head is queued again, behind the rest
+# of its pool. A cancellation is a decision about that head and stands, as do
+# a refused launch and a passing, failing or timed-out baseline, until the
+# branch moves.
 stamp="$(git -C "$checkout" rev-parse --path-format=absolute --git-path baseline-head)"
 priority=()
 read -r stamped_head stamped_job 2>/dev/null <"$stamp" || true
@@ -51,7 +50,7 @@ if [ "${stamped_head:-}" = "$head" ]; then
     phase="$("$agentctl" job get 0 --job-id "$stamped_job" --json 2>/dev/null | jq -r '.phase // empty' || true)"
   fi
   case "$phase" in
-    "" | unknown | cancelled | vanished) priority=(--priority -50) ;;
+    "" | unknown | vanished) priority=(--priority -50) ;;
     *) exit 0 ;;
   esac
 fi

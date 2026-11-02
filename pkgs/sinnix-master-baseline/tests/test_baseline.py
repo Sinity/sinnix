@@ -208,13 +208,13 @@ def test_a_checkout_cannot_queue_a_different_project_identity(world: dict) -> No
         ("running", False),
         ("refused", False),
         ("launch-failed", False),
-        ("cancelled", True),
+        ("cancelled", False),
         ("vanished", True),
         ("unknown", True),
         ("lookup-fails", True),
     ],
 )
-def test_a_head_whose_baseline_never_ran_is_queued_again_behind_other_work(
+def test_a_head_whose_baseline_was_lost_is_queued_again_behind_other_work(
     world: dict, phase: str, queued_again: bool
 ) -> None:
     baseline(world)
