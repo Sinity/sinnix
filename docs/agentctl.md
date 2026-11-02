@@ -517,11 +517,14 @@ declares these units:
   same checkout as `--workspace`. Its descriptor supplies the environment and
   operation limits; its ProjectID must match the registered project. A failed
   launch leaves the head unmarked for the next scheduled attempt. A head whose
-  job was lost or not recorded is queued again at priority -50, behind the
-  rest of its pool; a cancelled, refused, passing, failing or timed-out
-  baseline stands until the branch moves. Lanes read the newest
-  `<project>:baseline` job to learn whether a failure is already on master;
-  its warm target seeds new checkouts' targets (`docs/worktree-cleanup.md`).
+  job was lost or not recorded is queued again; a cancelled, refused, passing,
+  failing or timed-out baseline stands until the branch moves. The baseline
+  is a warm build, not a test run: Polylogue and Sinex declare it as
+  `xtask warm` (every test binary and Clippy, nothing run) in the `compile`
+  pool at priority -100, so it takes that slot only when no lane job waits.
+  Its target seeds new checkouts' targets (`docs/worktree-cleanup.md`).
+  Whether a failure is already on master comes from the projects' cloud
+  known-failure lists, not from this job.
 
 pueued and the pool slices come from `modules/features/cli/core.nix` and
 `flake/data/runtime-defaults.nix`. The package's test suite drives a private

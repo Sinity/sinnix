@@ -4,10 +4,11 @@
 # runtimeInputs: bash coreutils git jq
 set -euo pipefail
 
-# The baseline answers "does this already fail on master?" for every lane,
-# and its warm target seeds new checkouts (sinnix-cargo-target). It runs in
-# <workspace root>/<project>-master, a detached worktree this script alone
-# moves, and only while no baseline job is queued or running there.
+# The baseline is a warm build of master whose target seeds new checkouts
+# (sinnix-cargo-target); the descriptor's operation decides what it builds
+# and where it queues. It runs in <workspace root>/<project>-master, a
+# detached worktree this script alone moves, and only while no baseline job
+# is queued or running there.
 project="${1:?usage: sinnix-master-baseline <project>}"
 agentctl="${AGENTCTL:-agentctl}"
 
@@ -37,12 +38,10 @@ fi
 git -C "$root" config sinnix.baselineCheckout "$checkout"
 
 # The stamp names the head and the job queued for it. A job that was lost or
-# never recorded warmed nothing, so its head is queued again, behind the rest
-# of its pool. A cancellation is a decision about that head and stands, as do
+# never recorded warmed nothing, so its head is queued again. A cancellation is a decision about that head and stands, as do
 # a refused launch and a passing, failing or timed-out baseline, until the
 # branch moves.
 stamp="$(git -C "$checkout" rev-parse --path-format=absolute --git-path baseline-head)"
-priority=()
 read -r stamped_head stamped_job 2>/dev/null <"$stamp" || true
 if [ "${stamped_head:-}" = "$head" ]; then
   phase=""
@@ -50,7 +49,7 @@ if [ "${stamped_head:-}" = "$head" ]; then
     phase="$("$agentctl" job get 0 --job-id "$stamped_job" --json 2>/dev/null | jq -r '.phase // empty' || true)"
   fi
   case "$phase" in
-    "" | unknown | vanished) priority=(--priority -50) ;;
+    "" | unknown | vanished) ;;
     *) exit 0 ;;
   esac
 fi
@@ -62,6 +61,6 @@ if ! jq -e --arg id "$(jq -r '.id' <<<"$descriptor")" '.id == $id' <<<"$selected
   echo "$checkout declares a different project ID than $project" >&2
   exit 1
 fi
-job="$("$agentctl" job start --project "$checkout" baseline --workspace "$checkout" ${priority[@]+"${priority[@]}"} --json | jq -r '.job_id')"
+job="$("$agentctl" job start --project "$checkout" baseline --workspace "$checkout" --json | jq -r '.job_id')"
 printf '%s %s\n' "$head" "$job" >"$stamp"
 echo "queued $project baseline at $head"

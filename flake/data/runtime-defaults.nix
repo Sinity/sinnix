@@ -707,6 +707,8 @@ rec {
       # Type and lint checks: two at once, each peaking at 3-4 GiB
       # (2026-11-01: Polylogue compile 3.1 GiB, Sinex compile 3.9 GiB).
       # They write only metadata, so they outrank test builds for the disk.
+      # The master baselines' warm builds also run here, at the lowest queue
+      # priority: the background slice's 6G ceiling is below a test build.
       agent-ctl-compile = {
         IOAccounting = true;
         CPUWeight = 100;

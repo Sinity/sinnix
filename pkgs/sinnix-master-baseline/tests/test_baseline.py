@@ -214,7 +214,7 @@ def test_a_checkout_cannot_queue_a_different_project_identity(world: dict) -> No
         ("lookup-fails", True),
     ],
 )
-def test_a_head_whose_baseline_was_lost_is_queued_again_behind_other_work(
+def test_a_head_whose_baseline_was_lost_is_queued_again(
     world: dict, phase: str, queued_again: bool
 ) -> None:
     baseline(world)
@@ -222,9 +222,8 @@ def test_a_head_whose_baseline_was_lost_is_queued_again_behind_other_work(
     baseline(world)
     runs = started(world)
     assert len(runs) == (2 if queued_again else 1)
-    assert "--priority" not in runs[0]
-    if queued_again:
-        assert runs[1][runs[1].index("--priority") + 1] == "-50"
+    # The descriptor's priority places every baseline; a requeue keeps it.
+    assert all("--priority" not in run for run in runs)
 
 
 def test_a_stamp_without_a_job_is_queued_again(world: dict) -> None:
