@@ -2310,3 +2310,36 @@ def test_a_job_priority_overrides_the_declared_one(
     assert fake_pueue.added[-1]["priority"] == 50
     launch.start_operation(config, project, project.operation("verify"))
     assert fake_pueue.added[-1]["priority"] == 0
+
+
+def test_a_lane_branch_takes_its_pool_from_the_default_branch(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    # The default branch moved `check` to another pool after the lane's branch
+    # was cut; the lane's own descriptor still names the old one.
+    git = ["git", "-C", str(project_root), "-c", "user.name=f", "-c", "user.email=f@x"]
+    descriptor = project_root / ".agentctl/project.toml"
+    lane = descriptor.read_text()
+    subprocess.run([*git[:3], "init", "-q", "-b", "master"], check=True)
+    descriptor.write_text(lane.replace('pool = "normal"', 'pool = "compile"', 1))
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "commit", "-qm", "master"], check=True)
+    subprocess.run([*git, "update-ref", "refs/remotes/origin/master", "HEAD"], check=True)
+    descriptor.write_text(lane)
+    fake_pueue.groups["compile"] = 1
+    project = load_project_adapter(project_root)
+    assert project.operation("check").pool == "normal"
+
+    started = launch.start_operation(config, project, project.operation("check"))
+
+    assert fake_pueue.task(started["task_id"]).group == "compile"
+
+
+def test_without_a_default_branch_descriptor_the_lane_pool_stands(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    project = load_project_adapter(project_root)
+
+    started = launch.start_operation(config, project, project.operation("check"))
+
+    assert fake_pueue.task(started["task_id"]).group == "normal"

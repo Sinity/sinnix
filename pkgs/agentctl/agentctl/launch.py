@@ -14,6 +14,7 @@ import pwd
 import re
 import subprocess
 import time
+import tomllib
 import uuid
 from contextlib import contextmanager
 from dataclasses import replace
@@ -642,6 +643,8 @@ def start_operation(
     """
     if priority is not None:
         operation = replace(operation, priority=priority)
+    if (pool := default_branch_pool(project, operation.name)) is not None:
+        operation = replace(operation, pool=pool)
     if idempotency_key is None:
         return _start_operation(
             config,
@@ -697,6 +700,30 @@ def start_operation(
             idempotency_key=idempotency_key,
             request_digest=fingerprint,
         )
+
+
+def default_branch_pool(project: ProjectAdapter, operation: str) -> str | None:
+    """The pool the project's default branch declares for this operation.
+
+    Pool placement is host scheduling policy, so it follows the merged
+    descriptor rather than whatever a lane's branch carried when it was cut;
+    the branch keeps defining the command and its arguments. None when the
+    project names no default base, the base has no descriptor, or it does not
+    declare the operation.
+    """
+    if project.workspace is None:
+        return None
+    try:
+        raw = gitcmd.git(
+            project.root,
+            "show",
+            f"{project.workspace.default_base}:.agentctl/project.toml",
+            error=job_queries.JobError,
+        )
+        declared = tomllib.loads(raw)["operations"][operation]["pool"]
+    except (job_queries.JobError, tomllib.TOMLDecodeError, KeyError, TypeError):
+        return None
+    return declared if isinstance(declared, str) else None
 
 
 def _working_directory(
