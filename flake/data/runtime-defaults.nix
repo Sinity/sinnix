@@ -348,12 +348,16 @@ rec {
         # the disk when it is not. At 90-100 per agent slice, three of them
         # held as much weight as the whole desktop.
         IOWeight = 25;
-        # Raised from 14G/16G on 2026-10-27 for a wide Codex fleet (workers
-        # measured ~136 MB resident each); the desktop's MemoryMin, not this
-        # ceiling, is what protects the desktop. Swap stays small: agents are
-        # reclaimed or killed, never paged to the QLC NVMe.
-        MemoryHigh = "20G";
-        MemoryMax = "22G";
+        # At 20G/22G the host hit a global OOM twice on 2026-11-02 (03:25,
+        # 03:50): agents near their ceiling beside live and rehearsal
+        # PostgreSQL and the desktop left the kernel nothing, and it killed a
+        # build's rustc from outside any agent slice. 19G leaves the desktop's
+        # 6.5G guarantee, live services (5-9G) and the kernel their share, so
+        # agent work is throttled or killed inside this slice first. Swap
+        # stays small: agents are reclaimed or killed, never paged to the QLC
+        # NVMe.
+        MemoryHigh = "16G";
+        MemoryMax = "19G";
         MemorySwapMax = "2G";
         TasksMax = 16384;
       };
@@ -493,9 +497,14 @@ rec {
         # starved behind an idle desktop and the coordinator's own polls.
         CPUWeight = 90;
         IOWeight = 100;
-        # Builds (up to four at 5-8 GiB, by pool width) plus the codex pool.
-        MemoryHigh = "17G";
-        MemoryMax = "19G";
+        # Builds, up to four by pool width (normal 2, bulk 1, compile 1).
+        # Peak memory per job since 2026-11-01, page cache included: Polylogue
+        # focused p50 3.6G p90 5.5G, Sinex focused/exec p90 6.8-6.9G, compile
+        # and Clippy p90 2.0-3.4G, so four typical builds sum to ~13G. The plane
+        # sits 3G below the agent budget, leaving the agent CLIs and their
+        # tools room before the budget's own ceiling.
+        MemoryHigh = "14G";
+        MemoryMax = "16G";
         # Bounded swap for the plane as a whole. With none, a job at its
         # ceiling could only drop page cache (6 TiB of re-reads over one
         # 11-day uptime). A job's own cold pages are the cheaper thing to
