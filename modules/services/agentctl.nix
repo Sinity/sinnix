@@ -79,7 +79,7 @@ mkServiceModule {
       # 80-95% full memory pressure (2026-09-28), which also paused the pytest
       # pools through pressure pauses. Six fit.
       agent.parallel = 6;
-      # Codex workers: light, mostly waiting on capped builds elsewhere, so
+      # Codex workers: light, mostly waiting on builds in other pools, so
       # the fleet is sized by available work, not by cores (2026-10-27).
       # 40 (2026-10-27 15:40) filled zram completely by 16:06 (5 MB free,
       # 3.1 GB available) next to the job plane's builds; 32 recovered it.
@@ -104,14 +104,16 @@ mkServiceModule {
           slice = "agent-ctl-pytest-quick.slice";
         };
       };
-      # Three: the cargo cap bounds concurrent builds across pools, and at
-      # two, long measurement and copy jobs held every bulk slot while checks
-      # queued behind them for an hour (2026-10-25).
-      bulk.parallel = 3;
-      # Three Polylogue verify_quick runs fit the 9G normal slice now that one
-      # peaks under 1 GiB (polylogue #5754); at 3.3 GiB each they had held it
-      # at ~70% full memory pressure.
-      normal.parallel = 3;
+      # The widths of the pools that run Cargo builds (normal, bulk, compile)
+      # are the bound on concurrent builds: a job takes its queue slot only
+      # when it can run. Together they admit four. On 2026-11-01 three
+      # concurrent builds plus live and background I/O kept /realm's QLC
+      # drive at 60-90% I/O pressure, and a build that waited for a place
+      # inside its slot held that slot for up to 29 minutes.
+      # Focused test builds and lane checks: two at once.
+      normal.parallel = 2;
+      # Full checks and arbitrary commands, the longest builds: one at a time.
+      bulk.parallel = 1;
       # Long-lived development dependencies must not occupy short-job capacity.
       service.parallel = 2;
       interactive.parallel = 4;
@@ -125,32 +127,20 @@ mkServiceModule {
       # yield the disk to builds and interactive work; its slice carries the
       # lowest I/O weight in the job plane.
       background.parallel = 2;
-      # Benchmarks and measurements, and full system builds: long jobs that
-      # held bulk slots while the checks gating merges queued behind them.
-      # A slot each, outside bulk, so a check never waits behind them.
+      # Measurements and full system builds: long jobs that held bulk slots
+      # while the checks gating merges queued behind them. A slot each,
+      # outside bulk. A measurement that compiles uses `measure`; restores and
+      # benchmarks of prebuilt binaries use `measure_run`.
       measure.parallel = 1;
       system-build.parallel = 1;
       # Rust type and lint checks of a lane's change (`compile`, Clippy)
-      # write only metadata and take 1-4 minutes. In their own pool, outside
-      # the cargo cap, they never wait behind test builds or for a pause of
-      # `normal` and `bulk`, so a head is known to compile before it is
-      # pushed or sent to a cloud check.
-      compile.parallel = 2;
+      # write only metadata and take 1-4 minutes. In their own pool they
+      # never wait behind test builds or for a pause of `normal` and `bulk`,
+      # so a head is known to compile before it is pushed or sent to a cloud
+      # check.
+      compile.parallel = 1;
     };
     description = "Each pueue group's width and cross-pool admission policy.";
-  };
-
-  extraOptions.caps = lib.mkOption {
-    type = lib.types.attrsOf lib.types.ints.positive;
-    default = {
-      # Cargo builds across every pool. Five concurrent -j16 builds on this
-      # 31 GiB host (2026-10-25) ran into memory pressure; oomd killed checks
-      # after 21-54 minutes and others hit their timeouts. Three at -j8
-      # (CARGO_BUILD_JOBS in each project) fit the job plane's 17G: on
-      # 2026-10-27 two left the plane at 8 GiB while ~30 build jobs queued.
-      cargo = 3;
-    };
-    description = "Cross-pool caps: how many jobs whose operation names each cap run at once, whichever pools they queue in.";
   };
 
   extraOptions.masterBaselines = lib.mkOption {
@@ -189,7 +179,6 @@ mkServiceModule {
           private_project_catalog = config.sinnix.projects.privateCatalogFile;
           event_spool = eventSpool;
           agentctl = "${scriptPkgs.agentctl}/bin/agentctl";
-          inherit (cfg) caps;
           pools = lib.mapAttrs (
             _name: pool:
             {

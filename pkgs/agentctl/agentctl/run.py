@@ -75,8 +75,6 @@ USER_BUS_CONNECTION_REFUSED = (
     b"Failed to connect to user scope bus via local transport: Connection refused"
 )
 UNIT_OBSERVATION_GRACE_SECONDS = 10
-# How often a job waiting for a place under a cross-pool cap looks again.
-CAP_POLL_SECONDS = 2.0
 # Every running job's wrapper polls its unit through the user manager. A fixed
 # 50 ms poll is 20 `systemctl show` calls a second per job; with two dozen jobs
 # that saturates the manager, which then never dispatches queued unit starts.
@@ -848,152 +846,6 @@ def _mask_logs(paths: Sequence[Path], values: tuple[bytes, ...]) -> None:
             atomic_publish(path, masked, fsync=True, mode=0o600)
 
 
-def _cap_limit(launch: Mapping[str, Any], log: Any) -> tuple[Path, int] | None:
-    """The lock directory and width of the cap this job names, from the host
-    configuration as it is now, so a changed width applies to queued jobs."""
-    name = launch.get("cap")
-    if name is None:
-        return None
-    path = launch["environment"].get("AGENTCTL_CONFIG")
-    try:
-        config = load_config(Path(path) if path else None)
-    except ConfigError as error:
-        log.write(f"cap {name!r} not applied: {error}\n".encode())
-        return None
-    limit = config.caps.get(name)
-    if limit is None:
-        log.write(
-            f"cap {name!r} not applied: the host no longer declares it\n".encode()
-        )
-        return None
-    return config.state_dir / "caps" / name, limit
-
-
-def _cap_place(directory: Path, limit: int, ticket: Path) -> Any | None:
-    """Check tickets and places while the caller holds the counter lock."""
-    # A waiter whose ticket vanished (the caps directory cleaned mid-wait)
-    # keeps its number rather than failing or jumping the queue.
-    if not ticket.exists():
-        atomic_publish(ticket, str(os.getpid()).encode(), fsync=False, mode=0o600)
-    tickets = []
-    for path in directory.glob("*.ticket"):
-        pid = int(path.read_text())
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            path.unlink()
-            continue
-        except PermissionError:
-            pass
-        tickets.append(path)
-    tickets.sort(key=lambda path: int(path.stem))
-
-    # Places above a reduced width still count until their holders leave.
-    indices = set(range(limit))
-    indices.update(
-        int(path.stem) for path in directory.glob("*.lock") if path.stem.isdecimal()
-    )
-    available = []
-    occupied = 0
-    try:
-        for index in sorted(indices):
-            handle = (directory / f"{index}.lock").open("a")
-            try:
-                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                handle.close()
-                occupied += 1
-            except BaseException:
-                handle.close()
-                raise
-            else:
-                available.append((index, handle))
-        if tickets.index(ticket) < max(0, limit - occupied):
-            for position, (index, handle) in enumerate(available):
-                if index < limit:
-                    ticket.unlink()
-                    available.pop(position)
-                    return handle
-        return None
-    finally:
-        for _, handle in available:
-            handle.close()
-
-
-def hold_cap_place(
-    directory: Path, limit: int | Callable[[], int], *, cancelled: Any, log: Any
-) -> Any | None:
-    """Admit the oldest live tickets for the free places. The open place lock
-    is released by the kernel on exit. None means the wait was cancelled."""
-    directory.mkdir(parents=True, exist_ok=True)
-    ticket = None
-    with (directory / "queue.lock").open("a") as counter:
-        try:
-            fcntl.flock(counter, fcntl.LOCK_EX)
-            count_path = directory / "counter"
-            number = int(count_path.read_text()) + 1 if count_path.exists() else 1
-            atomic_publish(count_path, str(number).encode(), fsync=False, mode=0o600)
-            ticket = directory / f"{number}.ticket"
-            atomic_publish(ticket, str(os.getpid()).encode(), fsync=False, mode=0o600)
-            fcntl.flock(counter, fcntl.LOCK_UN)
-            announced = False
-            while True:
-                if cancelled():
-                    return None
-                width = limit() if callable(limit) else limit
-                fcntl.flock(counter, fcntl.LOCK_EX)
-                try:
-                    place = _cap_place(directory, width, ticket)
-                finally:
-                    fcntl.flock(counter, fcntl.LOCK_UN)
-                if place is not None:
-                    return place
-                if not announced:
-                    log.write(
-                        f"waiting for one of the {width} places of cap {directory.name!r}\n".encode()
-                    )
-                    log.flush()
-                    announced = True
-                time.sleep(CAP_POLL_SECONDS)
-        finally:
-            if ticket is not None:
-                # Serialize removal with ticket scans by the other waiters.
-                fcntl.flock(counter, fcntl.LOCK_EX)
-                ticket.unlink(missing_ok=True)
-
-
-def _take_cap(
-    launch: Mapping[str, Any], marker: Path, log: Any
-) -> tuple[dict[str, Any] | None, Any | None]:
-    """Hold a place under the job's cap, if it names one: the outcome record's
-    `cap` entry and the held lock, whose absence means a cancelled wait."""
-    cap = _cap_limit(launch, log)
-    if cap is None:
-        return None, None
-    directory, limit = cap
-
-    def current_limit() -> int:
-        nonlocal limit
-        current = _cap_limit(launch, log)
-        if current is not None and current[0] == directory:
-            limit = current[1]
-        return limit
-
-    waited_from = time.monotonic()
-    place = hold_cap_place(
-        directory,
-        current_limit,
-        cancelled=lambda: _marker_targets(marker, launch["attempt"]),
-        log=log,
-    )
-    record = {
-        "name": directory.name,
-        "limit": limit,
-        "waited_seconds": round(time.monotonic() - waited_from, 1),
-    }
-    return record, place
-
-
 def io_pressure_refusal(
     limit: float, root: Path = Path("/proc/pressure")
 ) -> str | None:
@@ -1189,8 +1041,6 @@ def _run(
     stdout_path.parent.mkdir(parents=True, exist_ok=True)
     log_path.write_bytes(b"")
     stdout_path.write_bytes(b"")
-    cap_record: dict[str, Any] | None = None
-    cap_place: Any | None = None
     with open(log_path, "ab") as log, open(stdout_path, "ab") as stdout:
         if lost_secrets:
             log.write(
@@ -1211,16 +1061,13 @@ def _run(
                 if unit is None or pool is None:
                     outcome, status = _run_bare(argv, launch, environment, stdout, log)
                 else:
-                    cap_record, cap_place = _take_cap(launch, marker, log)
                     pressure_limit = launch.get("max_io_pressure")
                     reason = (
                         None
                         if pressure_limit is None
                         else io_pressure_refusal(float(pressure_limit))
                     )
-                    if cap_record is not None and cap_place is None:
-                        outcome, status = Outcome.CANCELLED, CANCELLED_EXIT_CODE
-                    elif reason is not None:
+                    if reason is not None:
                         log.write(
                             f"refused: {reason}; measurements under load are not "
                             "valid, so start it again when the host is quiet\n".encode()
@@ -1308,8 +1155,6 @@ def _run(
                 log.write(
                     f"timed out after {launch['timeout_seconds']} seconds\n".encode()
                 )
-    if cap_place is not None:
-        cap_place.close()
     with (_attempt_root_for_marker(marker) / ".allocation.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if _marker_targets(marker, launch["attempt"]):
@@ -1357,8 +1202,6 @@ def _run(
     request = artifacts.cancellation(declared_log_path, launch["attempt"])
     if request:
         record["cancellation"] = request
-    if cap_record is not None:
-        record["cap"] = cap_record
     if scratch_dir is not None:
         # Measured now, while the unit has exited and nothing else writes
         # there; the record outlives the directory, which goes with the job.

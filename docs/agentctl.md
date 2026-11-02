@@ -241,21 +241,9 @@ A single-slot pool checks its slice before starting: a unit left by a dead
 wrapper whose task is terminal is stopped; a live one ends the run as
 `slot_occupied`.
 
-**Caps.** `sinnix.services.agentctl.caps` declares cross-pool caps, rendered
-as `caps` in the configuration; `cargo = 3` bounds Cargo builds across
-`normal` and `bulk`. An operation naming a cap waits, after it leaves the
-queue and before its unit starts, for one of the cap's places (a lock under
-`<state_dir>/caps/<name>/`); the wait holds the job's pool slot, does not count
-against its timeout, is logged once, and is recorded in the outcome as `cap`.
-Waiters receive increasing tickets under a shared lock. With k free places,
-only the k oldest live tickets may acquire a place; later polling cannot
-overtake them. Each ticket holds the wrapper's pid and is removed on admission,
-cancellation, or an exception. Admission checks remove tickets whose pids no
-longer exist. The numbered place locks are released by the kernel on exit.
-`job start` refuses a cap the host does not declare. The width is read when
-the job starts and on each admission check, so a changed declaration applies
-to queued and waiting jobs. A reduction leaves existing holders running and
-counts their places until they finish, including places above the new width.
+**Concurrent builds.** The widths of the pools that run Cargo builds
+(`normal` 2, `bulk` 1, `compile` 1) bound how many run at once, so a job
+takes its queue slot only when it can run; no job waits inside its slot.
 
 The complete pressure tick, including adaptive widths and admission hold
 release, has a 20-second wall-clock deadline inside the unit's 30-second
@@ -288,8 +276,7 @@ minute.
   one-slot `measure` pool and full system builds in the one-slot
   `system-build` pool, so neither holds a `bulk` slot a check is waiting for.
 - **Rust type and lint checks** (the Rust projects' `compile` operations and
-  their Clippy operations) run in the two-slot `compile` pool without the
-  cargo cap. They write only
+  their Clippy operations) run in the one-slot `compile` pool. They write only
   metadata, so they neither wait behind test builds nor stop when `normal`
   and `bulk` are paused, and a lane learns within minutes whether its head
   compiles.
@@ -447,7 +434,6 @@ pool = "bulk"
 result = "exit"
 timeout_seconds = 1200
 scratch = "tmpfs"
-cap = "cargo"
 unit_properties = ["MemoryHigh=8G"]
 ```
 
@@ -468,7 +454,6 @@ generation; reboot remains a separate action.
 | `checkout`            | `any` (the caller's `--workspace` or the project root) or `default` (the project root only)              |
 | `cache`               | `none`, or `tree+environment` to answer a request from an active or successful job with the same clean content tree, environment and arguments, in any checkout of the project and at any commit; after the queue entry is cleaned, its retained outcome still answers (`<state_dir>/results/` maps each request key to its newest job) |
 | `scratch`             | `none`, `tmpfs` or `nvme`                                                                                |
-| `cap`                 | a host-declared cross-pool cap (`caps`) the job holds a place under while its unit runs                  |
 | `max_io_pressure`     | refuse to start (exit 125) while host I/O `full avg60` exceeds this percentage; for measurements         |
 | `priority`            | -100 to 100, default 0: within its pool pueue starts a higher priority first, so short compile checks pass queued test runs |
 | `admission`           | `{ memory_mib }`: the expected footprint, exported as `AGENTCTL_ADMISSION_MEMORY_MIB`. It is not a limit |

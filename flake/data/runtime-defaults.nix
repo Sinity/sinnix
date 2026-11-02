@@ -493,7 +493,7 @@ rec {
         # starved behind an idle desktop and the coordinator's own polls.
         CPUWeight = 90;
         IOWeight = 100;
-        # Builds (two at 5-8 GiB under the cargo cap) plus the codex pool.
+        # Builds (up to four at 5-8 GiB, by pool width) plus the codex pool.
         MemoryHigh = "17G";
         MemoryMax = "19G";
         # Bounded swap for the plane as a whole. With none, a job at its
@@ -623,8 +623,8 @@ rec {
       # and swaps its own pages before the hard cap; equal limits with no swap
       # made bulk drop and re-read its page cache instead (4.86 TiB of
       # refaults in one uptime), and an 80M read cap made each re-read slow.
-      # Cargo builds peak at 5-8 GiB each; the cargo cap admits two across
-      # pools, and this slice holds them up to the plane's ceiling. At 8G/10G
+      # Cargo builds peak at 5-8 GiB each, and this slice holds them up to
+      # the plane's ceiling. At 8G/10G
       # two concurrent checks reclaimed against each other until oomd killed
       # one after 53 minutes (2026-10-25).
       agent-ctl-bulk = {
