@@ -449,6 +449,7 @@ in
         # Benchmarks and system builds never occupy the bulk slots checks use.
         assert lib.assertMsg (
           declaredPools.measure.parallel == 1 && declaredPools.system-build.parallel == 1
+          && declaredPools.measure.exclusiveWith == [ "normal" "bulk" ]
         ) "measurements and system builds each run in a one-slot pool of their own";
         assert lib.assertMsg (
           declaredPools ? compile && poolSlices ? agent-ctl-compile

@@ -1270,6 +1270,32 @@ def test_each_pool_with_a_declared_slice_runs_in_it(
     assert f"--slice=agent-ctl-{pool}.slice" in fake_systemd.run_argv()
 
 
+def test_measure_units_are_the_last_choice_for_the_oom_killers(
+    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue
+) -> None:
+    fake_pueue.groups["measure"] = 1
+    launch = write_launch(tmp_path, pool="measure")
+
+    assert main([str(launch)]) == 0
+
+    argv = fake_systemd.run_argv()
+    assert "ManagedOOMPreference=avoid" in argv
+    assert "OOMScoreAdjust=100" in argv
+    assert "OOMScoreAdjust=900" not in argv
+
+
+def test_build_units_rank_first_for_the_oom_killers(
+    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue
+) -> None:
+    launch = write_launch(tmp_path, pool="normal")
+
+    assert main([str(launch)]) == 0
+
+    argv = fake_systemd.run_argv()
+    assert "OOMScoreAdjust=900" in argv
+    assert "ManagedOOMPreference=avoid" not in argv
+
+
 def test_output_larger_than_eight_mb_is_preserved_completely(tmp_path: Path) -> None:
     launch = write_launch(
         tmp_path, argv=["sh", "-c", f"yes x | head -c {MAX_LOG_BYTES * 3}"]

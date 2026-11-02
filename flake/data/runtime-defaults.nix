@@ -722,6 +722,12 @@ rec {
         IOAccounting = true;
         CPUWeight = 100;
         IOWeight = 100;
+        # No MemoryLow: under recursive protection a child's low is bounded by
+        # its ancestors', and the user manager's 15G is claimed in full by
+        # the desktop and live slices, so it would be inert. Measurements are
+        # protected instead by running with the build pools drained
+        # (`exclusiveWith`) and by agentctl marking their units as oomd's
+        # last choice.
         MemoryHigh = "12G";
         MemoryMax = "14G";
         MemorySwapMax = "2G";
