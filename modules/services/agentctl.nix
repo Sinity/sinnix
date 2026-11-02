@@ -131,17 +131,7 @@ mkServiceModule {
       # while the checks gating merges queued behind them. A slot each,
       # outside bulk. A measurement that compiles uses `measure`; restores and
       # benchmarks of prebuilt binaries use `measure_run`.
-      # A measurement or rehearsal runs with the build pools drained: it
-      # waits for their running and queued work, and holds new builds until
-      # it ends. On 2026-11-02 systemd-oomd killed a rehearsal 46 minutes in
-      # under memory pressure from concurrent builds.
-      measure = {
-        parallel = 1;
-        exclusiveWith = [
-          "normal"
-          "bulk"
-        ];
-      };
+      measure.parallel = 1;
       system-build.parallel = 1;
       # Rust type and lint checks of a lane's change (`compile`, Clippy)
       # write only metadata and take 1-4 minutes. In their own pool they
