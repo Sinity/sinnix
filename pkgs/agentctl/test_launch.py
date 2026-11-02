@@ -2343,3 +2343,27 @@ def test_without_a_default_branch_descriptor_the_lane_pool_stands(
     started = launch.start_operation(config, project, project.operation("check"))
 
     assert fake_pueue.task(started["task_id"]).group == "normal"
+
+
+def test_a_lane_descriptor_without_a_workspace_table_reads_origin_master(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    git = ["git", "-C", str(project_root), "-c", "user.name=f", "-c", "user.email=f@x"]
+    descriptor = project_root / ".agentctl/project.toml"
+    text = descriptor.read_text()
+    start = text.index("[workspace]")
+    end = text.index("[operations.", start)
+    lane = text[:start] + text[end:]
+    subprocess.run([*git[:3], "init", "-q", "-b", "master"], check=True)
+    descriptor.write_text(lane.replace('pool = "normal"', 'pool = "compile"', 1))
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "commit", "-qm", "master"], check=True)
+    subprocess.run([*git, "update-ref", "refs/remotes/origin/master", "HEAD"], check=True)
+    descriptor.write_text(lane)
+    fake_pueue.groups["compile"] = 1
+    project = load_project_adapter(project_root)
+    assert project.workspace is None
+
+    started = launch.start_operation(config, project, project.operation("check"))
+
+    assert fake_pueue.task(started["task_id"]).group == "compile"

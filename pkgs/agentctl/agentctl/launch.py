@@ -708,16 +708,15 @@ def default_branch_pool(project: ProjectAdapter, operation: str) -> str | None:
     Pool placement is host scheduling policy, so it follows the merged
     descriptor rather than whatever a lane's branch carried when it was cut;
     the branch keeps defining the command and its arguments. None when the
-    project names no default base, the base has no descriptor, or it does not
-    declare the operation.
+    base has no descriptor or it does not declare the operation. A descriptor
+    without a `[workspace]` table takes `origin/master`.
     """
-    if project.workspace is None:
-        return None
+    base = project.workspace.default_base if project.workspace else "origin/master"
     try:
         raw = gitcmd.git(
             project.root,
             "show",
-            f"{project.workspace.default_base}:.agentctl/project.toml",
+            f"{base}:.agentctl/project.toml",
             error=job_queries.JobError,
         )
         declared = tomllib.loads(raw)["operations"][operation]["pool"]
