@@ -523,7 +523,10 @@ declares these units:
   checkout's own `baseline` operation using `--project CHECKOUT`, with that
   same checkout as `--workspace`. Its descriptor supplies the environment and
   operation limits; its ProjectID must match the registered project. A failed
-  launch leaves the head unmarked for the next scheduled attempt. Lanes read the newest
+  launch leaves the head unmarked for the next scheduled attempt. A head whose
+  job was cancelled before it ran, lost, or not recorded is queued again at
+  priority -50, behind the rest of its pool; a passing, failing, timed-out or
+  refused baseline stands until the branch moves. Lanes read the newest
   `<project>:baseline` job to learn whether a failure is already on master;
   its warm target seeds new checkouts' targets (`docs/worktree-cleanup.md`).
 

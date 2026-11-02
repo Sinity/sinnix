@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Evict Cargo targets whose checkout is gone, idle beyond the age budget, or least recently used under filesystem pressure
-# runtimeInputs: bash coreutils findutils gawk util-linux
+# runtimeInputs: bash coreutils findutils gawk git util-linux
 set -euo pipefail
 
 # Budgets come from deployment config (sinnix.features.dev.languages.cargoCache).
@@ -77,7 +77,15 @@ for entry in "$dir"/*/; do
     [ "$idle" -ge "$min_idle_seconds" ] && evict "$entry" "checkout removed" || true
     continue
   fi
-  if [ "$idle" -ge "$max_idle_seconds" ]; then
+  # A repository's master-baseline target seeds its new checkouts
+  # (sinnix-cargo-target) and is rebuilt only when the default branch moves,
+  # so a quiet branch does not make it idle; filesystem pressure still can.
+  baseline=0
+  if [ -n "$checkout" ] && [ -e "$checkout/.git" ] \
+    && [ "$(git -C "$checkout" config --get sinnix.baselineCheckout 2>/dev/null || true)" = "$checkout" ]; then
+    baseline=1
+  fi
+  if [ "$baseline" = 0 ] && [ "$idle" -ge "$max_idle_seconds" ]; then
     evict "$entry" "idle $((idle / 86400))d" || true
     continue
   fi

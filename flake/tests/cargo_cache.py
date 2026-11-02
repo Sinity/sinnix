@@ -340,6 +340,14 @@ class CargoCache(unittest.TestCase):
         self.assertTrue((target / "debug" / "deps" / "libold.rlib").exists())
         self.assertFalse((target / "debug" / "deps" / "libnew.rlib").exists())
 
+        # Without a baseline, the newest target of any lock seeds it: the two
+        # resolutions still share most dependency artifacts.
+        subprocess.run([*git, "config", "--unset", "sinnix.baselineCheckout"], check=True)
+        third = worktree("third-lane")
+        (third / "Cargo.lock").write_text("third resolution\n")
+        target = select_in(third)
+        self.assertTrue((target / "debug" / "deps" / "libbusy.rlib").exists())
+
     def test_busy_baseline_does_not_block_a_new_target(self):
         import fcntl
 
@@ -519,6 +527,23 @@ class CargoCache(unittest.TestCase):
             ],
             [],
         )
+
+    def test_eviction_keeps_the_idle_master_baseline_target(self):
+        self.provision()
+        baseline = self.root / "baseline"
+        subprocess.run(["git", "init", "-q", str(baseline)], check=True)
+        subprocess.run(
+            ["git", "-C", str(baseline), "config", "sinnix.baselineCheckout", str(baseline)],
+            check=True,
+        )
+        seed = self.make_target(baseline, idle_hours=100)
+        lane = self.make_target(self.checkout.resolve(), idle_hours=100)
+        self.evict()
+        self.assertTrue(seed.exists())
+        self.assertFalse(lane.exists())
+        # Filesystem pressure still removes it.
+        self.evict(use_percent_per_target=10, max_use_percent=5)
+        self.assertFalse(seed.exists())
 
     def test_pressure_evicts_least_recently_used_idle_targets_first(self):
         self.provision()

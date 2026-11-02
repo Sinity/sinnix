@@ -36,9 +36,12 @@ extents and Cargo reuses the dependency artifacts. Sources are tried in order:
 up to three other worktrees of the repository whose `Cargo.lock` is identical
 to the new checkout's, most recently built first, then the repository's
 master-baseline checkout (Git config `sinnix.baselineCheckout`, which
-`sinnix-master-baseline` sets). Lanes branch from an integration head that the
+`sinnix-master-baseline` sets), then up to three other worktrees of any lock,
+most recently built first. Lanes branch from an integration head that the
 default branch may trail by many dependency changes, so a same-lock lane is
-the warmer seed. A source whose build lock is held is skipped.
+the warmer seed; a target of another lock still holds every dependency the
+two resolutions share, and Cargo rebuilds only the rest. A source whose build
+lock is held is skipped.
 With incremental compilation disabled, seeding prunes
 every profile's `incremental/` tree,
 including cross-compilation profiles. Cargo test scratch in `target/tmp/`
@@ -56,7 +59,9 @@ Cargo build locks is held or within `minIdleHours` of use. It removes:
 
 - a target whose marked checkout no longer has `.git`;
 - a target idle longer than `maxIdleDays` (unmarked targets fall under this
-  rule only);
+  rule only), except a repository's master-baseline target, which seeds new
+  checkouts and is rebuilt only when the default branch moves (filesystem
+  pressure still removes it);
 - while the cache filesystem is fuller than `maxFilesystemUsePercent`, idle
   targets least recently used first, rereading usage after each committed
   removal. Targets share reflinked extents, so the filesystem's usage, not a

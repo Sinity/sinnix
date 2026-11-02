@@ -33,11 +33,14 @@ target="$(target_of "$checkout")"
 # seed is another worktree of this repository resolved from the same
 # Cargo.lock: lanes branch from one integration head, which the default
 # branch's baseline may trail by many dependency changes. The most recently
-# built of those comes first; the master-baseline target
-# (`sinnix.baselineCheckout`, set by sinnix-master-baseline) is the fallback.
-# Cargo's build lock on a source is held for its copy, so no build writes it
-# meanwhile; a busy source is skipped. Seeding is optional: with no idle seed
-# or no reflinks the target starts empty, without delaying shell entry.
+# built of those comes first, then the master-baseline target
+# (`sinnix.baselineCheckout`, set by sinnix-master-baseline). Without either,
+# the most recently built target of any other worktree still holds every
+# dependency the two lock files agree on; Cargo rebuilds only the rest, where
+# an empty target rebuilds all of them. Cargo's build lock on a source is held
+# for its copy, so no build writes it meanwhile; a busy source is skipped.
+# Seeding is optional: with no idle seed or no reflinks the target starts
+# empty, without delaying shell entry.
 seed_from() {
   local seed="$1"
   staging="$(mktemp -d "$target.seed.XXXXXX")"
@@ -66,29 +69,34 @@ staging=""
 trap '[ -z "$staging" ] || rm -rf -- "$staging"' EXIT
 
 if [ ! -e "$target" ]; then
-  candidates=()
-  lock="$checkout/Cargo.lock"
-  if [ -f "$lock" ]; then
-    size="$(stat -c %s "$lock")"
-    while IFS= read -r other; do
-      [ -d "$other" ] || continue
-      other="$(realpath "$other")"
-      [ "$other" != "$checkout" ] && [ -f "$other/Cargo.lock" ] || continue
-      seed="$(target_of "$other")"
-      [ -d "$seed/debug" ] || continue
-      [ "$(stat -c %s "$other/Cargo.lock")" = "$size" ] && cmp -s "$other/Cargo.lock" "$lock" || continue
-      candidates+=("$(stat -c %Y "$seed/debug") $other")
-    done < <(git worktree list --porcelain | sed -n 's/^worktree //p')
-  fi
-  ordered=()
-  if [ "${#candidates[@]}" -gt 0 ]; then
-    while IFS= read -r line; do ordered+=("${line#* }"); done \
-      < <(printf '%s\n' "${candidates[@]}" | sort -rn | head -n 3)
-  fi
   baseline="$(git config --get sinnix.baselineCheckout || true)"
   if [ -n "$baseline" ] && [ -d "$baseline" ]; then
-    ordered+=("$(realpath "$baseline")")
+    baseline="$(realpath "$baseline")"
+  else
+    baseline=""
   fi
+  same_lock=()
+  other_lock=()
+  lock="$checkout/Cargo.lock"
+  while IFS= read -r other; do
+    [ -d "$other" ] || continue
+    other="$(realpath "$other")"
+    [ "$other" != "$checkout" ] && [ "$other" != "$baseline" ] || continue
+    seed="$(target_of "$other")"
+    [ -d "$seed/debug" ] || continue
+    if [ -f "$lock" ] && [ -f "$other/Cargo.lock" ] && cmp -s "$other/Cargo.lock" "$lock"; then
+      same_lock+=("$(stat -c %Y "$seed/debug") $other")
+    else
+      other_lock+=("$(stat -c %Y "$seed/debug") $other")
+    fi
+  done < <(git worktree list --porcelain | sed -n 's/^worktree //p')
+  newest() { [ "$#" -gt 0 ] && printf '%s\n' "$@" | sort -rn | head -n 3 | cut -d' ' -f2-; }
+  ordered=()
+  while IFS= read -r line; do [ -n "$line" ] && ordered+=("$line"); done \
+    < <(newest ${same_lock[@]+"${same_lock[@]}"})
+  [ -z "$baseline" ] || ordered+=("$baseline")
+  while IFS= read -r line; do [ -n "$line" ] && ordered+=("$line"); done \
+    < <(newest ${other_lock[@]+"${other_lock[@]}"})
   mkdir -p "$(dirname "$target")"
   for source in ${ordered[@]+"${ordered[@]}"}; do
     seed="$(target_of "$source")"

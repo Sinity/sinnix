@@ -36,9 +36,24 @@ if [ ! -e "$checkout" ]; then
 fi
 git -C "$root" config sinnix.baselineCheckout "$checkout"
 
+# The stamp names the head and the job queued for it. A job cancelled before
+# it ran (typically to give its slot to a landing check), lost, or not
+# recorded warmed nothing, so the head is queued again, behind all other
+# work in its pool, which is what a deferral asks for. A launch the host
+# refused would be refused again; it and a passing, failing or timed-out
+# baseline stand until the branch moves.
 stamp="$(git -C "$checkout" rev-parse --path-format=absolute --git-path baseline-head)"
-if [ "$(cat "$stamp" 2>/dev/null || true)" = "$head" ]; then
-  exit 0
+priority=()
+read -r stamped_head stamped_job 2>/dev/null <"$stamp" || true
+if [ "${stamped_head:-}" = "$head" ]; then
+  phase=""
+  if [ -n "${stamped_job:-}" ]; then
+    phase="$("$agentctl" job get 0 --job-id "$stamped_job" --json 2>/dev/null | jq -r '.phase // empty' || true)"
+  fi
+  case "$phase" in
+    "" | unknown | cancelled | vanished) priority=(--priority -50) ;;
+    *) exit 0 ;;
+  esac
 fi
 git -C "$checkout" checkout --quiet --detach "$head"
 # The execution directory does not select its descriptor. Resolve the moved
@@ -48,6 +63,6 @@ if ! jq -e --arg id "$(jq -r '.id' <<<"$descriptor")" '.id == $id' <<<"$selected
   echo "$checkout declares a different project ID than $project" >&2
   exit 1
 fi
-"$agentctl" job start --project "$checkout" baseline --workspace "$checkout" >/dev/null
-printf '%s\n' "$head" >"$stamp"
+job="$("$agentctl" job start --project "$checkout" baseline --workspace "$checkout" ${priority[@]+"${priority[@]}"} --json | jq -r '.job_id')"
+printf '%s %s\n' "$head" "$job" >"$stamp"
 echo "queued $project baseline at $head"

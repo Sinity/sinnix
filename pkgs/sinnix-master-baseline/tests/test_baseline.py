@@ -56,6 +56,12 @@ def world(tmp_path: Path) -> dict:
         "        sys.exit(failure)\n"
         f"    with open({str(started)!r}, 'a') as output:\n"
         "        output.write(json.dumps(args) + '\\n')\n"
+        f"    print(json.dumps({{'job_id': 'baseline-' + str(len(open({str(started)!r}).readlines()))}}))\n"
+        "elif args[:2] == ['job', 'get']:\n"
+        "    phase = os.environ.get('BASELINE_JOB_PHASE', 'succeeded')\n"
+        "    if phase == 'lookup-fails':\n"
+        "        sys.exit(1)\n"
+        "    print(json.dumps({'job_id': args[args.index('--job-id') + 1], 'phase': phase}))\n"
         "else:\n"
         "    sys.exit(9)\n"
     )
@@ -103,6 +109,7 @@ def test_a_new_head_is_queued_once_in_the_reserved_checkout(world: dict) -> None
             "baseline",
             "--workspace",
             str(checkout),
+            "--json",
         ]
     ]
     assert git("config", "--get", "sinnix.baselineCheckout", cwd=world["root"]) == str(
@@ -166,7 +173,10 @@ def test_a_refused_launch_does_not_stamp_the_head_or_suppress_the_next_attempt(
     assert started(world) == []
     del world["env"]["BASELINE_START_FAIL"]
     baseline(world)
-    assert stamp.read_text().strip() == git("rev-parse", "HEAD", cwd=world["checkout"])
+    assert stamp.read_text().split() == [
+        git("rev-parse", "HEAD", cwd=world["checkout"]),
+        "baseline-1",
+    ]
     baseline(world)
     assert len(started(world)) == 1
 
@@ -187,3 +197,47 @@ def test_a_checkout_cannot_queue_a_different_project_identity(world: dict) -> No
         )
     )
     assert not stamp.exists()
+
+
+@pytest.mark.parametrize(
+    ("phase", "queued_again"),
+    [
+        ("succeeded", False),
+        ("failed", False),
+        ("timeout", False),
+        ("running", False),
+        ("refused", False),
+        ("launch-failed", False),
+        ("cancelled", True),
+        ("vanished", True),
+        ("unknown", True),
+        ("lookup-fails", True),
+    ],
+)
+def test_a_head_whose_baseline_never_ran_is_queued_again_behind_other_work(
+    world: dict, phase: str, queued_again: bool
+) -> None:
+    baseline(world)
+    world["env"]["BASELINE_JOB_PHASE"] = phase
+    baseline(world)
+    runs = started(world)
+    assert len(runs) == (2 if queued_again else 1)
+    assert "--priority" not in runs[0]
+    if queued_again:
+        assert runs[1][runs[1].index("--priority") + 1] == "-50"
+
+
+def test_a_stamp_without_a_job_is_queued_again(world: dict) -> None:
+    baseline(world)
+    stamp = Path(
+        git(
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            "baseline-head",
+            cwd=world["checkout"],
+        )
+    )
+    stamp.write_text(stamp.read_text().split()[0] + "\n")
+    baseline(world)
+    assert len(started(world)) == 2
