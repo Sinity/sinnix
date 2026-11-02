@@ -150,125 +150,22 @@ class CargoCache(unittest.TestCase):
         )
         self.assertFalse(Path(explicit["CARGO_TARGET_DIR"]).exists())
 
-    def test_a_new_checkout_is_seeded_from_the_baseline_target(self):
+    LOCK = (
+        "[[package]]\n"
+        'name = "dep"\n'
+        'version = "1.0.0"\n'
+        'source = "registry+https://github.com/rust-lang/crates.io-index"\n'
+        "\n"
+        "[[package]]\n"
+        'name = "member"\n'
+        'version = "0.1.0"\n'
+    )
+
+    def lanes(self):
+        """A repository whose worktrees select targets; returns helpers."""
         self.provision()
         # The sandbox filesystem has no reflinks; the copy itself is what
         # matters here.
-        (self.bin / "cp").write_text(
-            f'#!{shutil.which("bash")}\nargs=()\nfor a in "$@"; do '
-            '[ "$a" = --reflink=always ] || args+=("$a"); done\n'
-            f'exec "{shutil.which("cp")}" "${{args[@]}}"\n'
-        )
-        (self.bin / "cp").chmod(0o755)
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(self.checkout),
-                "-c",
-                "user.name=Fixture",
-                "-c",
-                "user.email=fixture@example.invalid",
-                "commit",
-                "-qm",
-                "fixture",
-                "--allow-empty",
-            ],
-            check=True,
-        )
-
-        def worktree(name):
-            path = self.root / name
-            subprocess.run(
-                [
-                    "git",
-                    "-C",
-                    str(self.checkout),
-                    "worktree",
-                    "add",
-                    "-q",
-                    "--detach",
-                    str(path),
-                ],
-                check=True,
-            )
-            return path
-
-        def select_in(path, **extra):
-            return Path(
-                subprocess.check_output(
-                    ["bash", str(SELECTOR)],
-                    cwd=path,
-                    env=dict(self.env, **extra),
-                    text=True,
-                ).strip()
-            )
-
-        baseline = worktree("baseline")
-        seed = select_in(baseline)
-        (seed / "debug" / "deps").mkdir(parents=True)
-        (seed / "debug" / "deps" / "libdep.rlib").write_bytes(b"compiled")
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(self.checkout),
-                "config",
-                "sinnix.baselineCheckout",
-                str(baseline),
-            ],
-            check=True,
-        )
-
-        for profile in ("debug", "release", "aarch64-unknown-linux-gnu/debug"):
-            (seed / profile / "incremental" / "session").mkdir(parents=True)
-            (seed / profile / "incremental" / "session" / "state").write_bytes(b"stale")
-        (seed / ".rustc_info.json").write_text("stale probe")
-        (seed / "tmp").mkdir()
-        (seed / "tmp" / "test-state").write_bytes(b"stale test state")
-        build_output = Path("debug/build/dependency/out/incremental")
-        (seed / build_output).mkdir(parents=True)
-        empty_output = build_output.parent / "empty"
-        (seed / empty_output).mkdir(mode=0o750)
-        (seed / build_output / "artifact").write_bytes(b"needed build output")
-        target = select_in(worktree("lane"))
-        for profile in ("debug", "release", "aarch64-unknown-linux-gnu/debug"):
-            self.assertFalse((target / profile / "incremental").exists())
-        self.assertFalse((target / "tmp").exists())
-        self.assertTrue((target / empty_output).is_dir())
-        self.assertEqual((target / empty_output).stat().st_mode & 0o777, 0o750)
-        self.assertEqual(
-            (target / build_output / "artifact").read_bytes(), b"needed build output"
-        )
-        self.assertFalse((target / ".rustc_info.json").exists())
-        self.assertTrue((target / "CACHEDIR.TAG").exists())
-        self.assertTrue((target / "debug" / ".cargo-lock").exists())
-        self.assertNotEqual(target, seed)
-        opted_in = select_in(worktree("incremental-lane"), CARGO_INCREMENTAL="1")
-        for profile in ("debug", "release", "aarch64-unknown-linux-gnu/debug"):
-            self.assertEqual(
-                (opted_in / profile / "incremental/session/state").read_bytes(),
-                b"stale",
-            )
-        self.assertFalse((opted_in / "tmp").exists())
-        self.assertFalse((opted_in / ".rustc_info.json").exists())
-        self.assertEqual(
-            (target / "debug" / "deps" / "libdep.rlib").read_bytes(), b"compiled"
-        )
-        self.assertEqual(
-            sorted(p.name for p in target.parent.iterdir()), ["checkout", "target"]
-        )
-        # An existing target is never replaced.
-        (target / "debug" / "deps" / "libdep.rlib").write_bytes(b"rebuilt")
-        self.assertEqual(select_in(self.root / "lane"), target)
-        self.assertEqual(
-            (target / "debug" / "deps" / "libdep.rlib").read_bytes(), b"rebuilt"
-        )
-
-    def test_a_worktree_on_the_same_lock_seeds_before_the_baseline(self):
-        import fcntl
-
-        self.provision()
         (self.bin / "cp").write_text(
             f'#!{shutil.which("bash")}\nargs=()\nfor a in "$@"; do '
             '[ "$a" = --reflink=always ] || args+=("$a"); done\n'
@@ -284,9 +181,9 @@ class CargoCache(unittest.TestCase):
             "-c",
             "user.email=fixture@example.invalid",
         ]
-        (self.checkout / "Cargo.lock").write_text("old resolution\n")
+        (self.checkout / "Cargo.lock").write_text(self.LOCK)
         subprocess.run([*git, "add", "Cargo.lock"], check=True)
-        subprocess.run([*git, "commit", "-qm", "old"], check=True)
+        subprocess.run([*git, "commit", "-qm", "fixture"], check=True)
 
         def worktree(name):
             path = self.root / name
@@ -295,99 +192,170 @@ class CargoCache(unittest.TestCase):
             )
             return path
 
-        def select_in(path):
+        def select_in(path, **extra):
             result = subprocess.run(
-                ["timeout", "5s", "bash", str(SELECTOR)],
+                ["timeout", "10s", "bash", str(SELECTOR)],
                 cwd=path,
-                env=self.env,
+                env=dict(self.env, **extra),
                 capture_output=True,
                 text=True,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             return Path(result.stdout.strip())
 
-        def warm(path, artifact):
-            target = select_in(path)
-            (target / "debug" / "deps").mkdir(parents=True, exist_ok=True)
-            (target / "debug" / "deps" / artifact).write_bytes(b"compiled")
-            return target
+        def baseline(path):
+            subprocess.run(
+                [*git, "config", "sinnix.baselineCheckout", str(path)], check=True
+            )
 
-        baseline = worktree("baseline")
-        warm(baseline, "libold.rlib")
-        subprocess.run(
-            [*git, "config", "sinnix.baselineCheckout", str(baseline)], check=True
+        return worktree, select_in, baseline
+
+    @staticmethod
+    def build_unit(target, unit, *, profile="debug", content=b"compiled"):
+        """Write one Cargo unit's outputs, as a build does, and return them."""
+        name, digest = unit.rsplit("-", 1)
+        crate = name.replace("-", "_")
+        root = target / profile
+        (root / ".fingerprint" / unit).mkdir(parents=True)
+        (root / ".fingerprint" / unit / f"lib-{crate}").write_text(digest)
+        (root / "deps").mkdir(exist_ok=True)
+        outputs = [
+            root / "deps" / f"lib{crate}-{digest}.rlib",
+            root / "deps" / f"{crate}-{digest}.d",
+            root / "deps" / f"{crate}-{digest}.{crate}.0.rcgu.o",
+        ]
+        for output in outputs:
+            output.write_bytes(content)
+        os.utime(root / ".fingerprint", None)
+        return [p.relative_to(target) for p in outputs]
+
+    def test_a_new_checkout_gets_the_dependency_units_of_warm_targets(self):
+        worktree, select_in, baseline = self.lanes()
+        master = worktree("master")
+        seed = select_in(master)
+        baseline(master)
+        dep = "dep-0123456789abcdef"
+        outputs = self.build_unit(seed, dep)
+        cross = self.build_unit(
+            seed, "dep-1111111111111111", profile="aarch64-unknown-linux-gnu/debug"
         )
-        (self.checkout / "Cargo.lock").write_text("new resolution\n")
-        subprocess.run([*git, "commit", "-qam", "new"], check=True)
-        warm(worktree("idle-lane"), "libnew.rlib")
-        busy = warm(worktree("busy-lane"), "libbusy.rlib")
-        os.utime(busy / "debug", (2_000_000_000, 2_000_000_000))
+        # A build script's compiled program and its run output live in
+        # build/<unit>/; an empty output directory keeps its mode.
+        script = seed / "debug" / "build" / "dep-2222222222222222"
+        (script / "out").mkdir(parents=True)
+        (script / "out" / "generated.rs").write_text("generated")
+        (script / "empty").mkdir(mode=0o750)
+        (seed / "debug" / ".fingerprint" / "dep-2222222222222222").mkdir()
+        # Path packages are fresh by mtime, so another checkout's build of
+        # them is never offered; neither is state outside the units.
+        member = self.build_unit(seed, "member-3333333333333333")
+        (seed / "debug" / "incremental" / "member-x").mkdir(parents=True)
+        (seed / "debug" / "libmember.rlib").write_bytes(b"uplifted")
+        (seed / ".rustc_info.json").write_text("stale probe")
+        (seed / "tmp").mkdir()
+        (seed / "tmp" / "test-state").write_bytes(b"stale test state")
 
-        with (busy / "debug" / ".cargo-lock").open("w") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            target = select_in(worktree("new-lane"))
-        # The newest same-lock target was busy, so the next one seeded it.
-        self.assertTrue((target / "debug" / "deps" / "libnew.rlib").exists())
-        self.assertFalse((target / "debug" / "deps" / "libbusy.rlib").exists())
+        target = select_in(worktree("lane"))
+        self.assertNotEqual(target, seed)
+        for path in [*outputs, *cross, Path("debug/build/dep-2222222222222222/out/generated.rs")]:
+            self.assertEqual((target / path).read_bytes(), (seed / path).read_bytes())
+        for unit in (dep, "dep-2222222222222222"):
+            self.assertTrue((target / "debug" / ".fingerprint" / unit).is_dir())
+        empty = target / "debug" / "build" / "dep-2222222222222222" / "empty"
+        self.assertEqual(empty.stat().st_mode & 0o777, 0o750)
+        for path in [
+            *member,
+            Path("debug/.fingerprint/member-3333333333333333"),
+            Path("debug/incremental"),
+            Path("debug/libmember.rlib"),
+            Path(".rustc_info.json"),
+            Path("tmp"),
+        ]:
+            self.assertFalse((target / path).exists(), path)
+        self.assertTrue((target / "CACHEDIR.TAG").exists())
         self.assertEqual(
             sorted(p.name for p in target.parent.iterdir()), ["checkout", "target"]
         )
 
-        # No worktree shares an edited lock: the baseline seeds it.
-        other = worktree("edited-lane")
-        (other / "Cargo.lock").write_text("edited resolution\n")
-        target = select_in(other)
-        self.assertTrue((target / "debug" / "deps" / "libold.rlib").exists())
-        self.assertFalse((target / "debug" / "deps" / "libnew.rlib").exists())
+        # A unit the target already has is never replaced.
+        (target / outputs[0]).write_bytes(b"rebuilt")
+        os.utime(seed / "debug" / ".fingerprint", None)
+        self.assertEqual(select_in(self.root / "lane"), target)
+        self.assertEqual((target / outputs[0]).read_bytes(), b"rebuilt")
 
-        # Without a baseline, the newest target of any lock seeds it: the two
-        # resolutions still share most dependency artifacts.
-        subprocess.run([*git, "config", "--unset", "sinnix.baselineCheckout"], check=True)
-        third = worktree("third-lane")
-        (third / "Cargo.lock").write_text("third resolution\n")
-        target = select_in(third)
-        self.assertTrue((target / "debug" / "deps" / "libbusy.rlib").exists())
-
-    def test_busy_baseline_does_not_block_a_new_target(self):
-        import fcntl
-
-        self.cache.mkdir()
-        (self.cache / ".subvolume").touch()
-        seed = Path(self.select().stdout.strip())
-        (seed / "debug" / "deps").mkdir(parents=True)
-        (seed / "debug" / "deps" / "active.rlib").write_bytes(b"in progress")
-        lane = self.root / "lane"
-        subprocess.run(["git", "init", "-q", str(lane)], check=True)
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(lane),
-                "config",
-                "sinnix.baselineCheckout",
-                str(self.checkout),
-            ],
-            check=True,
+    def test_a_new_generation_reaches_an_existing_target(self):
+        worktree, select_in, baseline = self.lanes()
+        master = worktree("master")
+        seed = select_in(master)
+        baseline(master)
+        self.build_unit(seed, "dep-0123456789abcdef")
+        lane = worktree("lane")
+        target = select_in(lane)
+        # Master changed its flags: every dependency has a new unit hash, and
+        # the baseline has built them. The lane's next selection adds them.
+        outputs = self.build_unit(seed, "dep-fedcba9876543210")
+        stamp = time.time() + 5
+        os.utime(seed / "debug" / ".fingerprint", (stamp, stamp))
+        select_in(lane)
+        for path in outputs:
+            self.assertTrue((target / path).exists(), path)
+        # An unchanged source is not read again: a unit removed from the
+        # lane stays removed until the source builds another one.
+        shutil.rmtree(target / "debug" / ".fingerprint" / "dep-fedcba9876543210")
+        select_in(lane)
+        self.assertFalse(
+            (target / "debug" / ".fingerprint" / "dep-fedcba9876543210").exists()
         )
+        self.build_unit(seed, "dep-aaaaaaaaaaaaaaaa")
+        os.utime(seed / "debug" / ".fingerprint", (stamp + 5, stamp + 5))
+        select_in(lane)
+        for unit in ("dep-fedcba9876543210", "dep-aaaaaaaaaaaaaaaa"):
+            self.assertTrue((target / "debug" / ".fingerprint" / unit).is_dir())
+
+    def test_recent_worktree_targets_add_units_the_baseline_lacks(self):
+        worktree, select_in, baseline = self.lanes()
+        master = worktree("master")
+        self.build_unit(select_in(master), "dep-0000000000000001")
+        baseline(master)
+        targets = {name: select_in(worktree(name)) for name in ["old", "a", "b", "c"]}
+        for i, name in enumerate(targets):
+            self.build_unit(targets[name], f"dep-{i + 2:016x}")
+            os.utime(targets[name] / "debug", (1_000_000_000 + i, 1_000_000_000 + i))
+        target = select_in(worktree("lane"))
+        have = {p.name for p in (target / "debug" / ".fingerprint").iterdir()}
+        # The baseline and the three most recently built other targets.
+        self.assertEqual(
+            have,
+            {"dep-0000000000000001", "dep-0000000000000003", "dep-0000000000000004",
+             "dep-0000000000000005"},
+        )
+
+    def test_a_busy_source_is_skipped_and_merged_once_idle(self):
+        worktree, select_in, baseline = self.lanes()
+        master = worktree("master")
+        seed = select_in(master)
+        baseline(master)
+        outputs = self.build_unit(seed, "dep-0123456789abcdef")
+        lane = worktree("lane")
         with (seed / "debug" / ".cargo-lock").open("w") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
-            result = subprocess.run(
-                ["timeout", "2s", "bash", str(SELECTOR)],
-                cwd=lane,
-                env=self.env,
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            target = Path(result.stdout.strip())
-            self.assertNotEqual(target, seed)
+            target = select_in(lane)
             self.assertTrue((target / "CACHEDIR.TAG").exists())
-            self.assertFalse((target / "debug" / "deps" / "active.rlib").exists())
-            self.assertEqual(
-                sorted(p.name for p in target.parent.iterdir()), ["checkout", "target"]
-            )
-        self.assertEqual(
-            (seed / "debug" / "deps" / "active.rlib").read_bytes(), b"in progress"
+            self.assertFalse((target / outputs[0]).exists())
+        self.assertEqual(select_in(lane), target)
+        self.assertTrue((target / outputs[0]).exists())
+        # Nor is a target written while its own build holds it.
+        self.build_unit(seed, "dep-fedcba9876543210")
+        os.utime(seed / "debug" / ".fingerprint", (time.time() + 5,) * 2)
+        with (target / "debug" / ".cargo-lock").open("w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            select_in(lane)
+        self.assertFalse(
+            (target / "debug" / ".fingerprint" / "dep-fedcba9876543210").exists()
+        )
+        select_in(lane)
+        self.assertTrue(
+            (target / "debug" / ".fingerprint" / "dep-fedcba9876543210").exists()
         )
 
     def test_selection_needs_no_privileged_tree_search(self):
@@ -509,10 +477,11 @@ class CargoCache(unittest.TestCase):
         lock = (busy / "target" / "debug" / ".cargo-lock").open()
         self.addCleanup(lock.close)
         fcntl.flock(lock, fcntl.LOCK_EX)
-        seeding = self.cache / str(os.getuid()) / ("f" * 32)
-        (seeding / "target.seed.fixture").mkdir(parents=True)
+        # A new entry whose target is not yet marked is recent by its own mtime.
+        fresh = self.cache / str(os.getuid()) / ("f" * 32)
+        (fresh / "target").mkdir(parents=True)
         output = self.evict().stdout
-        self.assertTrue(seeding.exists())
+        self.assertTrue(fresh.exists())
         self.assertTrue(kept.exists())
         self.assertFalse(orphan.exists())
         self.assertTrue(recent_orphan.exists())

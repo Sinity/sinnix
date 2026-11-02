@@ -30,24 +30,32 @@ inherited target through `nix develop --command`. Devkit resolves Cargo's actual
 target for test/report handling. Durable run history, Sinex service/test state
 and independently retained historical binaries keep their current owners.
 
-A checkout's first selection seeds its new target with a reflink copy of a
-warm one, taken while holding Cargo's build lock on the source, so it shares
-extents and Cargo reuses the dependency artifacts. Sources are tried in order:
-up to three other worktrees of the repository whose `Cargo.lock` is identical
-to the new checkout's, most recently built first, then the repository's
-master-baseline checkout (Git config `sinnix.baselineCheckout`, which
-`sinnix-master-baseline` sets), then up to three other worktrees of any lock,
-most recently built first. Lanes branch from an integration head that the
-default branch may trail by many dependency changes, so a same-lock lane is
-the warmer seed; a target of another lock still holds every dependency the
-two resolutions share, and Cargo rebuilds only the rest. A source whose build
-lock is held is skipped.
-With incremental compilation disabled, seeding prunes
-every profile's `incremental/` tree,
-including cross-compilation profiles. Cargo test scratch in `target/tmp/`
-and `.rustc_info.json` are always omitted before copying. Build-script output directories remain reusable.
-Disabled incremental state and checkout-specific compiler probes are regenerated.
-Without reflinks or an idle warm source, the target starts empty. The selector writes the target's
+Every selection adds to the target, by reflink, the dependency units it
+lacks. Cargo names each unit's outputs (`<profile>/.fingerprint/<package>-<hash>`,
+`build/<package>-<hash>`, `deps/*-<hash>*`) by a hash of everything that decides
+them: package source and version, features, profile, flags and toolchain. A
+unit another target built is therefore exactly the one this target would build.
+Sources are the repository's master-baseline checkout (Git config
+`sinnix.baselineCheckout`, which `sinnix-master-baseline` sets), then the three
+most recently built targets of other worktrees. A new checkout starts with every
+dependency warm. When a rebase brings a profile, flag or toolchain change, the
+lane's next job finds the new generation that the baseline already built, instead
+of recompiling about 600 dependencies.
+
+Only units of registry and Git packages are added. Units of path packages (those
+without `source` in either `Cargo.lock`: workspace members and local patches) are
+never copied. Cargo treats them as fresh when their dep-info is newer than their
+sources, so a copy built in another checkout after this one's files were written
+would pass for current code that differs. A source is read, and the target
+written, only while each one's Cargo lock (`<profile>/.cargo-lock`) is free; a
+busy one is retried at the next selection. A unit's outputs are copied before
+its fingerprint, so an interrupted copy leaves units Cargo rebuilds. Units already
+present are never replaced. Per source and profile, `.sinnix-merged/` in the
+target records the source's `.fingerprint` mtime at the last complete merge, so a
+selection reads a source again only after it has built a new unit.
+Incremental state, uplifted outputs, Cargo test scratch in `target/tmp/` and
+`.rustc_info.json` belong to no unit and are never copied.
+Without reflinks or an idle source the target keeps what it has. The selector writes the target's
 `CACHEDIR.TAG` (Cargo tags only a target directory it creates, and this one
 exists first), and on every selection rewrites `checkout` beside the target
 with the checkout path. That marker's mtime is the target's last selection.
@@ -59,8 +67,8 @@ Cargo build locks is held or within `minIdleHours` of use. It removes:
 
 - a target whose marked checkout no longer has `.git`;
 - a target idle longer than `maxIdleDays` (unmarked targets fall under this
-  rule only), except a repository's master-baseline target, which seeds new
-  checkouts and is rebuilt only when the default branch moves (filesystem
+  rule only), except a repository's master-baseline target, which supplies
+  other targets' dependency units and is rebuilt only when the default branch moves (filesystem
   pressure still removes it);
 - while the cache filesystem is fuller than `maxFilesystemUsePercent`, idle
   targets least recently used first, rereading usage after each committed
@@ -78,7 +86,6 @@ unit and effective target from a real declared job. Existing target leases remai
 explicit until their owners release them.
 
 Managed sessions and Cargo direnv environments default to `CARGO_INCREMENTAL=0`.
-An explicit `CARGO_INCREMENTAL=1` enables incremental rebuilds and preserves
-profile incremental state in new seeds. Declared AgentCTL operation values
+An explicit `CARGO_INCREMENTAL=1` enables incremental rebuilds. Declared AgentCTL operation values
 still take precedence over inherited values. Workspace manifests own debuginfo
 settings.

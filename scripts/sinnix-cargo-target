@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Select an isolated compiler target in the provisioned Realm cache subvolume
-# runtimeInputs: bash coreutils diffutils findutils git gnused util-linux
+# runtimeInputs: bash coreutils findutils gawk git gnused util-linux
 set -euo pipefail
 
 if [ -n "${CARGO_TARGET_DIR:-}" ]; then
@@ -27,87 +27,120 @@ checkout="$(git rev-parse --show-toplevel)"
 checkout="$(realpath "$checkout")"
 # Different checkouts keep independent writable targets, even on one branch.
 target="$(target_of "$checkout")"
+mkdir -p "$target"
 
-# A new target starts as a reflink copy of a warm one, so Cargo reuses the
-# dependency artifacts (they do not depend on the checkout path). The best
-# seed is another worktree of this repository resolved from the same
-# Cargo.lock: lanes branch from one integration head, which the default
-# branch's baseline may trail by many dependency changes. The most recently
-# built of those comes first, then the master-baseline target
-# (`sinnix.baselineCheckout`, set by sinnix-master-baseline). Without either,
-# the most recently built target of any other worktree still holds every
-# dependency the two lock files agree on; Cargo rebuilds only the rest, where
-# an empty target rebuilds all of them. Cargo's build lock on a source is held
-# for its copy, so no build writes it meanwhile; a busy source is skipped.
-# Seeding is optional: with no idle seed or no reflinks the target starts
-# empty, without delaying shell entry.
-seed_from() {
-  local seed="$1"
-  staging="$(mktemp -d "$target.seed.XXXXXX")"
-  # Walk under the source lock. Prune before copying so disabled incremental
-  # state and Cargo test scratch never create destination inodes. rustc's
-  # probe cache belongs to the source checkout/toolchain and is cheap to
-  # regenerate.
-  if flock --nonblock "$seed/debug/.cargo-lock" bash -euo pipefail -c '
-    cd "$1"
-    prune=( -path "./tmp" -o -path "./.rustc_info.json" )
-    if [ "$3" = 0 ]; then
-      prune+=( -o -type d -regex "./[^/]+(/[^/]+)?/incremental" )
-    fi
-    find . -regextype posix-extended \( "${prune[@]}" \) -prune -o \
-      \( ! -type d -o -empty \) -exec cp -a --parents --reflink=always --target-directory="$2/" -- {} +
-  ' bash "$seed" "$staging" "${CARGO_INCREMENTAL:-0}" 2>/dev/null \
-    && mv -T "$staging" "$target" 2>/dev/null; then
-    staging=""
-    return 0
-  fi
-  rm -rf -- "$staging"
-  staging=""
-  return 1
+# Every selection adds, by reflink, the warm dependency units this target
+# lacks: from the master-baseline target (`sinnix.baselineCheckout`, set by
+# sinnix-master-baseline), then the three most recently built targets of
+# other worktrees. Cargo names each unit's outputs by a hash of everything
+# that decides them (package source and version, features, profile, flags,
+# toolchain), so a unit another target built is exactly what this one would
+# build. A new checkout therefore starts warm, and a rebase onto a head that
+# changed the profile or flags finds the new generation the baseline already
+# built instead of compiling every dependency again.
+#
+# Only units of registry and Git packages are added. A path package (one
+# without `source` in either Cargo.lock: workspace members, local patches)
+# is fresh to Cargo when its dep-info is newer than its sources, so another
+# checkout's copy built after this checkout's files were written would be
+# taken as current even where the code differs.
+#
+# A source is read, and this target written, only while each one's Cargo
+# lock is free; a busy one is skipped until the next selection. Outputs are
+# copied before the fingerprint that vouches for them, so an interrupted
+# copy leaves units Cargo rebuilds. A stamp per source and profile keeps
+# the source's `.fingerprint` mtime at the last complete merge, so a
+# selection reads a source again only after it built a new unit. Without
+# reflinks or an idle source the target simply stays as it is.
+merge_profile() {
+  local seed="$1" profile="$2"
+  mkdir -p "$target/$profile/.fingerprint"
+  flock --nonblock "$seed/$profile/.cargo-lock" \
+    flock --nonblock "$target/$profile/.cargo-lock" \
+    bash -euo pipefail -c '
+      seed="$1/$2" dest="$3/$2" paths="$4"
+      cd "$seed"
+      work="$(mktemp -d)"
+      trap '\''rm -rf -- "$work"'\'' EXIT
+      ls -1 -f "$dest/.fingerprint" | sort >"$work/present"
+      ls -1 -f .fingerprint | sort | comm -23 - "$work/present" \
+        | awk -v paths="$paths" '\''
+            BEGIN { n = split(paths, p, "\n"); for (i = 1; i <= n; i++) path[p[i]] = 1 }
+            /^.+-[0-9a-f]{16}$/ { if (!(substr($0, 1, length($0) - 17) in path)) print }
+          '\'' >"$work/units"
+      [ -s "$work/units" ] || exit 0
+      {
+        [ ! -d build ] || ls -1 -f build \
+          | awk '\''NR == FNR { u[$0] = 1; next } $0 in u { print "build/" $0 }'\'' "$work/units" -
+        [ ! -d deps ] || ls -1 -f deps | awk '\''
+          NR == FNR { sub(/^.*-/, ""); h[$0] = 1; next }
+          match($0, /-[0-9a-f]{16}(\.|$)/) {
+            if (substr($0, RSTART + 1, 16) in h) print "deps/" $0
+          }'\'' "$work/units" -
+      } >"$work/outputs"
+      sed "s|^|.fingerprint/|" "$work/units" >"$work/fingerprints"
+      for list in outputs fingerprints; do
+        tr "\n" "\0" <"$work/$list" \
+          | xargs -0 -r cp -a --parents --reflink=always --update=none --target-directory="$dest/" --
+      done
+      wc -l <"$work/units"
+    ' bash "$seed" "$profile" "$target" "$paths"
 }
-staging=""
-trap '[ -z "$staging" ] || rm -rf -- "$staging"' EXIT
 
-if [ ! -e "$target" ]; then
+path_packages() {
+  local lock
+  for lock in "$@"; do
+    [ -f "$lock" ] || continue
+    awk '
+      /^\[\[package\]\]/ { if (name != "" && !source) print name; name = ""; source = 0 }
+      /^name = / { name = $3; gsub(/"/, "", name) }
+      /^source = / { source = 1 }
+      END { if (name != "" && !source) print name }
+    ' "$lock"
+  done | sort -u
+}
+
+if [ -f "$checkout/Cargo.lock" ]; then
   baseline="$(git config --get sinnix.baselineCheckout || true)"
+  sources=()
   if [ -n "$baseline" ] && [ -d "$baseline" ]; then
     baseline="$(realpath "$baseline")"
-  else
-    baseline=""
+    sources+=("$baseline")
   fi
-  same_lock=()
-  other_lock=()
-  lock="$checkout/Cargo.lock"
+  recent=()
   while IFS= read -r other; do
     [ -d "$other" ] || continue
     other="$(realpath "$other")"
     [ "$other" != "$checkout" ] && [ "$other" != "$baseline" ] || continue
-    seed="$(target_of "$other")"
-    [ -d "$seed/debug" ] || continue
-    if [ -f "$lock" ] && [ -f "$other/Cargo.lock" ] && cmp -s "$other/Cargo.lock" "$lock"; then
-      same_lock+=("$(stat -c %Y "$seed/debug") $other")
-    else
-      other_lock+=("$(stat -c %Y "$seed/debug") $other")
-    fi
+    [ -d "$(target_of "$other")/debug" ] || continue
+    recent+=("$(stat -c %Y "$(target_of "$other")/debug") $other")
   done < <(git worktree list --porcelain | sed -n 's/^worktree //p')
-  newest() { [ "$#" -gt 0 ] && printf '%s\n' "$@" | sort -rn | head -n 3 | cut -d' ' -f2-; }
-  ordered=()
-  while IFS= read -r line; do [ -n "$line" ] && ordered+=("$line"); done \
-    < <(newest ${same_lock[@]+"${same_lock[@]}"})
-  [ -z "$baseline" ] || ordered+=("$baseline")
-  while IFS= read -r line; do [ -n "$line" ] && ordered+=("$line"); done \
-    < <(newest ${other_lock[@]+"${other_lock[@]}"})
-  mkdir -p "$(dirname "$target")"
-  for source in ${ordered[@]+"${ordered[@]}"}; do
+  while IFS= read -r line; do [ -n "$line" ] && sources+=("$line"); done \
+    < <([ "${#recent[@]}" -eq 0 ] || printf '%s\n' "${recent[@]}" | sort -rn | head -n 3 | cut -d' ' -f2-)
+
+  stamps="$target/.sinnix-merged"
+  mkdir -p "$stamps"
+  for source in ${sources[@]+"${sources[@]}"}; do
     seed="$(target_of "$source")"
-    [ "$seed" != "$target" ] && [ -d "$seed/debug" ] || continue
-    if seed_from "$seed"; then
-      echo "sinnix-cargo-target: seeded $target from $source" >&2
-      break
-    fi
+    [ "$seed" != "$target" ] || continue
+    paths="$(path_packages "$checkout/Cargo.lock" "$source/Cargo.lock")"
+    added=0
+    for fingerprints in "$seed"/*/.fingerprint "$seed"/*/*/.fingerprint; do
+      [ -d "$fingerprints" ] || continue
+      profile="${fingerprints#"$seed/"}"
+      profile="${profile%/.fingerprint}"
+      stamp="$stamps/$(printf '%s:%s' "$source" "$profile" | sha256sum | cut -c1-32)"
+      [ ! -e "$stamp" ] || [ "$fingerprints" -nt "$stamp" ] || continue
+      if count="$(merge_profile "$seed" "$profile" 2>/dev/null)"; then
+        added=$((added + ${count:-0}))
+        touch -r "$fingerprints" "$stamp"
+      fi
+    done
+    [ "$added" -eq 0 ] \
+      || echo "sinnix-cargo-target: added $added units to $target from $source" >&2
   done
 fi
-mkdir -p "$target"
+
 # sinnix-cargo-target-evict reads the checkout from this marker, and its mtime
 # as the last selection; rewriting it on every selection keeps both current.
 printf '%s\n' "$checkout" >"$(dirname "$target")/checkout"

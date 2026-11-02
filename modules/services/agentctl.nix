@@ -156,7 +156,7 @@ mkServiceModule {
       "polylogue"
       "sinex"
     ];
-    description = "Projects whose `baseline` operation runs on each new default-branch head, in a reserved checkout whose target also seeds new checkouts' Cargo targets.";
+    description = "Projects whose `baseline` operation runs on each new default-branch head, in a reserved checkout whose target also supplies dependency units to other checkouts' Cargo targets.";
   };
 
   # No runtime surface: the job plane is pueued (declared by the CLI feature)

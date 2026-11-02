@@ -4,8 +4,8 @@
 # runtimeInputs: bash coreutils git jq
 set -euo pipefail
 
-# The baseline is a warm build of master whose target seeds new checkouts
-# (sinnix-cargo-target); the descriptor's operation decides what it builds
+# The baseline is a warm build of master whose target supplies dependency
+# units to every checkout's target (sinnix-cargo-target); the descriptor's operation decides what it builds
 # and where it queues. It runs in <workspace root>/<project>-master, a
 # detached worktree this script alone moves. A running baseline holds it;
 # a queued one for an older head is cancelled and replaced, so the pool holds

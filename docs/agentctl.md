@@ -526,7 +526,8 @@ declares these units:
   and Clippy, nothing run, 23-60 minutes) in the one-slot `baseline` pool,
   whose slice has the lowest build weights, so it never holds a slot a lane
   waits for.
-  Its target seeds new checkouts' targets (`docs/worktree-cleanup.md`).
+  Its target supplies dependency units to other checkouts' targets
+  (`docs/worktree-cleanup.md`).
   Whether a failure is already on master comes from the projects' cloud
   known-failure lists, not from this job.
 
