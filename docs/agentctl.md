@@ -244,7 +244,7 @@ wrapper whose task is terminal is stopped; a live one ends the run as
 `slot_occupied`.
 
 **Concurrent builds.** The widths of the pools that run Cargo builds
-(`normal` 2, `bulk` 1, `compile` 1, and `baseline` 1 for the master
+(`normal` 1, `bulk` 1, `compile` 1, and `baseline` 1 for the master
 baselines) bound how many run at once, so a job takes its queue slot only
 when it can run; no job waits inside its slot.
 
