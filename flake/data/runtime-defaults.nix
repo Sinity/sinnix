@@ -497,7 +497,8 @@ rec {
         # starved behind an idle desktop and the coordinator's own polls.
         CPUWeight = 90;
         IOWeight = 100;
-        # Builds, up to three by pool width (normal 1, bulk 1, compile 1).
+        # Builds, up to three by pool width (normal 1, bulk 1, compile 1),
+        # plus one master baseline at the lowest build weights.
         # Peak memory per job since 2026-11-01, page cache included: Polylogue
         # focused p50 3.6G p90 5.5G, Sinex focused/exec p90 6.8-6.9G, compile
         # and Clippy p90 2.0-3.4G, so four typical builds would sum to ~13G. The plane
@@ -707,12 +708,21 @@ rec {
       # Type and lint checks: two at once, each peaking at 3-4 GiB
       # (2026-11-01: Polylogue compile 3.1 GiB, Sinex compile 3.9 GiB).
       # They write only metadata, so they outrank test builds for the disk.
-      # The master baselines' warm builds also run here, at the lowest queue
-      # priority: the background slice's 6G ceiling is below a test build.
       agent-ctl-compile = {
         IOAccounting = true;
         CPUWeight = 100;
         IOWeight = 100;
+        MemoryHigh = "8G";
+        MemoryMax = "10G";
+        MemorySwapMax = "1G";
+      };
+      # The master baselines' warm builds (test binaries and Clippy, 23-60
+      # minutes): a build's memory ceiling, like compile's, but weights just
+      # above the offloads', so lane builds keep the CPU and the disk.
+      agent-ctl-baseline = {
+        IOAccounting = true;
+        CPUWeight = 10;
+        IOWeight = 8;
         MemoryHigh = "8G";
         MemoryMax = "10G";
         MemorySwapMax = "1G";

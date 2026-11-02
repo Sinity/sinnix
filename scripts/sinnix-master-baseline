@@ -7,8 +7,9 @@ set -euo pipefail
 # The baseline is a warm build of master whose target seeds new checkouts
 # (sinnix-cargo-target); the descriptor's operation decides what it builds
 # and where it queues. It runs in <workspace root>/<project>-master, a
-# detached worktree this script alone moves, and only while no baseline job
-# is queued or running there.
+# detached worktree this script alone moves. A running baseline holds it;
+# a queued one for an older head is cancelled and replaced, so the pool holds
+# at most one baseline per project and it is for the newest head.
 project="${1:?usage: sinnix-master-baseline <project>}"
 agentctl="${AGENTCTL:-agentctl}"
 
@@ -23,13 +24,25 @@ if ! jq -e '.operations | any(.name == "baseline")' <<<"$descriptor" >/dev/null;
 fi
 
 active="$("$agentctl" job list --project "$project" --active --json |
-  jq --arg label "$project:baseline" '[.[] | select(.label == $label)] | length')"
-if [ "$active" -ne 0 ]; then
+  jq -c --arg label "$project:baseline" '[.[] | select(.label == $label)]')"
+if jq -e 'any(.phase != "queued")' <<<"$active" >/dev/null; then
   exit 0
 fi
 
 git -C "$root" fetch --quiet "${base%%/*}" "${base#*/}"
 head="$(git -C "$root" rev-parse --verify "$base^{commit}")"
+queued="$(jq -r '.[].job_id' <<<"$active")"
+if [ -n "$queued" ]; then
+  stamp="$(git -C "$checkout" rev-parse --path-format=absolute --git-path baseline-head)"
+  read -r stamped_head _ 2>/dev/null <"$stamp" || true
+  if [ "${stamped_head:-}" = "$head" ]; then
+    exit 0
+  fi
+  for job in $queued; do
+    "$agentctl" job cancel 0 --job-id "$job" --actor sinnix-master-baseline \
+      --reason "superseded by $base at $head" --json >/dev/null
+  done
+fi
 if [ ! -e "$checkout" ]; then
   git -C "$root" worktree add --quiet --detach "$checkout" "$head"
   # Worktree cleanup keeps a locked checkout.
@@ -38,9 +51,9 @@ fi
 git -C "$root" config sinnix.baselineCheckout "$checkout"
 
 # The stamp names the head and the job queued for it. A job that was lost or
-# never recorded warmed nothing, so its head is queued again. A cancellation is a decision about that head and stands, as do
-# a refused launch and a passing, failing or timed-out baseline, until the
-# branch moves.
+# never recorded warmed nothing, so its head is queued again. A cancellation
+# is a decision about that head and stands, as do a refused launch and a
+# passing, failing or timed-out baseline, until the branch moves.
 stamp="$(git -C "$checkout" rev-parse --path-format=absolute --git-path baseline-head)"
 read -r stamped_head stamped_job 2>/dev/null <"$stamp" || true
 if [ "${stamped_head:-}" = "$head" ]; then

@@ -142,6 +142,10 @@ mkServiceModule {
       # so a head is known to compile before it is pushed or sent to a cloud
       # check.
       compile.parallel = 1;
+      # The master baselines' warm builds, which take 23-60 minutes. Their own
+      # slot, so they never hold one that lanes wait for; one at a time, at
+      # the plane's lowest build weights.
+      baseline.parallel = 1;
     };
     description = "Each pueue group's width and cross-pool admission policy.";
   };

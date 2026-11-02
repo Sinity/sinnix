@@ -31,6 +31,7 @@ def world(tmp_path: Path) -> dict:
     workspaces = tmp_path / "worktrees"
     workspaces.mkdir()
     started = tmp_path / "started.log"
+    cancelled = tmp_path / "cancelled.log"
     active = tmp_path / "active.json"
     active.write_text("[]")
     agentctl = tmp_path / "agentctl"
@@ -57,6 +58,10 @@ def world(tmp_path: Path) -> dict:
         f"    with open({str(started)!r}, 'a') as output:\n"
         "        output.write(json.dumps(args) + '\\n')\n"
         f"    print(json.dumps({{'job_id': 'baseline-' + str(len(open({str(started)!r}).readlines()))}}))\n"
+        "elif args[:2] == ['job', 'cancel']:\n"
+        f"    with open({str(cancelled)!r}, 'a') as output:\n"
+        "        output.write(args[args.index('--job-id') + 1] + '\\n')\n"
+        "    print('{}')\n"
         "elif args[:2] == ['job', 'get']:\n"
         "    phase = os.environ.get('BASELINE_JOB_PHASE', 'succeeded')\n"
         "    if phase == 'lookup-fails':\n"
@@ -71,6 +76,7 @@ def world(tmp_path: Path) -> dict:
         "root": root,
         "checkout": workspaces / "fixture-master",
         "started": started,
+        "cancelled": cancelled,
         "active": active,
         "env": env,
     }
@@ -134,10 +140,15 @@ def test_the_checkout_follows_master_but_never_moves_under_an_active_baseline(
     git("commit", "-q", "--allow-empty", "-m", "second", cwd=other)
     git("push", "-q", "origin", "HEAD:master", cwd=other)
 
-    world["active"].write_text(json.dumps([{"label": "fixture:baseline"}]))
+    world["active"].write_text(
+        json.dumps(
+            [{"label": "fixture:baseline", "job_id": "baseline-1", "phase": "running"}]
+        )
+    )
     baseline(world)
     assert git("rev-parse", "HEAD", cwd=world["checkout"]) == first
     assert len(started(world)) == 1
+    assert not world["cancelled"].exists()
 
     world["active"].write_text(json.dumps([{"label": "fixture:check"}]))
     baseline(world)
@@ -240,3 +251,34 @@ def test_a_stamp_without_a_job_is_queued_again(world: dict) -> None:
     stamp.write_text(stamp.read_text().split()[0] + "\n")
     baseline(world)
     assert len(started(world)) == 2
+
+
+def advance(tmp_path: Path) -> str:
+    other = tmp_path / "advance"
+    if not other.exists():
+        subprocess.run(
+            ["git", "clone", "-q", str(tmp_path / "origin.git"), str(other)], check=True
+        )
+    git("pull", "-q", "origin", "master", cwd=other)
+    git("commit", "-q", "--allow-empty", "-m", "next", cwd=other)
+    git("push", "-q", "origin", "HEAD:master", cwd=other)
+    return git("rev-parse", "HEAD", cwd=other)
+
+
+def test_a_queued_baseline_for_an_older_head_is_replaced(
+    world: dict, tmp_path: Path
+) -> None:
+    baseline(world)
+    queued = [{"label": "fixture:baseline", "job_id": "baseline-1", "phase": "queued"}]
+    world["active"].write_text(json.dumps(queued))
+
+    # Still the newest head: the queued job stands and nothing is added.
+    baseline(world)
+    assert len(started(world)) == 1
+    assert not world["cancelled"].exists()
+
+    head = advance(tmp_path)
+    baseline(world)
+    assert world["cancelled"].read_text().split() == ["baseline-1"]
+    assert len(started(world)) == 2
+    assert git("rev-parse", "HEAD", cwd=world["checkout"]) == head

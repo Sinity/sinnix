@@ -244,8 +244,9 @@ wrapper whose task is terminal is stopped; a live one ends the run as
 `slot_occupied`.
 
 **Concurrent builds.** The widths of the pools that run Cargo builds
-(`normal` 1, `bulk` 1, `compile` 1) bound how many run at once, so a job
-takes its queue slot only when it can run; no job waits inside its slot.
+(`normal` 1, `bulk` 1, `compile` 1, and `baseline` 1 for the master
+baselines) bound how many run at once, so a job takes its queue slot only
+when it can run; no job waits inside its slot.
 
 The complete pressure tick, including adaptive widths and admission hold
 release, has a 20-second wall-clock deadline inside the unit's 30-second
@@ -511,17 +512,20 @@ declares these units:
   configuration changes.
 - `agentctl-baseline-<project>` (every ten minutes, for each of
   `masterBaselines`): `sinnix-master-baseline` fetches the default branch and,
-  when its head is new and no baseline job is active, moves the reserved
+  when its head is new and no baseline job is running, moves the reserved
   detached checkout `<workspace root>/<project>-master` there and queues the
   checkout's own `baseline` operation using `--project CHECKOUT`, with that
   same checkout as `--workspace`. Its descriptor supplies the environment and
   operation limits; its ProjectID must match the registered project. A failed
   launch leaves the head unmarked for the next scheduled attempt. A head whose
   job was lost or not recorded is queued again; a cancelled, refused, passing,
-  failing or timed-out baseline stands until the branch moves. The baseline
-  is a warm build, not a test run: Polylogue and Sinex declare it as
-  `xtask warm` (every test binary and Clippy, nothing run) in the `compile`
-  pool at priority -100, so it takes that slot only when no lane job waits.
+  failing or timed-out baseline stands until the branch moves. A baseline
+  still queued for an older head is cancelled and replaced, so each project
+  has at most one, for the newest head. The baseline is a warm build, not a
+  test run: Polylogue and Sinex declare it as `xtask warm` (every test binary
+  and Clippy, nothing run, 23-60 minutes) in the one-slot `baseline` pool,
+  whose slice has the lowest build weights, so it never holds a slot a lane
+  waits for.
   Its target seeds new checkouts' targets (`docs/worktree-cleanup.md`).
   Whether a failure is already on master comes from the projects' cloud
   known-failure lists, not from this job.
