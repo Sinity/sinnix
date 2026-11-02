@@ -917,7 +917,7 @@ def test_job_launch_wait_timeout_is_not_success(
                 "fixture",
                 "check",
                 "--wait",
-                "--timeout-seconds",
+                "--wait-seconds",
                 "1",
             ]
         )

@@ -40,7 +40,9 @@ never cancels a job, and a queue cleanup retains its historical artifacts.
 | `pools apply`                                                        | write the declared pool widths into the running pueued                                                                                               |
 | `pressure tick`                                                      | one pass pausing or reopening groups against memory pressure                                                                                         |
 
-`job start` and `job wait` take `--timeout-seconds` for the wait. When the
+`job start --wait --wait-seconds N` and `job wait --timeout-seconds N` bound
+only the caller's wait; a job's runtime limit is always its operation's
+declared `timeout_seconds`. When the
 waited job ends without success, both print its failure lines (nextest
 verdicts, compiler errors, panics with their message, refusals and the
 `recorded as run N` history pointer) and the log's last lines to stderr.
@@ -242,7 +244,7 @@ wrapper whose task is terminal is stopped; a live one ends the run as
 `slot_occupied`.
 
 **Concurrent builds.** The widths of the pools that run Cargo builds
-(`normal` 2, `bulk` 1, `compile` 1) bound how many run at once, so a job
+(`normal` 1, `bulk` 1, `compile` 1) bound how many run at once, so a job
 takes its queue slot only when it can run; no job waits inside its slot.
 
 The complete pressure tick, including adaptive widths and admission hold

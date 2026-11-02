@@ -176,7 +176,14 @@ def parser() -> argparse.ArgumentParser:
         help="execution cwd only; use --project CHECKOUT to select its descriptor",
     )
     start.add_argument("--wait", action="store_true")
-    start.add_argument("--timeout-seconds", type=int, default=DEFAULT_WAIT_SECONDS)
+    # How long --wait waits. The job's own runtime limit is its operation's
+    # declared timeout_seconds; a caller cannot change it.
+    start.add_argument(
+        "--wait-seconds",
+        type=int,
+        default=DEFAULT_WAIT_SECONDS,
+        help="how long --wait waits; the job's runtime limit is the operation's declared timeout_seconds",
+    )
     start.add_argument(
         "--idempotency-key",
         help="caller key that makes a repeated launch return the same job",
@@ -416,7 +423,7 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         if arguments.wait:
             started = job_queries.wait(
                 started["task_id"],
-                timeout_seconds=arguments.timeout_seconds,
+                timeout_seconds=arguments.wait_seconds,
                 job_id=started.get("job_id"),
                 config=config,
             )
