@@ -106,15 +106,14 @@ mkServiceModule {
       };
       # The widths of the pools that run Cargo builds (normal, bulk, compile)
       # are the bound on concurrent builds: a job takes its queue slot only
-      # when it can run. Together they admit three, one of them a
-      # metadata-only check. The measure is job completion, not PSI: with
-      # normal at 2 beside a bulk build, focused job 625 timed out at 30
-      # minutes on 2026-11-02 while still compiling the `polylogue` crate
-      # (4.5 CPU-minutes of work when the drive is free), because /realm's
-      # QLC drive sustains about 25-50 MB/s of writes and three test builds
-      # each write 1-6 GB.
-      # Focused test builds and lane checks: one at a time.
-      normal.parallel = 1;
+      # when it can run. Together they admit four, one of them a
+      # metadata-only check. Two focused builds peak at about 6.2G each
+      # (Sinex focused compile, 2026-11-02) and fit the normal slice's 12G
+      # MemoryHigh, so an overrun is throttled or killed inside that slice.
+      # At one wide, normal held eight queued jobs (retro 20, 2026-11-02);
+      # at two beside other load on 11-02 05:13-06:34, oomd killed a focused
+      # compile, so this width stays under observation (sinnix-rerqe).
+      normal.parallel = 2;
       # Full checks and arbitrary commands, the longest builds: one at a time.
       bulk.parallel = 1;
       # Long-lived development dependencies must not occupy short-job capacity.

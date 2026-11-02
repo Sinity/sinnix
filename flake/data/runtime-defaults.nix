@@ -497,7 +497,7 @@ rec {
         # starved behind an idle desktop and the coordinator's own polls.
         CPUWeight = 90;
         IOWeight = 100;
-        # Builds, up to three by pool width (normal 1, bulk 1, compile 1),
+        # Builds, up to four by pool width (normal 2, bulk 1, compile 1),
         # plus one master baseline at the lowest build weights.
         # Peak memory per job since 2026-11-01, page cache included: Polylogue
         # focused p50 3.6G p90 5.5G, Sinex focused/exec p90 6.8-6.9G, compile
