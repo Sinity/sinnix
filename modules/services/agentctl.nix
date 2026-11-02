@@ -130,6 +130,12 @@ mkServiceModule {
       # A slot each, outside bulk, so a check never waits behind them.
       measure.parallel = 1;
       system-build.parallel = 1;
+      # Rust type and lint checks of a lane's change (`compile`, Clippy)
+      # write only metadata and take 1-4 minutes. In their own pool, outside
+      # the cargo cap, they never wait behind test builds or for a pause of
+      # `normal` and `bulk`, so a head is known to compile before it is
+      # pushed or sent to a cloud check.
+      compile.parallel = 2;
     };
     description = "Each pueue group's width and cross-pool admission policy.";
   };

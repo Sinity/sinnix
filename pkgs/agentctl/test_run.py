@@ -1256,6 +1256,20 @@ def test_a_pool_without_a_slice_policy_runs_under_the_normal_slice(
     )
 
 
+@pytest.mark.parametrize(
+    "pool", ["compile", "background", "measure", "system-build", "codex"]
+)
+def test_each_pool_with_a_declared_slice_runs_in_it(
+    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue, pool: str
+) -> None:
+    fake_pueue.groups[pool] = 1
+    launch = write_launch(tmp_path, pool=pool)
+
+    assert main([str(launch)]) == 0
+
+    assert f"--slice=agent-ctl-{pool}.slice" in fake_systemd.run_argv()
+
+
 def test_output_larger_than_eight_mb_is_preserved_completely(tmp_path: Path) -> None:
     launch = write_launch(
         tmp_path, argv=["sh", "-c", f"yes x | head -c {MAX_LOG_BYTES * 3}"]

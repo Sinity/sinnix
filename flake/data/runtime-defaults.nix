@@ -695,6 +695,17 @@ rec {
         MemoryMax = "6G";
         MemorySwapMax = "512M";
       };
+      # Type and lint checks: two at once, each peaking at 3-4 GiB
+      # (2026-11-01: Polylogue compile 3.1 GiB, Sinex compile 3.9 GiB).
+      # They write only metadata, so they outrank test builds for the disk.
+      agent-ctl-compile = {
+        IOAccounting = true;
+        CPUWeight = 100;
+        IOWeight = 100;
+        MemoryHigh = "8G";
+        MemoryMax = "10G";
+        MemorySwapMax = "1G";
+      };
       # One benchmark or measurement at a time. Its numbers are only valid on
       # a quiet host, so it runs throttled by nothing but its own ceiling: no
       # pressure kill, ordinary weights.

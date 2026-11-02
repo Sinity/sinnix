@@ -418,6 +418,7 @@ in
             "agent-ctl-background"
             "agent-ctl-measure"
             "agent-ctl-system-build"
+            "agent-ctl-compile"
             "agent-ctl-codex"
           ] (name: userSlices.${name});
           forbiddenAvoidTokens = [
@@ -449,6 +450,9 @@ in
         assert lib.assertMsg (
           declaredPools.measure.parallel == 1 && declaredPools.system-build.parallel == 1
         ) "measurements and system builds each run in a one-slot pool of their own";
+        assert lib.assertMsg (
+          declaredPools ? compile && poolSlices ? agent-ctl-compile
+        ) "type and lint checks have a pool and slice of their own";
         assert lib.assertMsg (lib.all (token: !(lib.hasInfix token avoidPattern))
           forbiddenAvoidTokens
         ) "the earlyoom fallback must not exempt agents, browsers, runtimes, or generic shells";

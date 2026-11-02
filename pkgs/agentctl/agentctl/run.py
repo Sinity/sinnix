@@ -115,6 +115,11 @@ POLICY_POOLS = frozenset(
         "interactive",
         "shell-quick",
         "shell-long",
+        "compile",
+        "background",
+        "measure",
+        "system-build",
+        "codex",
     }
 )
 DEFAULT_SLICE_POOL = "normal"

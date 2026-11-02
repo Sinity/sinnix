@@ -287,6 +287,12 @@ minute.
   the plane's lowest I/O weight. Benchmarks and measurements run in the
   one-slot `measure` pool and full system builds in the one-slot
   `system-build` pool, so neither holds a `bulk` slot a check is waiting for.
+- **Rust type and lint checks** (the Rust projects' `compile` operations and
+  their Clippy operations) run in the two-slot `compile` pool without the
+  cargo cap. They write only
+  metadata, so they neither wait behind test builds nor stop when `normal`
+  and `bulk` are paused, and a lane learns within minutes whether its head
+  compiles.
 
 ## Worktrees
 
