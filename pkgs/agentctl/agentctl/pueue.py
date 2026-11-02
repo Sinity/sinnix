@@ -246,7 +246,8 @@ def add(
     if stashed:
         arguments.append("--stashed")
     if priority:
-        arguments.extend(["--priority", str(priority)])
+        # Joined, so pueue's parser does not read a negative value as a flag.
+        arguments.append(f"--priority={priority}")
     arguments.append("--")
     arguments.extend(command)
     try:
