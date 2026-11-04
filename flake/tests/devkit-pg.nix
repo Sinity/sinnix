@@ -17,6 +17,7 @@
           service.ExecStart;
       postgres = inputs.self.nixosConfigurations.sinnix-prime.pkgs.postgresql_18.withPackages (p: [
         p.timescaledb
+        p.pgvector
       ]);
     in
     {
@@ -79,6 +80,8 @@
             CREATE DATABASE fixture;
             \connect fixture
             CREATE EXTENSION timescaledb;
+            CREATE EXTENSION vector;
+            DO $$ BEGIN ASSERT vector_dims('[1,2,3]'::vector) = 3; END $$;
             CREATE TABLE sample (value integer);
             INSERT INTO sample VALUES (42);
             \connect postgres

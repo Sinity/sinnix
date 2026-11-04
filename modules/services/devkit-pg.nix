@@ -22,7 +22,10 @@
   ...
 }@args:
 let
-  postgres = pkgs.postgresql_18.withPackages (p: [ p.timescaledb ]);
+  postgres = pkgs.postgresql_18.withPackages (p: [
+    p.timescaledb
+    p.pgvector
+  ]);
   initdb = pkgs.writeShellScript "sinnix-devkit-pg-initdb" ''
     set -eu
     data="$1"
