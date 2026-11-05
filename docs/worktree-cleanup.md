@@ -30,31 +30,23 @@ inherited target through `nix develop --command`. Devkit resolves Cargo's actual
 target for test/report handling. Durable run history, Sinex service/test state
 and independently retained historical binaries keep their current owners.
 
-Every selection adds to the target, by reflink, the dependency units it
-lacks. Cargo names each unit's outputs (`<profile>/.fingerprint/<package>-<hash>`,
-`build/<package>-<hash>`, `deps/*-<hash>*`) by a hash of everything that decides
-them: package source and version, features, profile, flags and toolchain. A
-unit another target built is therefore exactly the one this target would build.
-Sources are the repository's master-baseline checkout (Git config
-`sinnix.baselineCheckout`, which `sinnix-master-baseline` sets), then the three
-most recently built targets of other worktrees. A new checkout starts with every
-dependency warm. When a rebase brings a profile, flag or toolchain change, the
-lane's next job finds the new generation that the baseline already built, instead
-of recompiling about 600 dependencies.
+An empty target is seeded once, by reflink, from one idle target. The preferred
+source is the repository's master-baseline checkout (Git config
+`sinnix.baselineCheckout`, set by `sinnix-master-baseline`); otherwise the
+selector tries the three most recently built targets of other worktrees and
+uses the first idle one. Once the target contains build artifacts, Cargo owns
+it: later selections neither add another source's units nor replace its files.
 
-Only units of registry and Git packages are added. Units of path packages (those
-without `source` in either `Cargo.lock`: workspace members and local patches) are
-never copied. Cargo treats them as fresh when their dep-info is newer than their
-sources, so a copy built in another checkout after this one's files were written
-would pass for current code that differs. A source is read, and the target
-written, only while each one's Cargo lock (`<profile>/.cargo-lock`) is free; a
-busy one is retried at the next selection. A unit's outputs are copied before
-its fingerprint, so an interrupted copy leaves units Cargo rebuilds. Units already
-present are never replaced. Per source and profile, `.sinnix-merged/` in the
-target records the source's `.fingerprint` mtime at the last complete merge, so a
-selection reads a source again only after it has built a new unit.
-Incremental state, uplifted outputs, Cargo test scratch in `target/tmp/` and
-`.rustc_info.json` belong to no unit and are never copied.
+Artifact filenames are not content hashes. Builds can produce the same filename
+with different metadata and dependency requirements, so independently merging
+units can pair a crate with an incompatible dependency build. Seeding takes all
+source and destination profile locks together and copies every output before
+any fingerprint. Only registry and Git package units are copied. Path packages
+(workspace members and local patches, without `source` in either `Cargo.lock`)
+stay local, because another checkout's newer dep-info could otherwise make
+outdated code appear current. Incremental state, uplifted outputs, test scratch
+in `target/tmp/` and `.rustc_info.json` are not copied.
+
 Without reflinks or an idle source the target keeps what it has. The selector writes the target's
 `CACHEDIR.TAG` (Cargo tags only a target directory it creates, and this one
 exists first), and on every selection rewrites `checkout` beside the target

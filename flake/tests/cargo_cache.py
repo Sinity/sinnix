@@ -216,11 +216,12 @@ class CargoCache(unittest.TestCase):
         name, digest = unit.rsplit("-", 1)
         crate = name.replace("-", "_")
         root = target / profile
-        (root / ".fingerprint" / unit).mkdir(parents=True)
+        (root / ".fingerprint" / unit).mkdir(parents=True, exist_ok=True)
         (root / ".fingerprint" / unit / f"lib-{crate}").write_text(digest)
         (root / "deps").mkdir(exist_ok=True)
         outputs = [
             root / "deps" / f"lib{crate}-{digest}.rlib",
+            root / "deps" / f"lib{crate}-{digest}.rmeta",
             root / "deps" / f"{crate}-{digest}.d",
             root / "deps" / f"{crate}-{digest}.{crate}.0.rcgu.o",
         ]
@@ -283,54 +284,52 @@ class CargoCache(unittest.TestCase):
         self.assertEqual(select_in(self.root / "lane"), target)
         self.assertEqual((target / outputs[0]).read_bytes(), b"rebuilt")
 
-    def test_a_new_generation_reaches_an_existing_target(self):
+    def test_a_populated_target_keeps_one_builds_dependency_set(self):
         worktree, select_in, baseline = self.lanes()
         master = worktree("master")
         seed = select_in(master)
         baseline(master)
-        self.build_unit(seed, "dep-0123456789abcdef")
+        same_name = "dep-0123456789abcdef"
+        original = self.build_unit(seed, same_name, content=b"dependency A")
         lane = worktree("lane")
         target = select_in(lane)
-        # Master changed its flags: every dependency has a new unit hash, and
-        # the baseline has built them. The lane's next selection adds them.
-        outputs = self.build_unit(seed, "dep-fedcba9876543210")
-        stamp = time.time() + 5
-        os.utime(seed / "debug" / ".fingerprint", (stamp, stamp))
+        # The filename is unchanged, but this producer now has another build.
+        self.build_unit(seed, same_name, content=b"dependency B")
+        incoming = self.build_unit(seed, "dep-fedcba9876543210", content=b"requires B")
         select_in(lane)
-        for path in outputs:
-            self.assertTrue((target / path).exists(), path)
-        # An unchanged source is not read again: a unit removed from the
-        # lane stays removed until the source builds another one.
-        shutil.rmtree(target / "debug" / ".fingerprint" / "dep-fedcba9876543210")
+        for path in original:
+            self.assertEqual((target / path).read_bytes(), b"dependency A")
+        for path in incoming:
+            self.assertFalse((target / path).exists(), path)
+        # Cargo's removal of an artifact is not an invitation to reseed it.
+        (target / original[0]).unlink()
         select_in(lane)
-        self.assertFalse(
-            (target / "debug" / ".fingerprint" / "dep-fedcba9876543210").exists()
-        )
-        self.build_unit(seed, "dep-aaaaaaaaaaaaaaaa")
-        os.utime(seed / "debug" / ".fingerprint", (stamp + 5, stamp + 5))
-        select_in(lane)
-        for unit in ("dep-fedcba9876543210", "dep-aaaaaaaaaaaaaaaa"):
-            self.assertTrue((target / "debug" / ".fingerprint" / unit).is_dir())
+        self.assertFalse((target / original[0]).exists())
 
-    def test_recent_worktree_targets_add_units_the_baseline_lacks(self):
+    def test_a_target_uses_one_source_with_baseline_then_recent_preference(self):
         worktree, select_in, baseline = self.lanes()
         master = worktree("master")
-        self.build_unit(select_in(master), "dep-0000000000000001")
+        seed = select_in(master)
+        self.build_unit(seed, "dep-0000000000000001")
         baseline(master)
         targets = {name: select_in(worktree(name)) for name in ["old", "a", "b", "c"]}
         for i, name in enumerate(targets):
             self.build_unit(targets[name], f"dep-{i + 2:016x}")
-            os.utime(targets[name] / "debug", (1_000_000_000 + i, 1_000_000_000 + i))
+            os.utime(targets[name] / "debug", (1_000_000_000 + i,) * 2)
         target = select_in(worktree("lane"))
         have = {p.name for p in (target / "debug" / ".fingerprint").iterdir()}
-        # The baseline and the three most recently built other targets.
-        self.assertEqual(
-            have,
-            {"dep-0000000000000001", "dep-0000000000000003", "dep-0000000000000004",
-             "dep-0000000000000005"},
+        self.assertEqual(have, {"dep-0000000000000001"})
+        subprocess.run(
+            ["git", "-C", str(self.checkout), "config", "--unset", "sinnix.baselineCheckout"],
+            check=True,
         )
+        os.utime(seed / "debug", (999_999_998,) * 2)
+        os.utime(target / "debug", (999_999_999,) * 2)
+        fallback = select_in(worktree("fallback"))
+        have = {p.name for p in (fallback / "debug" / ".fingerprint").iterdir()}
+        self.assertEqual(have, {"dep-0000000000000001", "dep-0000000000000005"})
 
-    def test_a_busy_source_is_skipped_and_merged_once_idle(self):
+    def test_a_busy_source_or_empty_destination_is_not_seeded_until_idle(self):
         worktree, select_in, baseline = self.lanes()
         master = worktree("master")
         seed = select_in(master)
@@ -342,21 +341,12 @@ class CargoCache(unittest.TestCase):
             target = select_in(lane)
             self.assertTrue((target / "CACHEDIR.TAG").exists())
             self.assertFalse((target / outputs[0]).exists())
-        self.assertEqual(select_in(lane), target)
-        self.assertTrue((target / outputs[0]).exists())
-        # Nor is a target written while its own build holds it.
-        self.build_unit(seed, "dep-fedcba9876543210")
-        os.utime(seed / "debug" / ".fingerprint", (time.time() + 5,) * 2)
         with (target / "debug" / ".cargo-lock").open("w") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             select_in(lane)
-        self.assertFalse(
-            (target / "debug" / ".fingerprint" / "dep-fedcba9876543210").exists()
-        )
-        select_in(lane)
-        self.assertTrue(
-            (target / "debug" / ".fingerprint" / "dep-fedcba9876543210").exists()
-        )
+            self.assertFalse((target / outputs[0]).exists())
+        self.assertEqual(select_in(lane), target)
+        self.assertTrue((target / outputs[0]).exists())
 
     def test_selection_needs_no_privileged_tree_search(self):
         self.provision()

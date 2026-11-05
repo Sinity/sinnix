@@ -29,62 +29,61 @@ checkout="$(realpath "$checkout")"
 target="$(target_of "$checkout")"
 mkdir -p "$target"
 
-# Every selection adds, by reflink, the warm dependency units this target
-# lacks: from the master-baseline target (`sinnix.baselineCheckout`, set by
-# sinnix-master-baseline), then the three most recently built targets of
-# other worktrees. Cargo names each unit's outputs by a hash of everything
-# that decides them (package source and version, features, profile, flags,
-# toolchain), so a unit another target built is exactly what this one would
-# build. A new checkout therefore starts warm, and a rebase onto a head that
-# changed the profile or flags finds the new generation the baseline already
-# built instead of compiling every dependency again.
-#
-# Only units of registry and Git packages are added. A path package (one
-# without `source` in either Cargo.lock: workspace members, local patches)
-# is fresh to Cargo when its dep-info is newer than its sources, so another
-# checkout's copy built after this checkout's files were written would be
-# taken as current even where the code differs.
-#
-# A source is read, and this target written, only while each one's Cargo
-# lock is free; a busy one is skipped until the next selection. Outputs are
-# copied before the fingerprint that vouches for them, so an interrupted
-# copy leaves units Cargo rebuilds. A stamp per source and profile keeps
-# the source's `.fingerprint` mtime at the last complete merge, so a
-# selection reads a source again only after it built a new unit. Without
-# reflinks or an idle source the target simply stays as it is.
-merge_profile() {
-  local seed="$1" profile="$2"
-  mkdir -p "$target/$profile/.fingerprint"
-  flock --nonblock "$seed/$profile/.cargo-lock" \
-    flock --nonblock "$target/$profile/.cargo-lock" \
+# Artifact filenames are not content hashes: two builds can use the same
+# filename while their metadata requires different dependency builds. Seed an
+# empty target from one idle source only, then leave it entirely to Cargo.
+# All source profiles are locked together, and every output is copied before
+# any fingerprint. Path packages remain local to this checkout.
+seed_target() {
+  local seed="$1" paths="$2"
+  flock --nonblock "$target/.sinnix-seed.lock" \
     bash -euo pipefail -c '
-      seed="$1/$2" dest="$3/$2" paths="$4"
-      cd "$seed"
+      seed="$1" dest="$2" paths="$3"
+      shopt -s nullglob
+      profiles=()
+      for fingerprints in "$seed"/*/.fingerprint "$seed"/*/*/.fingerprint; do
+        [ -d "$fingerprints" ] || continue
+        profile="${fingerprints#"$seed/"}"
+        profile="${profile%/.fingerprint}"
+        mkdir -p "$dest/$profile"
+        exec {lock}>"$seed/$profile/.cargo-lock"
+        flock --nonblock "$lock" || exit 1
+        exec {lock}>"$dest/$profile/.cargo-lock"
+        flock --nonblock "$lock" || exit 1
+        profiles+=("$profile")
+      done
+      [ "${#profiles[@]}" -ne 0 ] || exit 1
+      [ -z "$(find "$dest" -type f ! -name .cargo-lock ! -name CACHEDIR.TAG \
+        ! -name .sinnix-seed.lock -print -quit)" ] || exit 1
       work="$(mktemp -d)"
       trap '\''rm -rf -- "$work"'\'' EXIT
-      ls -1 -f "$dest/.fingerprint" | sort >"$work/present"
-      ls -1 -f .fingerprint | sort | comm -23 - "$work/present" \
-        | awk -v paths="$paths" '\''
-            BEGIN { n = split(paths, p, "\n"); for (i = 1; i <= n; i++) path[p[i]] = 1 }
-            /^.+-[0-9a-f]{16}$/ { if (!(substr($0, 1, length($0) - 17) in path)) print }
-          '\'' >"$work/units"
-      [ -s "$work/units" ] || exit 0
-      {
-        [ ! -d build ] || ls -1 -f build \
-          | awk '\''NR == FNR { u[$0] = 1; next } $0 in u { print "build/" $0 }'\'' "$work/units" -
-        [ ! -d deps ] || ls -1 -f deps | awk '\''
-          NR == FNR { sub(/^.*-/, ""); h[$0] = 1; next }
-          match($0, /-[0-9a-f]{16}(\.|$)/) {
-            if (substr($0, RSTART + 1, 16) in h) print "deps/" $0
-          }'\'' "$work/units" -
-      } >"$work/outputs"
-      sed "s|^|.fingerprint/|" "$work/units" >"$work/fingerprints"
+      : >"$work/outputs"
+      : >"$work/fingerprints"
+      for profile in "${profiles[@]}"; do
+        cd "$seed/$profile"
+        ls -1 -f .fingerprint | awk -v paths="$paths" '\''
+          BEGIN { n = split(paths, p, "\n"); for (i = 1; i <= n; i++) path[p[i]] = 1 }
+          /^.+-[0-9a-f]{16}$/ { if (!(substr($0, 1, length($0) - 17) in path)) print }
+        '\'' >"$work/units"
+        {
+          [ ! -d build ] || ls -1 -f build \
+            | awk '\''NR == FNR { u[$0] = 1; next } $0 in u { print "build/" $0 }'\'' "$work/units" -
+          [ ! -d deps ] || ls -1 -f deps | awk '\''
+            NR == FNR { sub(/^.*-/, ""); h[$0] = 1; next }
+            match($0, /-[0-9a-f]{16}(\.|$)/) {
+              if (substr($0, RSTART + 1, 16) in h) print "deps/" $0
+            }'\'' "$work/units" -
+        } | sed "s|^|$profile/|" >>"$work/outputs"
+        sed "s|^|$profile/.fingerprint/|" "$work/units" >>"$work/fingerprints"
+      done
+      [ -s "$work/outputs" ] || exit 1
+      cd "$seed"
       for list in outputs fingerprints; do
         tr "\n" "\0" <"$work/$list" \
           | xargs -0 -r cp -a --parents --reflink=always --update=none --target-directory="$dest/" --
       done
-      wc -l <"$work/units"
-    ' bash "$seed" "$profile" "$target" "$paths"
+      wc -l <"$work/fingerprints"
+    ' bash "$seed" "$target" "$paths"
 }
 
 path_packages() {
@@ -100,7 +99,9 @@ path_packages() {
   done | sort -u
 }
 
-if [ -f "$checkout/Cargo.lock" ]; then
+if [ -f "$checkout/Cargo.lock" ] \
+  && [ -z "$(find "$target" -type f ! -name .cargo-lock ! -name CACHEDIR.TAG \
+    ! -name .sinnix-seed.lock -print -quit)" ]; then
   baseline="$(git config --get sinnix.baselineCheckout || true)"
   sources=()
   if [ -n "$baseline" ] && [ -d "$baseline" ]; then
@@ -118,26 +119,14 @@ if [ -f "$checkout/Cargo.lock" ]; then
   while IFS= read -r line; do [ -n "$line" ] && sources+=("$line"); done \
     < <([ "${#recent[@]}" -eq 0 ] || printf '%s\n' "${recent[@]}" | sort -rn | head -n 3 | cut -d' ' -f2-)
 
-  stamps="$target/.sinnix-merged"
-  mkdir -p "$stamps"
   for source in ${sources[@]+"${sources[@]}"}; do
     seed="$(target_of "$source")"
     [ "$seed" != "$target" ] || continue
     paths="$(path_packages "$checkout/Cargo.lock" "$source/Cargo.lock")"
-    added=0
-    for fingerprints in "$seed"/*/.fingerprint "$seed"/*/*/.fingerprint; do
-      [ -d "$fingerprints" ] || continue
-      profile="${fingerprints#"$seed/"}"
-      profile="${profile%/.fingerprint}"
-      stamp="$stamps/$(printf '%s:%s' "$source" "$profile" | sha256sum | cut -c1-32)"
-      [ ! -e "$stamp" ] || [ "$fingerprints" -nt "$stamp" ] || continue
-      if count="$(merge_profile "$seed" "$profile" 2>/dev/null)"; then
-        added=$((added + ${count:-0}))
-        touch -r "$fingerprints" "$stamp"
-      fi
-    done
-    [ "$added" -eq 0 ] \
-      || echo "sinnix-cargo-target: added $added units to $target from $source" >&2
+    if count="$(seed_target "$seed" "$paths" 2>/dev/null)"; then
+      echo "sinnix-cargo-target: seeded $count units into $target from $source" >&2
+      break
+    fi
   done
 fi
 
