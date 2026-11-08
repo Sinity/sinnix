@@ -442,7 +442,13 @@ in
         # nm-applet and at-spi at 5s) — and the system manager's own 90s default
         # is deliberately left alone, since daemons with real flush work sit
         # outside this chain.
-        systemd.user.settings.Manager.DefaultTimeoutStopSec = "15s";
+        systemd.user.settings.Manager = {
+          DefaultTimeoutStopSec = "15s";
+          # Per-unit I/O figures for user units (agent jobs, the Polylogue
+          # daemon), as system units already have; the health sweep's I/O
+          # stall lane names the top readers from these.
+          DefaultIOAccounting = true;
+        };
       }
     ]
   );
