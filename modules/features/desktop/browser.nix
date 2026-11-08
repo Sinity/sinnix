@@ -195,6 +195,11 @@ mkFeatureModule {
         };
       };
 
+      # Chrome's remote-debugging port grants full control of every signed-in
+      # session to whoever connects; only the operator's own processes
+      # (including agents, which run as the operator) may.
+      sinnix.networking.operatorOnlyLocalPorts = [ helpers.data.ports.chromeDevtools ];
+
       home-manager.users.${user} =
         {
           pkgs,
@@ -210,8 +215,8 @@ mkFeatureModule {
           # profile path (~/.config/google-chrome). Pointing at a non-default
           # directory restores debug-port behaviour. See:
           # https://developer.chrome.com/blog/remote-debugging-port
-          # Side effect: loopback-only debug port allows local processes to
-          # read cookies via CDP. Acceptable on this single-user machine.
+          # The loopback debug port is limited to the operator's own processes
+          # by sinnix.networking.operatorOnlyLocalPorts (set above).
           chromeUserDataDir = "${config.home.homeDirectory}/${nixosConfig.sinnix.features.desktop.browser.chromeUserDataDir}";
           chromeArgs = lib.concatStringsSep " " (
             [
