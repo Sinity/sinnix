@@ -338,42 +338,6 @@ def render_human(data: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def render_acknowledged_only(acked: list[dict[str, Any]]) -> str:
-    """The outages part of the session-start context (sessionstart-context.sh):
-    empty string (print nothing) when there is nothing acknowledged."""
-    if not acked:
-        return ""
-    lines = ["## Acknowledged outages (known-down, do not re-report as incidents)", ""]
-    for row in acked:
-        lines.append(f"- {row['surface']} ({row.get('unit') or '?'}) — {row['reason']}")
-    lines.append("")
-    lines.append(
-        "These are declared in the runtime inventory with a tracking reference. "
-        "Treat them as\nexpected state. If one looks stale, check its reference "
-        "rather than raising it as new."
-    )
-    return "\n".join(lines) + "\n"
-
-
-def acknowledged_only_report(
-    *,
-    socket_path: Path,
-    static_inventory_path: Path,
-    fetch: Callable[[Path, str], dict[str, Any] | None] = fetch_socket_json,
-    read_static: Callable[[Path], dict[str, Any] | None] = read_static_inventory,
-) -> str:
-    """The fast path the folded session-start hook actually takes: a direct
-    static-file read, same as the shell hook it replaces, with the socket as
-    fallback only -- so a healthy host pays no hub server round trip for
-    something a `jq` one-liner used to answer alone."""
-    inventory = read_static(static_inventory_path)
-    if inventory is None:
-        snapshot = fetch(socket_path, "/v1/snapshot")
-        state = snapshot.get("state") if isinstance(snapshot, dict) else None
-        inventory = state.get("runtime_inventory") if isinstance(state, dict) else None
-    return render_acknowledged_only(acknowledged_outages(inventory))
-
-
 def render_attention(data: dict[str, Any]) -> str:
     """The machine part of the session-start context: only what needs
     attention, one line each; empty when the machine is healthy."""
@@ -424,15 +388,6 @@ def main(argv: list[str] | None = None) -> int:
         "--json", action="store_true", help="Emit the composed document as JSON."
     )
     parser.add_argument(
-        "--acknowledged-only",
-        action="store_true",
-        help=(
-            "Print only the acknowledged-outages block that the session-start "
-            "context (sessionstart-context.sh) injects; silent when there "
-            "is nothing acknowledged."
-        ),
-    )
-    parser.add_argument(
         "--attention",
         action="store_true",
         help=(
@@ -445,14 +400,6 @@ def main(argv: list[str] | None = None) -> int:
         "--inventory", type=Path, default=runtime_inventory.default_path()
     )
     args = parser.parse_args(argv)
-
-    if args.acknowledged_only:
-        text = acknowledged_only_report(
-            socket_path=args.socket, static_inventory_path=args.inventory
-        )
-        if text:
-            sys.stdout.write(text)
-        return 0
 
     if args.attention:
         data = compose(

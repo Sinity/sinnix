@@ -5,10 +5,15 @@
 #   1. Polylogue's session-start brief (`polylogue hook SessionStart`, which
 #      also records the event in Polylogue's hook spool). After compaction it
 #      is Polylogue's compaction recipe.
-#   2. Services that are down on purpose (`sinnix status --acknowledged-only`),
-#      so a fresh session does not report an intentional outage as a finding.
-#   3. Sinex sources that recorded something in the last two hours: names and
-#      times only, never captured content.
+#   2. What on the machine needs attention (`sinnix status --attention`):
+#      failed or stuck units, failing health lanes, undelivered desktop
+#      notices, and the services that are down on purpose (so a fresh session
+#      does not report an intentional outage as a finding). Silent when the
+#      machine is healthy.
+#   3. Sinex: its search index when it is far behind, sources that recorded
+#      something in the last two hours, and sources that went quiet (events in
+#      the last 7 days but none in the last 24 hours). Names and times only,
+#      never captured content.
 #
 # Parts 2 and 3 describe the machine, so they come only on a new session
 # (`startup`, `clear`), not on `resume` or `compact`.
@@ -39,7 +44,7 @@ fi
 
 if [ "$source" = startup ] || [ "$source" = clear ]; then
   if command -v sinnix >/dev/null 2>&1; then
-    timeout 4s sinnix status --acknowledged-only >"$work/outages" 2>/dev/null &
+    timeout 4s sinnix status --attention >"$work/outages" 2>/dev/null &
   fi
   if [ "${SINEX_SESSIONSTART_RECALL:-1}" != 0 ] && command -v sinexctl >/dev/null 2>&1; then
     timeout "${SINEX_SESSIONSTART_RECALL_TIMEOUT_SECS:-4}s" sinexctl --json status >"$work/sinex" 2>/dev/null &
@@ -53,13 +58,28 @@ outages=$(cat "$work/outages" 2>/dev/null || true)
 sinex=$(jq -r --argjson hours "${SINEX_SESSIONSTART_RECALL_HOURS:-2}" --argjson limit "${SINEX_SESSIONSTART_RECALL_LIMIT:-8}" '
   def epoch: sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | fromdateiso8601;
   (now - $hours * 3600) as $since
-  | [.sources[]? | select(.last_event != null and (.last_event | epoch) >= $since)]
-  | sort_by(.last_event) | reverse
-  | if length == 0 then empty else
-      "Sinex sources with events in the last \($hours)h, newest first (UTC): "
-      + ([.[0:$limit][] | "\(.binding) \(.last_event[11:16])"] | join(", "))
-      + ". `sinex_recall` or `sinexctl recall` shows what they recorded."
-    end
+  | (now - 86400) as $day | (now - 7 * 86400) as $week
+  | ([.sources[]? | select(.last_event != null and (.last_event | epoch) >= $since)]
+     | sort_by(.last_event) | reverse) as $fresh
+  | ([.sources[]? | select(.last_event != null)
+      | select((.last_event | epoch) < $day and (.last_event | epoch) >= $week)]
+     | sort_by(.last_event) | reverse) as $quiet
+  | (.search_index.behind // 0) as $behind
+  | [
+      (if $behind >= 1000 then
+         "Sinex search index is \($behind) commits behind; search and follow answers lag."
+       else empty end),
+      (if ($quiet | length) > 0 then
+         "Sinex sources gone quiet (events this week, none in 24h): "
+         + ([$quiet[0:$limit][] | "\(.binding) last \(.last_event[0:16])"] | join(", "))
+       else empty end),
+      (if ($fresh | length) > 0 then
+         "Sinex sources with events in the last \($hours)h, newest first (UTC): "
+         + ([$fresh[0:$limit][] | "\(.binding) \(.last_event[11:16])"] | join(", "))
+         + ". `sinex_recall` or `sinexctl recall` shows what they recorded."
+       else empty end)
+    ]
+  | join("\n")
 ' "$work/sinex" 2>/dev/null || true)
 
 context=""
