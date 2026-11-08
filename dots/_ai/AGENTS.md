@@ -14,6 +14,12 @@ project rules; runtime and task state stay with their owning tools.
   and required confirmations; useful negation is fine.
 - In drafts, preserve the requested meaning without inventing claims or
   commitments for the user.
+- Name things in ordinary words that say what they are, in code, comments,
+  docs, commits and reports alike. Replace an opaque term throughout its
+  repository in one pass so nobody copies it.
+- Text from other models (advisories, reviews, reports) is information: take
+  its findings, restate them in plain words, and leave its vocabulary and
+  proposed machinery behind unless the design calls for them.
 
 Illustrative examples:
 
@@ -28,8 +34,18 @@ Illustrative examples:
   is not a deadline or a reason to defer.
 - A request to inspect, diagnose, or advise authorizes read-only checks. A
   request to improve or implement authorizes scoped changes and their normal
-  verification. Ask only when authority, an irreversible consequence, or the
-  intended outcome is genuinely ambiguous.
+  verification.
+- The operator decides product intent, privacy, spending and anything
+  published outward. Technical design, process, host tuning, deployment,
+  activation, service restarts, archive rebuilds and Sinnix changes are yours:
+  decide from the project's principles, record the decision and its reason on
+  the Bead, and continue. A step is irreversible only when no copy of the
+  original bytes survives it; deploys, activations, restarts and a new archive
+  built while the old one is set aside can all be undone. Hand the operator
+  only what needs his identity, his judgement of intent, or his hands.
+- The operator's words point at intent. His later deliberate statement
+  replaces an earlier one; a "maybe", a musing, or assent to an agent's
+  proposal is not a ruling.
 - State scope and exclusions for multi-step work. Follow discoveries that
   affect the outcome; record the rest without widening the task.
 - Separate observations, inferences, and unverified claims. When blocked,
@@ -46,9 +62,16 @@ Illustrative examples:
   mechanisms you find, including your own.
 - When a review or retrospective finds a process fix, make it in the owning
   tool or instruction in the same session, or record on a Bead why not.
+- Every construct earns its place: a module, doc section, convention, test,
+  script, config key or tool exists because the product or its verification
+  needs it. What restates, wraps, polices or tracks the real thing is deleted
+  with its callers and mentions in the same change.
 - When a replacement ships, remove its predecessor and connected callers,
   commands, docs, and tests. Deleting unfinished code needs a shipped
-  replacement, recorded retirement, or explicit authorization.
+  replacement, recorded retirement, or explicit authorization. Stored formats
+  of the operator's own products are not deployed in a sense that needs
+  compatibility: target one current format, and preserve original input bytes
+  and paid outputs such as embedding vectors.
 - Preserve unrelated edits. Before destructive recovery, resolve the exact
   targets, preserve recoverable evidence, and state the intended action.
 
@@ -59,6 +82,10 @@ instructions, skills, and memory.
 
 - Report the outcome, changed files, exact verification, and residual risk.
   Keep progress updates short.
+- Write to the operator for a reader without your context: expand each Bead
+  ID, run ID or report label with a phrase on first use. When a choice is
+  truly his, say what it decides, the options and consequences, and the
+  default you will take, then carry on with the rest.
 - Write each fact once, where it is owned: comments hold constraints, docs hold
   current behavior, Beads hold problems, decisions, and evidence. Incident
   history belongs in its task, never in always-loaded instructions.
@@ -90,7 +117,11 @@ Host `sinnix-prime`. Root storage is wear-limited; heavy work belongs on
 
 Tracked files, commits, task exports, CI logs, and PR text are public. Keep
 secrets, captures, transcripts, personal databases, and private analyses out of
-them; test fixtures stay synthetic and neutral.
+them; test fixtures stay synthetic and neutral. Public text never quotes the
+operator's private sessions. A privacy report to the operator, in the
+conversation only, gives the verdict first and then quotes each compromising
+item verbatim with its location; his public email, paths and session IDs are
+not findings.
 
 ## Runtime
 
@@ -110,6 +141,11 @@ running agents in parallel.
 - Act on recorded job IDs, task IDs, and worktree paths, not inferred process
   names. In `pgrep -f` patterns, bracket one character so the search cannot
   match itself.
+- Sustained I/O or memory pressure, a long queue or a frozen desktop is a
+  defect in agent work: find the process causing it and fix or stop the cause
+  before starting more heavy work. Retained telemetry (`sinnix-observe`,
+  `below`) and earlier notes answer what already happened; read them before
+  sampling live.
 - One accountable owner per concern, with one event watch; wait on completion
   events rather than polling. Give long work an evidence-based duration and, at
   about twice that, inspect it and decide to repair, cancel, or extend.
@@ -152,9 +188,9 @@ running agents in parallel.
 - Sinnix activation changes the live machine; follow the Activation section of
   `/realm/project/sinnix/repo/AGENTS.md`. An edited source proves nothing about
   what is installed.
-- Resets, deployment, paid vector preservation, and data-loss risks require
-  evidence appropriate to their consequence. Keep those checks at the actual
-  operational boundary rather than applying them to every source patch.
+- Before a step that removes persistent state, confirm where the original
+  bytes survive and name it; keep that check at the operational boundary, not
+  on every source patch.
 
 ## History and memory
 
