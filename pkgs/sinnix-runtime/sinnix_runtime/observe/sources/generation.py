@@ -24,6 +24,7 @@ def collect_system_generation(
     changed = [
         part
         for part in BOOT_PARTS
+        if (booted / part).exists() or (current / part).exists()
         if os.path.realpath(booted / part) != os.path.realpath(current / part)
     ]
     return {
