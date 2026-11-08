@@ -1066,16 +1066,6 @@ def test_incomplete_cancel_has_refused_exit_status(cli_config, monkeypatch, caps
     assert json.loads(capsys.readouterr().out)["terminal"] is False
 
 
-def test_events_compact_cli(cli_config, capsys):
-    cli_config.event_spool.parent.mkdir(parents=True, exist_ok=True)
-    cli_config.event_spool.write_text('{"kind":"pressure"}\n')
-    assert cli.main(["events", "compact", "--json"]) == 0
-    result = json.loads(capsys.readouterr().out)
-    assert result["events_kept"] == 1
-    assert result["events_rewritten"] == 0
-    assert result["bytes_before"] == result["bytes_after"]
-
-
 @pytest.mark.parametrize("timeouts", [(900, 1800), (0, 0)])
 def test_launch_and_get_expose_the_bound_descriptor_not_the_workspace_descriptor(
     fake_pueue: FakePueue,

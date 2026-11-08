@@ -209,7 +209,7 @@ class Handler(BaseHTTPRequestHandler):
         pages moved here from a timer.
         """
         requested = {
-            "/": ("storage", "drift"),
+            "/": ("storage", "generation"),
             "/work/": ("workloads", "ingestion", "slices"),
         }.get(pages.canonical(path), ())
         snapshot = self.builder.page_snapshot(requested)

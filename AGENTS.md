@@ -91,12 +91,9 @@ the destructive-command guard, and agentctl own their respective behavior.
 Instruction and skill text is live through symlinks; Codex's per-skill links
 change at activation when a skill is added, renamed, or removed.
 
-After changing the skill set or descriptions, agent definitions, or MCP
-registry, regenerate `docs/agent-environment.md`:
-
-```sh
-nix run .#sinnix-agent-environment-doc -- --output docs/agent-environment.md
-```
+The MCP registry and capability index (`/etc/sinnix/capability-index.json`,
+read with `sinnix-capabilities`) list servers and tools; skill frontmatter is
+the skill list.
 
 ## Workflow and verification
 

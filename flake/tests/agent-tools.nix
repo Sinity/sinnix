@@ -236,18 +236,6 @@ in
               ) config.sinnix.persistence.home.directories;
               message = "Clodex's non-secret OAuth recovery state must survive impermanence.";
             }
-            # These two jobs render through mkScheduledJob at the NixOS level
-            # (/etc/systemd/user), not through home-manager — the two
-            # namespaces never merge, so asserting the right carrier is the
-            # test's whole value.
-            {
-              assertion = builtins.hasAttr "sinnix-settings-env-lint" config.systemd.user.services;
-              message = "The settings environment audit service must be declared.";
-            }
-            {
-              assertion = builtins.hasAttr "sinnix-settings-env-lint" config.systemd.user.timers;
-              message = "The settings environment audit timer must be declared.";
-            }
             {
               assertion = builtins.all (path: builtins.hasAttr path hm.home.file) [
                 ".local/bin/sinnix-chrome-control"
@@ -1499,24 +1487,6 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/bd-dolt-authority.sh} ${sinnixScriptRegistry.packageSet.beads}/bin/bd
             touch "$out"
           '';
-      skillAuthoringFixture =
-        pkgs.runCommand "skill-authoring-fixture"
-          {
-            nativeBuildInputs = [
-              pkgs.bash
-              pkgs.coreutils
-              pkgs.jq
-              pkgs.python3
-            ];
-          }
-          ''
-            validator="$TMPDIR/validate_skill.py"
-            cp ${../../dots/_ai/skills/skill-authoring/scripts/validate_skill.py} "$validator"
-            chmod +x "$validator"
-            patchShebangs "$validator"
-            ${pkgs.bash}/bin/bash ${../../flake/tests/skill-authoring.sh} "$validator"
-            touch "$out"
-          '';
       chatgptConversationsFixture =
         pkgs.runCommand "chatgpt-conversations-fixture"
           {
@@ -1614,7 +1584,6 @@ in
             patchShebangs "$root/scripts/sinnix-rank"
             cp -r ${../../pkgs/sinnix-rank-core} "$root/pkgs/sinnix-rank-core"
             cp -r ${../../dots/_ai/skills/rank-options} "$root/dots/_ai/skills/rank-options"
-            cp -r ${../../dots/_ai/skills/skill-authoring} "$root/dots/_ai/skills/skill-authoring"
             chmod -R u+w "$root"
             cd "$root"
             HOME="$TMPDIR/home" SINNIX_REPO_ROOT="$root" \
@@ -1661,24 +1630,6 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/agent-definitions.sh} ${../../dots/claude/agents}
             touch "$out"
           '';
-      settingsEnvLintFixture =
-        pkgs.runCommand "settings-env-lint-fixture"
-          {
-            nativeBuildInputs = [
-              pkgs.bash
-              pkgs.coreutils
-              pkgs.jq
-              pkgs.python3
-            ];
-          }
-          ''
-            scanner="$TMPDIR/sinnix-settings-env-lint"
-            cp ${../../scripts/sinnix-settings-env-lint} "$scanner"
-            chmod +x "$scanner"
-            patchShebangs "$scanner"
-            ${pkgs.bash}/bin/bash ${../../flake/tests/settings-env-lint.sh} "$scanner"
-            touch "$out"
-          '';
     in
     {
       checks = {
@@ -1696,14 +1647,12 @@ in
         kitty-launch-keep-focus = kittyLaunchKeepFocusFixture;
         bd-safety-hook = bdSafetyHookFixture;
         bd-dolt-authority = bdDoltAuthorityFixture;
-        skill-authoring = skillAuthoringFixture;
         chatgpt-conversations = chatgptConversationsFixture;
         desktop-capture = desktopCaptureFixture;
         recovery-skills = recoverySkillsFixture;
         rank-options-skill = rankOptionsSkillFixture;
         hooks-harness = hooksHarnessFixture;
         agent-definitions = agentDefinitionsFixture;
-        settings-env-lint = settingsEnvLintFixture;
       };
 
       checks = {

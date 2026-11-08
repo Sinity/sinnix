@@ -307,7 +307,7 @@ class SnapshotBuilder:
             "browser",
             "ingestion",
             "workloads",
-            "drift",
+            "generation",
         }
         if section not in allowed:
             raise ValueError("unknown observation section")

@@ -653,7 +653,7 @@ def test_below_live_path_returns_the_report_dict(monkeypatch) -> None:
 def test_current_profile_never_fans_out_expensive_collectors(monkeypatch):
     for name in (
         "collect_below",
-        "collect_config_drift",
+        "collect_system_generation",
         "collect_chrome_io",
         "collect_storage",
         "collect_blocked_tasks",

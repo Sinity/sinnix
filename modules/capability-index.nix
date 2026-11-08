@@ -1,7 +1,6 @@
 # Capability index — /etc/sinnix/capability-index.json
 #
-# The discoverability half of introspection.nix's config dump: not what the
-# machine is configured to be, but what it can DO and how to invoke it, merged
+# What the machine can DO and how to invoke it, merged
 # from the declarations that already carry that information. The builder and
 # its source map live in modules/lib/capability-index.nix.
 #

@@ -13,7 +13,7 @@ agents_dir=${1:?agent definitions directory}
 schemas_dir="$agents_dir/schemas"
 test -d "$agents_dir" -a -d "$schemas_dir"
 
-for name in triage review judge; do
+for name in triage review; do
   file="$agents_dir/$name.md"
   test -f "$file"
   frontmatter=$(awk 'BEGIN { in_fm=0 } /^---$/ { in_fm++; next } in_fm == 1 { print } in_fm == 2 { exit }' "$file")
@@ -44,7 +44,7 @@ frontmatter_field() {
 }
 
 write_tools="Write Edit MultiEdit"
-for name in triage review judge; do
+for name in triage review; do
   denied=$(frontmatter_field "$agents_dir/$name.md" disallowedTools)
   granted=$(frontmatter_field "$agents_dir/$name.md" tools)
   for tool in $write_tools; do
@@ -64,7 +64,7 @@ test -f "$agents_dir/implementer.md"
 worker_granted=$(frontmatter_field "$agents_dir/implementer.md" tools)
 printf '%s' "$worker_granted" | grep -Fq '*'
 
-for name in triage judge; do
+for name in triage; do
   test -f "$schemas_dir/$name.schema.json"
   jq -e '.type == "object" and .additionalProperties == false and (.required | length) > 0' \
     "$schemas_dir/$name.schema.json" >/dev/null
@@ -84,4 +84,3 @@ validate_sample() {
   ' >/dev/null
 }
 validate_sample "$schemas_dir/triage.schema.json" '{"verdict":"confirmed","confidence":1,"evidence":["fixture:1"],"unsupported":[]}'
-validate_sample "$schemas_dir/judge.schema.json" '{"verdict":"unsupported","confidence":0.2,"evidence":["fixture:2"],"refutation_attempted":true,"unsupported":["missing live route"]}'

@@ -80,11 +80,8 @@ them — that burns its own budget and, for small/fast models, actively fights
 their instinct to avoid broad exploration), the specific bug shapes to watch
 for (the taxonomy below), an explicit instruction to read _every_ file
 completely, and — critically — permission to report partial coverage honestly
-rather than end in silence. See
-[`references/model-tiering.md`](references/model-tiering.md) for which model
-fits which region shape and the concrete launch mechanics (including non-
-Claude backends) that actually worked, with the concurrency/staggering
-lessons learned the hard way.
+rather than end in silence. Model choice and launch mechanics follow the
+`orchestrate` skill.
 
 ### 4. Triage and file
 

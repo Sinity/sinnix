@@ -421,37 +421,6 @@ in
         };
       }
     )
-    (lib.sinnix.mkScheduledJob
-      {
-        inherit config;
-        unitName = "sinnix-config-drift";
-        description = "Compare live state with the evaluated Sinnix configuration";
-        surface = config.sinnix.runtime.units.config-drift;
-      }
-      {
-        execStart = lib.concatStringsSep " " [
-          "${scriptPkgs.sinnix-config-drift}/bin/sinnix-config-drift"
-          "--manifest /etc/sinnix/config.json"
-          "--output ${cfg.paths.machineRoot}/config-drift.jsonl"
-          "--user-name ${cfg.user.name}"
-          # The user profile's noctalia, so the merged export uses the same
-          # binary and schema the running shell does. The collector runs this
-          # child as cfg.user, independently of its privileged machine probes.
-          "--noctalia /etc/profiles/per-user/${cfg.user.name}/bin/noctalia"
-          "--noctalia-config-home /home/${cfg.user.name}/.config/noctalia"
-          "--noctalia-state-home /home/${cfg.user.name}/.local/state/noctalia"
-        ];
-        unit = {
-          after = [ "local-fs.target" ];
-          wants = [ "local-fs.target" ];
-        };
-        timer = {
-          onBootSec = "2min";
-          intervalSec = 300;
-          persistent = true;
-        };
-      }
-    )
     {
       assertions =
         let
@@ -551,21 +520,6 @@ in
           resourceClass = "critical";
           notifyOnFailure = true;
         };
-        # The drift probe itself is governed like everything else it audits:
-        # classed, observed, and its output watched as a lane, so a silently
-        # dead probe is a health verdict rather than a quiet absence.
-        config-drift = {
-          unit = "sinnix-config-drift.service";
-          resourceClass = "background";
-          notifyOnFailure = true;
-          captures = [
-            {
-              name = "config-drift";
-              path = "${cfg.paths.machineRoot}/config-drift.jsonl";
-              staleAfterSeconds = 1800;
-            }
-          ];
-        };
       };
 
       environment.etc."sinnix/runtime-inventory.json" = {
@@ -573,7 +527,6 @@ in
         mode = "0444";
       };
       environment.systemPackages = [
-        scriptPkgs.sinnix-config-drift
         scriptPkgs.sinnix-preflight
       ];
       # setgid: the health transition ledger and its dedup state are written by

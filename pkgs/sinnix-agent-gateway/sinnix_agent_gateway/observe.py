@@ -29,7 +29,7 @@ class ObserveService:
             "generated_at",
             "window",
             "live_pressure",
-            "config_drift",
+            "system_generation",
             "gaps_summary",
             "storage",
             "sources",

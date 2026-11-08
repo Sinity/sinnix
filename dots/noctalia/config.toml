@@ -4,9 +4,7 @@
 # on the next reload with no rebuild. Noctalia merges it with the GUI-owned
 # ~/.local/state/noctalia/settings.toml, and the state file wins. Stable
 # intent lives here; wallpaper favorites, last wallpaper, lockscreen widget
-# geometry and other genuinely mutable state stay in the state file. The
-# config-drift lane compares this file with `noctalia config export merged`
-# for the critical keys, so a GUI override of one is reported, not silent.
+# geometry and other genuinely mutable state stay in the state file.
 
 [accessibility]
 ui_scale = 1.5

@@ -13,65 +13,6 @@ let
     sinnix-lib = externalPackages.sinnix-lib;
   };
   phoneAppPackage = pkgs.callPackage (inputs.phone-app + "/pkg.nix") { };
-  mcpRegistry = import ./data/mcp-registry.nix { inherit lib; };
-  agentProfiles = import ./data/agent-profiles.nix;
-  agentEnvironmentSelections = [
-    {
-      name = "claude";
-      client = "claude";
-      selection = "default";
-    }
-    {
-      name = "codex";
-      client = "codex";
-      selection = "default";
-    }
-    {
-      name = "codex-local";
-      client = "codex";
-      selection = "full";
-    }
-    {
-      name = "codex-deepseek";
-      client = "codex";
-      selection = "full";
-    }
-    {
-      name = "gemini";
-      client = "gemini";
-      selection = "full";
-    }
-    {
-      name = "antigravity";
-      client = "antigravity";
-      selection = "antigravity";
-    }
-    {
-      name = "hermes";
-      client = "hermes";
-      selection = "evidence";
-    }
-  ]
-  ++ lib.mapAttrsToList (name: profile: {
-    name = "hermes-${name}";
-    client = "hermes";
-    selection = profile.mcpProfile or "evidence";
-  }) agentProfiles.hermesProfiles;
-  agentEnvironmentData = pkgs.writeText "sinnix-agent-environment-data.json" (
-    builtins.toJSON {
-      profiles = map (row: {
-        inherit (row) name client;
-        tiers = mcpRegistry.profileTiers.${row.selection};
-        servers = lib.attrNames (mcpRegistry.selectClientServersForProfile row.selection row.client);
-      }) agentEnvironmentSelections;
-      servers = lib.mapAttrsToList (name: server: {
-        inherit name;
-        inherit (server) tier transport clients;
-        command = server.command or null;
-        url = server.url or null;
-      }) mcpRegistry.registry;
-    }
-  );
   agentctlPackage = pkgs.callPackage ../pkgs/agentctl/pkg.nix {
     inherit (pkgs) pueue;
     sinnix-lib = externalPackages.sinnix-lib;
@@ -419,25 +360,6 @@ let
     sinnix-phone-app = phoneAppPackage;
     sinnix-phone-app-install = phoneAppPackage.install;
 
-    sinnix-agent-environment-doc = pkgs.writeShellApplication {
-      name = "sinnix-agent-environment-doc";
-      runtimeInputs = [
-        pkgs.bash
-        pkgs.coreutils
-        pkgs.findutils
-        pkgs.gawk
-        pkgs.jq
-        pkgs.ripgrep
-      ];
-      text = ''
-        exec ${pkgs.bash}/bin/bash ${pkgs.writeText "sinnix-agent-environment-doc-source" (builtins.readFile ../scripts/sinnix-agent-environment-doc)} \
-          --data ${agentEnvironmentData} \
-          --skills-root "''${SINNIX_AGENT_SKILLS_ROOT:-$PWD/dots/_ai/skills}" \
-          --agents-root "''${SINNIX_AGENT_DEFS_ROOT:-$PWD/dots/claude/agents}" \
-          "$@"
-      '';
-      meta.description = "Render the generated Sinnix agent environment reference";
-    };
 
     sinnix-agent-cli-locks = pkgs.writeShellApplication {
       name = "sinnix-agent-cli-locks";
