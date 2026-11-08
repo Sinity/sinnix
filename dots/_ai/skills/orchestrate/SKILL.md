@@ -38,6 +38,10 @@ next, not on supervising progress.
   retained records and native jobs; use native agents for new work.
 - Add workers only when independent work benefits from parallelism. Keep one
   owner for a small connected change; available slots are not a dispatch target.
+- Concurrent agents are one shared budget (20 in Claude Code). An audit or
+  investigation works in its own context and samples breadth; it starts helper
+  agents only when a question splits into parts too large for one context, and
+  then only a few, so other planned work still gets slots.
 - Size the number of writers to what the build queue can verify. Unverified
   branches pile up and meet their errors together in one checkout, where they
   are debugged one at a time.
@@ -66,8 +70,12 @@ next, not on supervising progress.
   review only the delta and affected invariants. Report unmet criteria honestly.
   Implementation, testing, and self-review stay with one owner, never split
   into handoffs or a separate reviewer stage.
-- A worker reports useful progress while required hosted review is pending,
-  then completes publication under the repository's actual gates.
+- A worker owns its change until it is merged: when the check it needs is
+  queued, it blocks on that job (`agentctl job wait <task> --job-id <id>`) and
+  merges on the exact tested head, instead of ending its turn with the merge
+  left to someone else. It reports useful progress while required hosted review
+  is pending, then completes publication under the repository's actual gates.
+  Helper scripts that wait or merge are written for bash and run with `bash`.
 
 ## Models
 

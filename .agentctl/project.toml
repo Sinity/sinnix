@@ -189,7 +189,7 @@ cache = "tree+environment"
 [operations.switch]
 description = "Build and activate the workstation configuration"
 exec = ["switch"]
-pool = "bulk"
+pool = "system-build"
 result = "exit"
 scratch = "nvme"
 timeout_seconds = 28800
@@ -197,7 +197,7 @@ timeout_seconds = 28800
 [operations.boot]
 description = "Build and set the workstation boot default for the next reboot"
 exec = ["boot"]
-pool = "bulk"
+pool = "system-build"
 result = "exit"
 scratch = "nvme"
 timeout_seconds = 28800
