@@ -75,7 +75,15 @@ next, not on supervising progress.
   merges on the exact tested head, instead of ending its turn with the merge
   left to someone else. It reports useful progress while required hosted review
   is pending, then completes publication under the repository's actual gates.
-  Helper scripts that wait or merge are written for bash and run with `bash`.
+  The wait and the merge are one chained command, never a hand-written
+  script: `agentctl job wait <task> --job-id <id> && gh pr merge <n>
+  --squash --match-head-commit <sha>`; where the forge runs the check, `gh pr
+  merge --auto --squash --match-head-commit <sha>` lets the required check
+  gate the merge.
+- Before merging, rebase the branch onto the current default branch and let
+  the forge squash it. Never build a squash commit locally on a different base
+  than the branch was written on: it silently reverts whatever landed between
+  the two bases.
 
 ## Models
 

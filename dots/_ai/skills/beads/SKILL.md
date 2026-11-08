@@ -115,3 +115,9 @@ enough that neither has to reconstruct intent.
 - File a discovered follow-up at discovery time, linked to its origin, with a
   real title and edges. A ten-second follow-up with a ritual title costs more
   than it saves.
+
+## Writes that report an unclear result
+
+A `bd` write that ends with a connection loss or "result indeterminate" may
+have applied. Read the item (`bd show`, or `bd list` for a create) before
+retrying, so the write is never applied twice.
