@@ -3,7 +3,7 @@
   upstream,
   sourceRevision,
 }:
-assert sourceRevision == "0903241a6b8c823660abe5b440e563eb8abed44b";
+assert sourceRevision == "a45588bd2c2b7a86d7ba38118c49510c0c2f786e";
 upstream.overrideAttrs (old: {
   pname = "sinex-mcp-cli";
   patches = (old.patches or [ ]) ++ [ ./read-only-mcp.patch ];
