@@ -18,7 +18,13 @@ and [the command contract](../../../../docs/agentctl.md) for syntax.
   reads and controls so a queue reorder cannot redirect the call.
 - Wait for a job by blocking on it once: `agentctl job start … --wait`, or
   `agentctl job wait --job-id <id> <task_id>`, which returns at completion
-  without cancelling. Read `result` and `logs` after it is terminal; each
+  without cancelling. Its exit status is the answer: 0 when the job succeeded,
+  4 when it ended without success (it prints the failure lines). Chain on that
+  status (`agentctl job wait <task> --job-id <id> && gh pr merge …`) instead of
+  parsing its output.
+- From a worktree, name the checkout: `agentctl job start --project <worktree
+  path> <operation>`, or omit the project so the enclosing checkout is used. A
+  bare project id selects the registered canonical checkout, not your worktree. Read `result` and `logs` after it is terminal; each
   repeated `job get`, `logs`, `tail` or `sleep` costs a turn and learns nothing
   new. Read original artifacts; a successful transport proves only what its
   payload covers.
