@@ -164,14 +164,29 @@ mkServiceModule {
             };
           };
 
-          # Chrome loads the extension from this directory once
-          # (`sinnix-chrome-control load-extension --path <dir>`) and picks up
-          # new files when the extension reloads.
+          # Chrome loads the extension from this directory and never rereads
+          # its files by itself: a running background keeps the old code
+          # against new page scripts. When the files change, loading the
+          # same directory again reloads the extension under the same ID.
+          # Files are compared by content, so an unchanged extension is not
+          # reloaded on every switch.
+          # Without a reachable Chrome the next browser start loads them.
           home.activation.polylogueBrowserExtension = lib.mkIf browser.enable (
             lib.hm.dag.entryAfter [ "writeBoundary" ] ''
               run mkdir -p ${lib.escapeShellArg extensionDir}
-              run ${pkgs.rsync}/bin/rsync -rL --delete --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r \
-                ${extensionFiles}/ ${lib.escapeShellArg extensionDir}/
+              changed=$(run ${pkgs.rsync}/bin/rsync -rLic --delete --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r \
+                ${extensionFiles}/ ${lib.escapeShellArg extensionDir}/)
+              control="$HOME/.local/bin/sinnix-chrome-control"
+              if [[ -n $changed && ! -v DRY_RUN && -x $control ]]; then
+                PATH=${
+                  lib.makeBinPath [
+                    pkgs.curl
+                    pkgs.jq
+                    pkgs.websocat
+                  ]
+                }:$PATH "$control" load-extension --path ${lib.escapeShellArg extensionDir} >/dev/null 2>&1 \
+                  || echo "Polylogue extension files changed; Chrome was not reachable, so it loads them on its next start"
+              fi
             ''
           );
 
