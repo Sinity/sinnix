@@ -36,7 +36,6 @@ never cancels a job, and a queue cleanup retains its historical artifacts.
 | `evidence list \| get`                                               | read original retained native evidence                                                                                                               |
 | `view [p]`                                                           | queue groups, failures, active jobs, open runs and ready tasks                                                                                       |
 | `events tail [--lines N] [--follow] [--project p]`                   | the event log (`/realm/state/agentctl/events.jsonl`)                                                                                                 |
-| `events compact [--json]`                                            | one-shot replacement of verified embedded receipts with outcome references                                                                           |
 | `pools apply`                                                        | write the declared pool widths into the running pueued                                                                                               |
 | `pressure tick`                                                      | one pass pausing or reopening groups against memory pressure                                                                                         |
 
@@ -68,51 +67,6 @@ Both values are positive integers. Omitted values keep native Nix defaults;
 `--no-build` evaluates the same complete default target set without building.
 Discovery retains its recycled evaluator workers; the explicit bounds apply to
 the subsequent Nix build.
-
-### Event log compaction
-
-`agentctl events compact --json` migrates legacy finished queue-task events
-that embed `execution_receipt`. It takes the same `events.jsonl.lock` as
-appenders and holds it through verification and atomic replacement. Appends
-wait for the command to finish. Memory is bounded by one event and outcome.
-
-For each receipt it tries the job's canonical attempt outcome, then the legacy
-`jobs/<job_id>.outcome` path. It reconstructs the outcome from the embedded
-fields using the legacy publisher's sorted JSON encoding and requires its
-SHA-256 to match the file bytes. The reference names the resolved absolute
-path and that digest. Shared event fields (attempt, outcome, exit code, unit,
-pool) and fields outside the outcome remain on the event. Missing, unreadable,
-or mismatching outcomes leave the original event bytes intact.
-
-The command writes a temporary file beside the log, preserves its owner and
-mode, fsyncs it, rereads both files to verify line counts and every rewritten
-reference, then renames it and fsyncs the directory. Malformed complete records
-are kept verbatim; an unterminated tail refuses compaction. A pre-rename failure
-removes the temporary file and retains the original. A directory-fsync failure
-after rename reports failure although the replacement is already visible.
-The summary reports `bytes_before`, `bytes_after`, `events_rewritten`,
-`events_kept`, and `receipts_unresolved` (embedded receipts kept because no
-matching outcome was found). Existing outcome references are kept unchanged.
-The command leaves snapshots untouched and does not create a backup.
-
-Stop `agentctl events tail --follow` readers before running compaction, then
-restart them afterwards. They keep their open file descriptor on the old
-inode and cannot see subsequent appends to the replacement. Gateway
-`events.tail` reads its configured `runtimeTransitions` ledger (by default
-`/run/sinnix/health-transitions.jsonl`), which is separate from the AgentCTL
-spool configured as `eventSpool`. Its cursors bind to that runtime ledger's
-device/inode generation. Compacting the AgentCTL spool leaves those cursors
-valid when the two paths are separate. If `runtimeTransitions` points at this
-spool, replacement makes its cursors stale; start a new call without the old
-cursor in that case. See also [the gateway event contract](agent-gateway.md).
-
-After activation, check `agentctl events compact --help`. During the approved
-maintenance window, run `agentctl events compact --json`, retain its summary,
-and check `agentctl events tail --lines 3 --json`. Restart followers and verify
-a subsequent real job transition appears. Check that a fresh gateway
-`events.tail` call succeeds and that old-cursor behavior matches the configured
-runtime ledger: it becomes stale only if that ledger was replaced. Snapshot
-retirement is a separate operator action after review of the compaction summary.
 
 ## Jobs
 
