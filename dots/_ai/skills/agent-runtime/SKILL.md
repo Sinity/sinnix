@@ -22,6 +22,13 @@ and [the command contract](../../../../docs/agentctl.md) for syntax.
   repeated `job get`, `logs`, `tail` or `sleep` costs a turn and learns nothing
   new. Read original artifacts; a successful transport proves only what its
   payload covers.
+- Pools run one heavy job at a time, so queue order decides wall time. Give
+  short jobs that unblock others (an activation, a compile or fast check, a
+  focused rerun) `--priority 50`; leave full checks and package builds at the
+  default.
+- Bound log reads: `journalctl` takes an exact unit and `--since` within the
+  job's lifetime, plus `-n`; a glob unit over days of journal can read for
+  hours.
 - Keep one `agentctl events tail --follow --project <project>` watch per
   concern. Reuse its live handle and stop a watch you own when its purpose ends.
 - A queued job is already running work. Wait for its completion event before

@@ -56,7 +56,9 @@ next, not on supervising progress.
   stacked work waits for the slower of the two and doubles conflict
   resolution. Give a shared contract one owner.
 - The prompt names assigned outcomes, ownership, relevant source pointers,
-  exclusions, and what to report. Include the base and a test selector when
+  exclusions, and what to report. In Claude Code the Write tool refuses report
+  files from subagents; a worker writes its report with a shell heredoc to the
+  path the prompt names, then returns a short summary. Include the base and a test selector when
   needed; avoid copied instructions, complete manifests, and unchanged history.
 - Ask the owner to read every assigned task, write the whole connected change
   in one pass, use proportional verification, and briefly review the delivery
