@@ -1,8 +1,9 @@
 # Sinex MCP provider backport
 
-The workstation daemon runs Sinex `0903241a6b8c823660abe5b440e563eb8abed44b`:
-schema-2 revision `a081818b6` plus one commit that bounds commit-log and window
-page reads (it changes no `sinexctl` code, so this patch still applies). The MCP provider builds only `sinexctl` from that same input with
+The workstation daemon runs Sinex `a45588bd2c2b7a86d7ba38118c49510c0c2f786e`:
+schema-2 revision `a081818b6` plus two commits, bounded commit-log and window
+page reads and size-fitting of confirmed-stream messages (neither changes
+`sinexctl` code, so this patch still applies). The MCP provider builds only `sinexctl` from that same input with
 `read-only-mcp.patch`. The patch backports the Access-derived read annotations
 and object-only structured replies merged upstream as
 `0d4ecc08c97d5c840bce1fb1cb138fa038477d8f` (PR 2969). It retains the data notice.

@@ -91,9 +91,10 @@
     };
 
     # Sinex: its package and NixOS module (modules/services/sinex/bridge.nix).
-    # Pinned to the deployed schema-2 revision (a081818b6) plus one commit that
-    # reads commit-log and window pages without scanning every event; the
-    # full move to Sinex master is a separate migration. A bump is a deploy,
+    # Pinned to the deployed schema-2 revision (a081818b6) plus two commits:
+    # commit-log and window pages read without scanning every event, and
+    # confirmed-stream messages fitted to the NATS size limit; the full move
+    # to Sinex master is a separate migration. A bump is a deploy,
     # and sinexd is restarted by hand afterwards.
     #
     # nixpkgs is deliberately NOT `follows`: Sinex builds against its own
@@ -103,7 +104,7 @@
     # `switch` publishes the Sinex closure after a successful activation
     # (sinexCachePush in flake/command-registry.nix), and the
     # sinex-cache-prebuild timer builds a newly pinned revision ahead of it.
-    sinex.url = "git+https://github.com/Sinity/sinex?ref=fix/deployed-page-reads-20261108&rev=0903241a6b8c823660abe5b440e563eb8abed44b";
+    sinex.url = "git+https://github.com/Sinity/sinex?ref=fix/deployed-page-reads-20261108&rev=a45588bd2c2b7a86d7ba38118c49510c0c2f786e";
 
     # BTRFS rollback impermanence (see modules/persistence.nix)
     impermanence = {
