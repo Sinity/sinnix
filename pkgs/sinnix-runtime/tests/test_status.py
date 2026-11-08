@@ -364,3 +364,54 @@ def test_default_inventory_path_falls_back_to_etc(
 ) -> None:
     monkeypatch.delenv("SINNIX_RUNTIME_INVENTORY_FILE", raising=False)
     assert inventory.default_path() == Path("/etc/sinnix/runtime-inventory.json")
+
+
+# --------------------------------------------------------------------------
+# visibility: failed desktop delivery, failing lanes, the attention block
+# --------------------------------------------------------------------------
+
+
+def _fetch_mixed(_socket: Path, route: str) -> dict[str, Any] | None:
+    return {"/v1/snapshot": SNAPSHOT_HEALTHY, "/v1/health/lanes": LANES_MIXED}[route]
+
+
+def test_failed_desktop_delivery_is_the_first_line() -> None:
+    data = hub_status.compose(
+        socket_path=Path("/nonexistent/hub.sock"),
+        fetch=_fetch_mixed,
+        bd_head=lambda: {"available": False},
+        read_delivery=lambda: {"status": "failed", "at": "2026-11-08T23:00:00Z"},
+    )
+    text = hub_status.render_human(data)
+    assert text.splitlines()[2].startswith("Desktop notices are not being delivered")
+
+
+def test_failing_lanes_are_counted_in_the_headline() -> None:
+    data = hub_status.compose(
+        socket_path=Path("/nonexistent/hub.sock"),
+        fetch=_fetch_mixed,
+        bd_head=lambda: {"available": False},
+        read_delivery=lambda: {},
+    )
+    assert "2 health lanes failing" in data["system"]["summary"]
+
+
+def test_attention_block_lists_problems_and_is_empty_when_healthy() -> None:
+    data = hub_status.compose(
+        socket_path=Path("/nonexistent/hub.sock"),
+        fetch=_fetch_mixed,
+        bd_head=lambda: {"available": False},
+        read_delivery=lambda: {"status": "failed", "at": "t"},
+    )
+    text = hub_status.render_attention(data)
+    assert "desktop notices failing since t" in text
+    assert "unit failed: sinnix-capture-kitty-scrollback.service" in text
+    assert "health lane stale: capture:video-resolve" in text
+
+    healthy = {
+        "system": {"status": "healthy"},
+        "capture_freshness": {"available": True, "non_healthy": []},
+        "acknowledged_outages": [],
+        "desktop_delivery": {"status": "ok"},
+    }
+    assert hub_status.render_attention(healthy) == ""

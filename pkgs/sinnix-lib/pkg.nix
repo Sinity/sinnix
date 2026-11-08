@@ -1,6 +1,7 @@
 {
   python3Packages,
   lib,
+  libnotify,
 }:
 python3Packages.buildPythonPackage {
   pname = "sinnix-lib";
@@ -13,6 +14,13 @@ python3Packages.buildPythonPackage {
       ./sinnix_lib
     ];
   };
+  # notify-send by absolute path: system units and the hub server do not
+  # have the user profile on PATH, and a missing binary must not silently
+  # drop every desktop notice.
+  postPatch = ''
+    substituteInPlace sinnix_lib/notify.py \
+      --replace-fail '@notifySend@' '${libnotify}/bin/notify-send'
+  '';
   doCheck = false;
   build-system = [ python3Packages.setuptools ];
   pythonImportsCheck = [

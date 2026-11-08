@@ -113,6 +113,18 @@ def ledger_path() -> Path:
     return runtime_dir() / "health-transitions.jsonl"
 
 
+def delivery_path() -> Path:
+    """Outcome of the last desktop notice: `sinnix status` shows a failed one
+    first, so a broken notifier is never silent."""
+    return runtime_dir() / "desktop-delivery.json"
+
+
+def record_delivery(delivered: bool, path: Path | None = None) -> None:
+    with modify_json(path or delivery_path(), {}, mode=0o664) as document:
+        document["status"] = "ok" if delivered else "failed"
+        document["at"] = utc_ts()
+
+
 # --------------------------------------------------------------------------
 # evidence and phrasing
 # --------------------------------------------------------------------------
@@ -377,7 +389,9 @@ class Emitter:
     @staticmethod
     def _notify(urgency: str, title: str, body: str) -> None:
         notify_phone(title, body, key=f"health:{title}:{body}")
-        notify_desktop(title, body, urgency=urgency, app_name=APP_NAME)
+        record_delivery(
+            notify_desktop(title, body, urgency=urgency, app_name=APP_NAME)
+        )
 
     def observe(self, key: str) -> None:
         """Register a key without judging it (mid-transition units).

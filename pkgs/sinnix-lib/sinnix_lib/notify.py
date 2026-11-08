@@ -13,6 +13,9 @@ import subprocess
 from pathlib import Path
 
 USER_BUS_ROOT = Path("/run/user")
+# Replaced with the Nix store path of libnotify's notify-send at build time;
+# falls back to PATH when run from a source checkout.
+NOTIFY_SEND = "@notifySend@"
 
 
 def notify_desktop(
@@ -26,7 +29,7 @@ def notify_desktop(
     """Best-effort desktop notification; True when at least one delivery
     succeeded. Never raises — notification is advisory by definition.
     """
-    exe = shutil.which("notify-send")
+    exe = NOTIFY_SEND if not NOTIFY_SEND.startswith("@") else shutil.which("notify-send")
     if exe is None:
         return False
     args = [exe, f"--urgency={urgency}", f"--app-name={app_name}", title, body]
