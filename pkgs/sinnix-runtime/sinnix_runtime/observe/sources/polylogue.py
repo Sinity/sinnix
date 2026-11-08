@@ -1,23 +1,20 @@
-"""Polylogue live-ingest attempt reader."""
+"""Polylogue daemon status reader (`polylogue status --json`)."""
 
 from __future__ import annotations
 
+import json
 import os
-from datetime import UTC, datetime
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
 from ..runtime_inventory import polylogue_archive
-from .sqlite_util import sqlite_columns, sqlite_errors, sqlite_rows, table_exists
 
-POLYLOGUE_TIERS = (
-    "index.db",
-    "source.db",
-    "embeddings.db",
-    "ops.db",
-    "audit.db",
-    "user.db",
-)
+POLYLOGUE_UNIT = "polylogue-live.service"
+# Database files of the Rust archive. Original bytes live in the blob store
+# (`blobs/`, `segments/` in later builds), which is not listed here.
+POLYLOGUE_FILES = ("archive.db", "index.db", "embeddings.db")
 
 
 def _archive_root() -> Path | None:
@@ -25,95 +22,80 @@ def _archive_root() -> Path | None:
     return Path(configured) if isinstance(configured, str) and configured else None
 
 
-def polylogue_tiers() -> dict[str, Any]:
+def polylogue_files() -> dict[str, Any]:
     root = _archive_root()
-    rows: list[dict[str, str]] = []
+    rows: list[dict[str, Any]] = []
     if root is None:
-        return {"root": None, "tiers": rows}
-    for name in POLYLOGUE_TIERS:
+        return {"root": None, "files": rows}
+    for name in POLYLOGUE_FILES:
         path = root / name
         try:
-            if path.is_symlink():
-                state = "compatibility" if path.exists() else "stale_compatibility"
-            elif path.is_file():
-                state = "active"
-            elif path.exists():
-                state = "inaccessible"
-            else:
-                state = "missing"
+            size = path.stat().st_size if path.is_file() else None
+            state = (
+                "present"
+                if size is not None
+                else ("missing" if not path.exists() else "inaccessible")
+            )
         except OSError:
-            state = "inaccessible"
-        rows.append({"name": name, "path": str(path), "state": state})
-    return {"root": str(root), "tiers": rows}
+            size, state = None, "inaccessible"
+        rows.append({"name": name, "path": str(path), "state": state, "bytes": size})
+    return {"root": str(root), "files": rows}
 
 
-def polylogue_db() -> Path | None:
-    override = os.environ.get("SINNIX_OBSERVE_POLYLOGUE_DB")
-    if override:
-        return Path(override)
-    root = _archive_root()
-    return root / "ops.db" if root is not None else None
+def _status_command() -> list[str] | None:
+    override = os.environ.get("SINNIX_OBSERVE_POLYLOGUE")
+    executable = override or shutil.which("polylogue")
+    return [executable, "status", "--json"] if executable else None
 
 
-def collect_polylogue_live_attempts(limit: int) -> dict[str, Any]:
-    db = polylogue_db()
+def collect_polylogue_status(timeout: float = 20.0) -> dict[str, Any]:
+    """Ask the running daemon for its status; report a gap when it cannot answer."""
     source: dict[str, Any] = {
-        "db": str(db) if db else None,
+        "unit": POLYLOGUE_UNIT,
         "available": False,
-        "rows": [],
-        "archive": polylogue_tiers(),
+        "archive": polylogue_files(),
     }
-    if not db or not table_exists(db, "ingest_attempts"):
-        source["gaps"] = ["polylogue.live_attempts.unavailable"]
+    command = _status_command()
+    if command is None:
+        source["gaps"] = ["polylogue.status.no_executable"]
         return source
-    required = {
-        "attempt_id",
-        "source_path",
-        "origin",
-        "status",
-        "phase",
-        "started_at_ms",
-        "heartbeat_at_ms",
-        "finished_at_ms",
-        "parsed_raw_count",
-        "materialized_count",
-        "error_message",
-    }
-    if not required.issubset(sqlite_columns(db, "ingest_attempts")):
-        source["gaps"] = ["polylogue.live_attempts.invalid_schema"]
-        return source
-    # The OPS tier owns this relation. Retain its fields and units; only the
-    # common report timestamps and path/error names need a projection.
-    prior_errors = len(sqlite_errors())
-    rows = sqlite_rows(
-        db,
-        """
-        select *, coalesce(heartbeat_at_ms, finished_at_ms, started_at_ms) as updated_at_ms
-        from ingest_attempts
-        order by coalesce(heartbeat_at_ms, finished_at_ms, started_at_ms) desc,
-                 started_at_ms desc, attempt_id
-        limit ?
-        """,
-        (limit,),
-    )
-    if len(sqlite_errors()) != prior_errors:
-        source["gaps"] = ["polylogue.live_attempts.query_failed"]
-        return source
-    for row in rows:
-        row.update(
-            started_at=_timestamp(row["started_at_ms"]),
-            updated_at=_timestamp(row["updated_at_ms"]),
-            completed_at=_timestamp(row["finished_at_ms"]),
-            current_source=row["origin"],
-            current_path=row["source_path"],
-            error=row["error_message"],
+    try:
+        done = subprocess.run(
+            command, capture_output=True, text=True, timeout=timeout, check=False
         )
-    source["available"] = True
-    source["rows"] = rows
+    except (OSError, subprocess.TimeoutExpired) as error:
+        source["gaps"] = ["polylogue.status.unreachable"]
+        source["error"] = str(error)
+        return source
+    if done.returncode != 0:
+        source["gaps"] = ["polylogue.status.failed"]
+        source["error"] = (done.stderr or done.stdout).strip()[:500]
+        return source
+    try:
+        status = json.loads(done.stdout)
+    except json.JSONDecodeError:
+        source["gaps"] = ["polylogue.status.unreadable"]
+        return source
+    store = status.get("store") or {}
+    source.update(
+        available=True,
+        pid=status.get("pid"),
+        uptime_seconds=status.get("uptime_seconds"),
+        busy=status.get("busy"),
+        passes=status.get("passes"),
+        mode=(status.get("mode") or {}).get("state"),
+        last_pass=status.get("last_pass"),
+        store={
+            key: store.get(key)
+            for key in (
+                "sessions",
+                "messages",
+                "inputs",
+                "revisions",
+                "stored_bytes",
+                "parse_states",
+                "search_pending",
+            )
+        },
+    )
     return source
-
-
-def _timestamp(milliseconds: int | None) -> str | None:
-    if milliseconds is None:
-        return None
-    return datetime.fromtimestamp(milliseconds / 1000, UTC).isoformat()

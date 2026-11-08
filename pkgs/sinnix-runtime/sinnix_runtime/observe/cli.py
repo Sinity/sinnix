@@ -18,7 +18,7 @@ from .sources.agent_gateway import collect_agent_gateway
 from .sources.below import collect_below
 from .sources.chrome import collect_chrome_io
 from .sources.drift import collect_config_drift
-from .sources.polylogue import collect_polylogue_live_attempts
+from .sources.polylogue import collect_polylogue_status
 from .sources.pressure import collect_blocked_tasks, collect_pressure
 from .sources.sqlite_util import clear_sqlite_errors, sqlite_errors
 from .sources.storage import collect_storage
@@ -54,8 +54,8 @@ def _sources(
             "path": sinex.get("db"),
             "available": sinex.get("available"),
         },
-        "polylogue_live_attempts": {
-            "path": polylogue.get("db"),
+        "polylogue_status": {
+            "unit": polylogue.get("unit"),
             "available": polylogue.get("available"),
         },
     }
@@ -146,7 +146,7 @@ def collect_report(args: argparse.Namespace) -> dict[str, Any]:
             else:
                 systemd_units = collect_systemd_units(args.offline)
                 sinex = collect_sinex_xtask(args.limit)
-                polylogue = collect_polylogue_live_attempts(args.limit)
+                polylogue = collect_polylogue_status()
                 gateway = collect_agent_gateway(args.limit, below)
                 workload_rows = build_workload_rows(
                     systemd_units, sinex, polylogue, below
@@ -166,12 +166,12 @@ def collect_report(args: argparse.Namespace) -> dict[str, Any]:
                 )
         elif section == "ingestion":
             sinex = collect_sinex_xtask(args.limit)
-            polylogue = collect_polylogue_live_attempts(args.limit)
+            polylogue = collect_polylogue_status()
             report.update(
                 {
                     "sources": _sources(sinex, polylogue),
                     "sinex_xtask_history": sinex,
-                    "polylogue_live_attempts": polylogue,
+                    "polylogue_status": polylogue,
                 }
             )
         else:
@@ -184,7 +184,7 @@ def collect_report(args: argparse.Namespace) -> dict[str, Any]:
     systemd_units = collect_systemd_units(args.offline)
     slices = collect_resource_slices(args.offline)
     sinex = collect_sinex_xtask(args.limit)
-    polylogue = collect_polylogue_live_attempts(args.limit)
+    polylogue = collect_polylogue_status()
     below = collect_below(args.since, args.duration, args.limit, args.offline)
     chrome_io = collect_chrome_io(args.offline, below, args.limit)
     gateway = collect_agent_gateway(args.limit, below)
@@ -204,7 +204,7 @@ def collect_report(args: argparse.Namespace) -> dict[str, Any]:
         "resource_slices": slices,
         "chrome_io": chrome_io,
         "sinex_xtask_history": sinex,
-        "polylogue_live_attempts": polylogue,
+        "polylogue_status": polylogue,
         "below": below,
         "agent_gateway": gateway,
         "workload_rows": workload_rows,

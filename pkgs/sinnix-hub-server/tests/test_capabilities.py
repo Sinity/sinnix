@@ -34,7 +34,7 @@ INDEX: dict[str, Any] = {
             "kind": "service",
             "name": "polylogue",
             "description": "AI chat archiver",
-            "invoke": "systemctl --user status polylogued.service",
+            "invoke": "systemctl --user status polylogue-live.service",
             "enabled": True,
             "owner": "modules/services/polylogue.nix",
             "docs": None,

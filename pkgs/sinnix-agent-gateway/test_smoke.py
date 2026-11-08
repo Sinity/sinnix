@@ -730,7 +730,7 @@ def test_machine_query_selects_and_pages_large_collector_report(tmp_path: Path) 
         "runtime_inventory": {"units": []},
         "agent_gateway": {"available": True},
         "chrome_io": {"available": True},
-        "polylogue_live_attempts": {"available": False},
+        "polylogue_status": {"available": False},
         "sinex_xtask_history": {"available": False},
     }
     collector = tmp_path / "observe-fixture"

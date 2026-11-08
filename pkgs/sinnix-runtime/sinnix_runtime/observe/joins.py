@@ -12,7 +12,7 @@ from .util import normalize_timestamp
 def project_for_unit(unit: str) -> str | None:
     if unit.startswith("sinex") or unit == "postgresql.service":
         return "sinex"
-    if unit.startswith("polylogue") or unit.startswith("polylogued"):
+    if unit.startswith("polylogue"):
         return "polylogue"
     if unit.startswith("borg") or unit.startswith("btrbk"):
         return "backup"
@@ -23,7 +23,7 @@ def project_for_text(text: str) -> str | None:
     lower = text.lower()
     if "sinex" in lower or "xtask" in lower:
         return "sinex"
-    if "polylogue" in lower or "polylogued" in lower:
+    if "polylogue" in lower:
         return "polylogue"
     if "borg" in lower or "btrbk" in lower:
         return "backup"
@@ -95,9 +95,7 @@ def build_workload_rows(
             "sinex.invocation.lacks_psi_window",
             "sinex.invocation.lacks_declared_resource_class",
         ]
-        command = " ".join(
-            str(v) for v in [row.get("command"), row.get("subcommand")] if v
-        )
+        command = " ".join(str(v) for v in [row.get("command"), row.get("args")] if v)
         rows.append(
             {
                 "workload_id": f"sinex.xtask:{row.get('id')}",
@@ -115,74 +113,41 @@ def build_workload_rows(
                 "cgroup": None,
                 "resource_class": infer_sinex_resource_class(row),
                 "metrics": {
-                    "rss_mb": row.get("process_memory_usage_max_mb"),
-                    "cpu_avg": row.get("process_cpu_usage_avg"),
-                    "process_count_max": row.get("process_count_max"),
-                    "resource_sample_count": row.get("resource_sample_count"),
-                    "scope_key": row.get("scope_key"),
-                    "launch_mode": row.get("launch_mode"),
-                    "shared_background_slice_memory_usage_max_mb": row.get(
-                        "shared_background_slice_memory_usage_max_mb"
-                    ),
-                    "shared_nix_build_slice_memory_usage_max_mb": row.get(
-                        "shared_nix_build_slice_memory_usage_max_mb"
-                    ),
+                    "agentctl_job": row.get("agentctl_job"),
+                    "cwd": row.get("cwd"),
+                    "failure": row.get("failure"),
                 },
                 "below": match_below("sinex", None, below),
                 "gaps": gaps,
             }
         )
 
-    for row in polylogue.get("rows", []):
-        gaps = []
-        if not row.get("cgroup_path"):
-            gaps.append("polylogue.live_attempt.lacks_cgroup")
-        if row.get("source_payload_read_bytes") is None:
-            gaps.append("polylogue.live_attempt.lacks_io_bytes")
-        if row.get("cgroup_memory_current_mb") is None:
-            gaps.append("polylogue.live_attempt.lacks_cgroup_memory")
+    if polylogue.get("available"):
+        last = polylogue.get("last_pass") or {}
         rows.append(
             {
-                "workload_id": f"polylogue.live_attempt:{row.get('attempt_id')}",
-                "source": "polylogue.live_attempt",
+                "workload_id": f"polylogue.daemon:{polylogue.get('pid')}",
+                "source": "polylogue.daemon",
                 "project": "polylogue",
-                "kind": "project-ledger",
-                "name": "polylogue live ingest",
-                "run_id": row.get("attempt_id"),
-                "started_at": normalize_timestamp(row.get("started_at")),
-                "finished_at": normalize_timestamp(row.get("completed_at")),
-                "duration_secs": None,
-                "status": row.get("status"),
-                "unit": "polylogued.service",
-                "unit_source": "sinnix-inferred",
-                "cgroup": row.get("cgroup_path"),
+                "kind": "daemon-status",
+                "name": "polylogue daemon",
+                "pid": polylogue.get("pid"),
+                "status": "busy" if polylogue.get("busy") else "idle",
+                "unit": polylogue.get("unit"),
+                "unit_source": "sinnix-declared",
+                "cgroup": None,
                 "resource_class": "capture-runtime",
                 "metrics": {
-                    "phase": row.get("phase"),
-                    "parsed_raw_count": row.get("parsed_raw_count"),
-                    "materialized_count": row.get("materialized_count"),
-                    "outcome_code": row.get("outcome_code"),
-                    "input_bytes": row.get("input_bytes"),
-                    "source_payload_read_bytes": row.get("source_payload_read_bytes"),
-                    "cursor_fingerprint_read_bytes": row.get(
-                        "cursor_fingerprint_read_bytes"
-                    ),
-                    "parse_time_s": row.get("parse_time_s"),
-                    "convergence_time_s": row.get("convergence_time_s"),
-                    "current_source": row.get("current_source"),
-                    "current_path": row.get("current_path"),
-                    "rss_current_mb": row.get("rss_current_mb"),
-                    "rss_peak_self_mb": row.get("rss_peak_self_mb"),
-                    "rss_peak_children_mb": row.get("rss_peak_children_mb"),
-                    "cgroup_memory_current_mb": row.get("cgroup_memory_current_mb"),
-                    "cgroup_memory_peak_mb": row.get("cgroup_memory_peak_mb"),
-                    "cgroup_memory_swap_current_mb": row.get(
-                        "cgroup_memory_swap_current_mb"
-                    ),
-                    "error": row.get("error"),
+                    "uptime_seconds": polylogue.get("uptime_seconds"),
+                    "passes": polylogue.get("passes"),
+                    "last_pass_seconds": last.get("seconds"),
+                    "last_pass_inputs_changed": last.get("inputs_changed"),
+                    "last_pass_bytes_read": last.get("bytes_read"),
+                    "last_pass_messages_written": last.get("messages_written"),
+                    "last_pass_errors": len(last.get("errors") or []),
                 },
-                "below": match_below("polylogued", row.get("cgroup_path"), below),
-                "gaps": gaps,
+                "below": match_below("polylogue", None, below),
+                "gaps": [],
             }
         )
 

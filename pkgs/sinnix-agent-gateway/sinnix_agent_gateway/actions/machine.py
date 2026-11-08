@@ -945,8 +945,8 @@ ACTIONS: tuple[Action, ...] = (
         aliases=("systemctl status", "unit status", "service status", "is it running"),
         examples=(
             Example(
-                title="Describe polylogued",
-                input={"target": {"name": "polylogued", "scope": "user"}},
+                title="Describe polylogue-live",
+                input={"target": {"name": "polylogue-live", "scope": "user"}},
             ),
         ),
     ),
@@ -964,7 +964,11 @@ ACTIONS: tuple[Action, ...] = (
         examples=(
             Example(
                 title="Last 50 lines",
-                input={"target": {"name": "polylogued"}, "lines": 50, "since": "-1h"},
+                input={
+                    "target": {"name": "polylogue-live"},
+                    "lines": 50,
+                    "since": "-1h",
+                },
             ),
         ),
     ),

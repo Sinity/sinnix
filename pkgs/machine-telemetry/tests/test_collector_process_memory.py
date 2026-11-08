@@ -192,7 +192,7 @@ def test_service_unit_props_batches_each_manager(monkeypatch) -> None:
     got = collector.service_unit_props(
         [
             ("system", "a.service"),
-            ("user", "polylogued.service"),
+            ("user", "polylogue-live.service"),
             ("system", "shared.service"),
             ("user", "b.service"),
             ("user", "noctalia.service"),
@@ -204,14 +204,14 @@ def test_service_unit_props_batches_each_manager(monkeypatch) -> None:
     assert [call[0] for call in calls] == ["system", "user"]
     assert calls[0][1] == ["a.service", "shared.service"]
     assert calls[1][1] == [
-        "polylogued.service",
+        "polylogue-live.service",
         "b.service",
         "noctalia.service",
         "shared.service",
     ]
     assert set(got) == {
         ("system", "a.service"),
-        ("user", "polylogued.service"),
+        ("user", "polylogue-live.service"),
         ("system", "shared.service"),
         ("user", "b.service"),
         ("user", "noctalia.service"),

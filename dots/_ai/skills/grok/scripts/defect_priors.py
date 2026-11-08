@@ -1,20 +1,16 @@
 #!/usr/bin/env python3
-"""Defect-prior scoreboard: rank polylogue modules for the next hunt wave.
+"""Defect-prior scoreboard: rank Rust modules for the next hunt wave.
 
-Prior = LOC x thin-test-coverage x churn x past-defect-density, minus
-recently-swept penalty. Machines rank, models judge. Consumers: the
-overseer's hunt dispatch; the sweep ledger lives beside the output.
+Prior = lines x thin tests x churn x past-defect mentions. Machines rank,
+models judge. Tests live in a sibling `tests.rs` (or `<module>/tests.rs`), so
+a module's test count is the number of `#[test]` functions there.
 
 Usage: defect_priors.py [--repo /realm/project/polylogue/repo] [--top 25]
-Sweep ledger (optional): .agent/scratch/sweep-ledger.jsonl in the repo,
-rows {"module": "polylogue/foo.py", "lens": "...", "commit": "...",
-"date": "..."} - a module swept at a commit is penalized until it churns.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import math
 import re
 import subprocess
@@ -22,11 +18,20 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+TEST_ATTR = re.compile(r"#\[(?:tokio::)?test")
+
 
 def sh(args: list[str], cwd: Path) -> str:
     return subprocess.run(
         args, cwd=cwd, capture_output=True, text=True, timeout=300
     ).stdout
+
+
+def sibling_tests(path: Path) -> Path | None:
+    for candidate in (path.with_suffix("") / "tests.rs", path.parent / "tests.rs"):
+        if candidate.is_file() and candidate != path:
+            return candidate
+    return None
 
 
 def main() -> int:
@@ -36,103 +41,55 @@ def main() -> int:
     args = ap.parse_args()
     repo = Path(args.repo)
 
-    # LOC per product file
     loc: dict[str, int] = {}
-    for f in repo.glob("polylogue/**/*.py"):
+    tests: dict[str, int] = {}
+    for f in repo.glob("crates/*/src/**/*.rs"):
+        if f.name == "tests.rs" or "/tests/" in str(f):
+            continue
         rel = str(f.relative_to(repo))
         try:
             loc[rel] = sum(1 for _ in f.open(errors="replace"))
+            sibling = sibling_tests(f)
+            tests[rel] = (
+                len(TEST_ATTR.findall(sibling.read_text(errors="replace")))
+                if sibling
+                else 0
+            )
         except OSError:
             continue
 
-    # churn: commits touching each file in the last 60 days
     churn: dict[str, int] = defaultdict(int)
     out = sh(["git", "log", "--since=60.days", "--name-only", "--pretty=format:"], repo)
     for line in out.splitlines():
-        line = line.strip()
-        if line in loc:
-            churn[line] += 1
+        if line.strip() in loc:
+            churn[line.strip()] += 1
 
-    # covering-test proxy: how many test files mention the module's import path
-    # (cheap stand-in when no testmon db is readable; testmon db preferred)
-    covered: dict[str, int] = defaultdict(int)
-    testmon = repo / ".cache" / "testmon" / "testmondata"
-    if testmon.exists():
-        try:
-            import sqlite3
-
-            conn = sqlite3.connect(f"file:{testmon}?mode=ro&immutable=1", uri=True)
-            for fname, cnt in conn.execute(
-                "SELECT ff.filename, COUNT(DISTINCT n.name) FROM node_fingerprint nf "
-                "JOIN node n ON n.id = nf.node_id "
-                "JOIN fingerprint fp ON fp.id = nf.fingerprint_id "
-                "JOIN file_fp ff ON ff.id = fp.file_fp_id GROUP BY ff.filename"
-            ):
-                if fname in loc:
-                    covered[fname] = cnt
-            conn.close()
-        except Exception:
-            covered.clear()
-    if not covered:
-        grep = sh(
-            ["grep", "-rl", "-E", "from polylogue|import polylogue", "tests/"], repo
-        )
-        test_files = [t for t in grep.splitlines() if t.endswith(".py")]
-        for t in test_files:
-            body = (repo / t).read_text(errors="replace")
-            for rel in loc:
-                mod = rel[:-3].replace("/", ".")
-                if mod in body:
-                    covered[rel] += 1
-
-    # past defect density: bead descriptions mentioning the file (best effort)
     defects: dict[str, int] = defaultdict(int)
-    try:
-        beads = subprocess.run(
+    beads = (
+        subprocess.run(
             ["bd", "list", "--json", "--all"],
             cwd=repo,
             capture_output=True,
             text=True,
             timeout=120,
         ).stdout
-        blob = beads if beads else "[]"
-        for rel in loc:
-            defects[rel] = len(re.findall(re.escape(rel), blob))
-    except Exception:
-        pass
-
-    # sweep ledger penalty
-    swept: dict[str, str] = {}
-    ledger = repo / ".agent" / "scratch" / "sweep-ledger.jsonl"
-    head = sh(["git", "rev-parse", "HEAD"], repo).strip()
-    if ledger.exists():
-        for line in ledger.open():
-            try:
-                row = json.loads(line)
-                swept[row["module"]] = row.get("commit", "")
-            except Exception:
-                continue
+        or "[]"
+    )
+    for rel in loc:
+        defects[rel] = len(re.findall(re.escape(rel), beads))
 
     rows = []
     for rel, n in loc.items():
         if n < 60:
             continue
-        cov = covered.get(rel, 0)
-        thin = 1.0 / (1.0 + cov)
-        ch = 1.0 + math.log1p(churn.get(rel, 0))
-        dd = 1.0 + 0.5 * defects.get(rel, 0)
-        penalty = 0.25 if swept.get(rel) == head else 1.0
-        score = n * thin * ch * dd * penalty
-        rows.append(
-            (score, rel, n, cov, churn.get(rel, 0), defects.get(rel, 0), rel in swept)
-        )
+        thin = 1.0 / (1.0 + tests[rel])
+        score = n * thin * (1.0 + math.log1p(churn[rel])) * (1.0 + 0.5 * defects[rel])
+        rows.append((score, rel, n, tests[rel], churn[rel], defects[rel]))
 
     rows.sort(reverse=True)
-    print(f"{'score':>10}  {'LOC':>5} {'cov':>4} {'chn':>3} {'bd':>3} swept  module")
-    for score, rel, n, cov, ch, dd, sw in rows[: args.top]:
-        print(
-            f"{score:10.0f}  {n:5d} {cov:4d} {ch:3d} {dd:3d} {'y' if sw else '-':>5}  {rel}"
-        )
+    print(f"{'score':>10}  {'lines':>5} {'tests':>5} {'chn':>3} {'bd':>3}  module")
+    for score, rel, n, t, ch, dd in rows[: args.top]:
+        print(f"{score:10.0f}  {n:5d} {t:5d} {ch:3d} {dd:3d}  {rel}")
     return 0
 
 

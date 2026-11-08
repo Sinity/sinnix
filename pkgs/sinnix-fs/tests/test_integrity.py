@@ -437,6 +437,7 @@ def test_scan_exclusion_is_a_component_boundary_not_a_lexical_prefix():
     assert fs.content_excluded("/realm/state/polylogue")
     assert fs.content_excluded("/realm/state/polylogue/inside")
     assert fs.content_excluded("/realm/state/polylogue-report") is None
+    assert fs.content_excluded("/realm/state/polylogue-live/data/polylogue/index.db")
     assert fs.content_excluded("/realm/tmp")
     assert fs.content_excluded("/realm/tmp/work/anything")
     assert fs.content_excluded("/realm/tmp-other") is None

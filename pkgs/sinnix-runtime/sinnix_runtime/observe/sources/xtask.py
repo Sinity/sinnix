@@ -1,4 +1,4 @@
-"""Sinex xtask invocation-history reader."""
+"""Sinex check and test history, read from devkit's run history store."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-from ..util import float_or_zero
 from .sqlite_util import sqlite_columns, sqlite_errors, sqlite_rows, table_exists
 
 
@@ -14,57 +13,39 @@ def sinex_history_db() -> Path | None:
     override = os.environ.get("SINNIX_OBSERVE_SINEX_DB")
     if override:
         return Path(override)
-    sinex_root = Path(os.environ.get("SINEX_ROOT", "/realm/project/sinex/repo"))
-    return sinex_root / ".sinex/state/xtask-history.db"
+    state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
+    return state / "devkit/history.db"
 
 
 def collect_sinex_xtask(limit: int) -> dict[str, Any]:
+    """Recent Sinex xtask runs. Devkit records no per-run resource samples."""
     db = sinex_history_db()
     source: dict[str, Any] = {
         "db": str(db) if db else None,
         "available": False,
         "rows": [],
     }
-    if not db or not db.exists() or not table_exists(db, "invocations"):
+    if not db or not db.exists() or not table_exists(db, "runs"):
         source["gaps"] = ["sinex.xtask_history.unavailable"]
         return source
-    cols = sqlite_columns(db, "invocations")
-    if not {"id", "command", "started_at", "status"}.issubset(cols):
+    if not {"id", "project", "command", "started_ms", "status"}.issubset(
+        sqlite_columns(db, "runs")
+    ):
         source["gaps"] = ["sinex.xtask_history.invalid_schema"]
         return source
-    wanted = [
-        "id",
-        "command",
-        "subcommand",
-        "profile",
-        "args_json",
-        "started_at",
-        "finished_at",
-        "duration_secs",
-        "status",
-        "exit_code",
-        "cwd",
-        "pid",
-        "scope_key",
-        "launch_mode",
-        "is_background",
-        "process_cpu_usage_avg",
-        "process_memory_usage_max_mb",
-        "process_count_max",
-        "resource_sample_count",
-        "shared_nix_build_slice_cpu_usage_avg",
-        "shared_nix_build_slice_memory_usage_max_mb",
-        "shared_background_slice_cpu_usage_avg",
-        "shared_background_slice_memory_usage_max_mb",
-    ]
-    selected = [col for col in wanted if col in cols]
     prior_errors = len(sqlite_errors())
     rows = sqlite_rows(
         db,
-        f"""
-        select {", ".join(selected)}
-        from invocations
-        order by started_at desc
+        """
+        select id, command, args, checkout as cwd, pid, agentctl_job, status, failure,
+               strftime('%Y-%m-%dT%H:%M:%SZ', started_ms / 1000, 'unixepoch') as started_at,
+               case when duration_ms is null then null else
+                 strftime('%Y-%m-%dT%H:%M:%SZ', (started_ms + duration_ms) / 1000, 'unixepoch')
+               end as finished_at,
+               duration_ms / 1000.0 as duration_secs
+        from runs
+        where project = 'sinex'
+        order by started_ms desc
         limit ?
         """,
         (limit,),
@@ -78,11 +59,12 @@ def collect_sinex_xtask(limit: int) -> dict[str, Any]:
 
 
 def infer_sinex_resource_class(row: dict[str, Any]) -> str | None:
-    command = str(row.get("command") or "")
-    bg_mb = float_or_zero(row.get("shared_background_slice_memory_usage_max_mb"))
-    nix_mb = float_or_zero(row.get("shared_nix_build_slice_memory_usage_max_mb"))
-    if command in {"build", "check", "test", "doc"} or nix_mb > 0:
+    if str(row.get("command") or "") in {
+        "check",
+        "compile",
+        "test",
+        "warm",
+        "coverage",
+    }:
         return "developer-build"
-    if row.get("is_background") or row.get("launch_mode") == "background" or bg_mb > 0:
-        return "background-maintenance"
     return None

@@ -14,7 +14,6 @@ from sinnix_runtime.observe.sources import (
     agent_gateway,
     below,
     chrome,
-    polylogue,
     pressure,
     proc,
     sqlite_util,
@@ -264,45 +263,8 @@ def test_sqlite_util_handles_missing(tmp_path) -> None:
 def test_xtask_missing_db_reports_gap() -> None:
     out = xtask.collect_sinex_xtask(limit=5)
     assert "gaps" in out or out.get("available") is True
-    cls = xtask.infer_sinex_resource_class({"command": "build"})
-    assert cls == "developer-build"
-    cls = xtask.infer_sinex_resource_class({"command": "run", "is_background": True})
-    assert cls == "background-maintenance"
-    cls = xtask.infer_sinex_resource_class({"command": "run"})
-    assert cls is None
-
-
-def test_polylogue_missing_db_reports_gap() -> None:
-    out = polylogue.collect_polylogue_live_attempts(limit=5)
-    assert "gaps" in out or out.get("available") is True
-
-
-def test_polylogue_archive_inventory_reports_all_tier_states(
-    tmp_path, monkeypatch
-) -> None:
-    root = tmp_path / "archive"
-    root.mkdir()
-    (root / "index.db").touch()
-    (tmp_path / "source-target.db").touch()
-    (root / "source.db").symlink_to(tmp_path / "source-target.db")
-    (root / "ops.db").symlink_to(tmp_path / "missing.db")
-    inventory = tmp_path / "runtime-inventory.json"
-    inventory.write_text(json.dumps({"polylogue": {"archiveRoot": str(root)}}))
-    monkeypatch.setenv("SINNIX_RUNTIME_INVENTORY_FILE", str(inventory))
-
-    states = {row["name"]: row["state"] for row in polylogue.polylogue_tiers()["tiers"]}
-    assert list(states) == [
-        "index.db",
-        "source.db",
-        "embeddings.db",
-        "ops.db",
-        "audit.db",
-        "user.db",
-    ]
-    assert states["index.db"] == "active"
-    assert states["source.db"] == "compatibility"
-    assert states["ops.db"] == "stale_compatibility"
-    assert states["embeddings.db"] == "missing"
+    assert xtask.infer_sinex_resource_class({"command": "check"}) == "developer-build"
+    assert xtask.infer_sinex_resource_class({"command": "run"}) is None
 
 
 def test_below_offline_reports_gap() -> None:
@@ -313,7 +275,7 @@ def test_below_offline_reports_gap() -> None:
 
 def test_joins_classifiers() -> None:
     assert joins.project_for_unit("sinex-nats.service") == "sinex"
-    assert joins.project_for_unit("polylogued.service") == "polylogue"
+    assert joins.project_for_unit("polylogue-live.service") == "polylogue"
     assert joins.project_for_unit("btrbk.service") == "backup"
     assert joins.project_for_unit("unknown.service") is None
     assert joins.project_for_text("running xtask check") == "sinex"
@@ -329,7 +291,7 @@ def test_joins_classifiers() -> None:
     assert joins.infer_resource_class_from_cgroup("/sys/fs/cgroup/app.slice") is None
     assert joins.infer_resource_class_from_cgroup("") is None
     matched = joins.match_below(
-        "polylogued.service",
+        "polylogue-live.service",
         "/polylogue",
         {"cgroup_peaks": [{"cgroup": "/polylogue/x"}], "process_peaks": []},
     )
@@ -350,7 +312,7 @@ def test_joins_build_workload_rows_minimal() -> None:
             }
         ],
         sinex={"rows": []},
-        polylogue={"rows": []},
+        polylogue={"available": False},
         below={"process_peaks": []},
     )
     assert any(r["source"] == "systemd" for r in rows)
@@ -373,7 +335,7 @@ def test_render_human_minimal() -> None:
         "resource_slices": [],
         "chrome_io": {},
         "sinex_xtask_history": {"db": None, "rows": []},
-        "polylogue_live_attempts": {"db": None, "rows": []},
+        "polylogue_status": {"unit": "polylogue-live.service", "available": False},
         "below": {"cgroup_peaks": [], "process_peaks": []},
         "workload_rows": [],
         "gaps_summary": {},
@@ -404,14 +366,14 @@ def test_render_human_surfaces_acknowledged_outages() -> None:
         "resource_slices": [],
         "chrome_io": {},
         "sinex_xtask_history": {"db": None, "rows": []},
-        "polylogue_live_attempts": {"db": None, "rows": []},
+        "polylogue_status": {"unit": "polylogue-live.service", "available": False},
         "below": {"cgroup_peaks": [], "process_peaks": []},
         "workload_rows": [],
         "gaps_summary": {},
         "runtime_inventory": {
             "units": {
-                "polylogued": {
-                    "unit": "polylogued.service",
+                "polylogue": {
+                    "unit": "polylogue-live.service",
                     "expectedDown": "storage migration blocks every start (sinnix-qh6s, since 2026-08-14)",
                 },
                 "ollama": {
@@ -698,7 +660,7 @@ def test_current_profile_never_fans_out_expensive_collectors(monkeypatch):
         "collect_systemd_units",
         "collect_resource_slices",
         "collect_sinex_xtask",
-        "collect_polylogue_live_attempts",
+        "collect_polylogue_status",
         "collect_agent_gateway",
     ):
         monkeypatch.setattr(

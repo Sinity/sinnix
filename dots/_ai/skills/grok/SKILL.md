@@ -54,8 +54,8 @@ find <root> -name "*.rs" -not -name "*_test.rs" | xargs wc -l | sort -rn
 
 (swap the extension/exclusion for the target language). Do this per-crate/
 per-package, then drill into whichever subdirectories are still too large to
-read exhaustively. For a Polylogue hunt, `scripts/defect_priors.py` ranks
-modules by size, thin coverage, churn, and past defects. `scripts/partition_by_size.sh` automates the sweep and
+read exhaustively. For a Rust workspace (Polylogue, Sinex, common), `scripts/defect_priors.py`
+ranks modules by size, sibling test count, churn, and past defect mentions. `scripts/partition_by_size.sh` automates the sweep and
 proposes region boundaries at a target size — see
 [`references/partitioning.md`](references/partitioning.md) for the full
 methodology and worked sizing targets per model tier.

@@ -27,9 +27,8 @@ producers. No persistence bind redirects these roots.
 
 The service requires `realm.mount` and runs before `local-fs.target`, tmpfiles,
 Realm scaffolding, the operator's user manager, and every declared filesystem
-mount below or sourced from a target. This includes the Polylogue pytest tmpfs
-and `/var/cache/sinex` bind. Ordinary system services start after sysinit;
-user services and Pueue start under the user manager. `DefaultDependencies=no`
+mount below or sourced from a target, including the `/var/cache/sinex` bind.
+Ordinary system services start after sysinit; user services and Pueue start under the user manager. `DefaultDependencies=no`
 avoids a dependency cycle with the early filesystem phase. It is wanted,
 rather than required, by `local-fs.target`, so failure is recorded in the
 journal and boot continues. Manual starts are refused, switch does not restart
@@ -77,7 +76,6 @@ sudo btrfs subvolume show /realm/state/cache
 # Only if the historical path exists:
 if test -e /realm/worktrees; then sudo btrfs subvolume show /realm/worktrees; fi
 sudo btrfs subvolume list -o /realm
-findmnt --mountpoint /realm/tmp/polylogue-pytest
 findmnt --mountpoint /var/cache/sinex
 ```
 

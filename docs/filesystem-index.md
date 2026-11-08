@@ -78,8 +78,9 @@ are treated as samples.
 ## Coverage and boundaries
 
 The scanner stops at configured boundaries (temporary work trees, Polylogue's
-archive, Stashbox's store, build and dependency directories) and records a
-`collection_boundary` row with the reason, never a guessed file count. A
+archives (the live one and its preserved copies), Stashbox's store, build and
+dependency directories) and records a `collection_boundary` row with the
+reason, never a guessed file count. A
 boundary does not mean empty or unimportant. Missing roots, unreadable
 directories and files that fail to read are recorded as errors, and
 `status` reports coverage as incomplete when any exist. Directory totals above

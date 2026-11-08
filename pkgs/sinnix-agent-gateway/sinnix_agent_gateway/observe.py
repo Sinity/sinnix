@@ -40,7 +40,7 @@ class ObserveService:
         "gateway": ("agent_gateway",),
         "browser": ("chrome_io",),
         "storage": ("storage",),
-        "ingestion": ("polylogue_live_attempts", "sinex_xtask_history"),
+        "ingestion": ("polylogue_status", "sinex_xtask_history"),
     }
 
     def __init__(

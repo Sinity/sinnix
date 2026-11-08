@@ -12,19 +12,27 @@ hooks, browser host and `mcp-polylogue`.
 ## Read history
 
 1. Read the available MCP tool schemas or `polylogue --help` before choosing
-   a command. `polylogue status --json` reports freshness and daemon state;
-   an empty result alone does not establish absent history.
+   a command; they describe the installed build. `polylogue status --json`
+   reports freshness and daemon state; an empty result alone does not
+   establish absent history.
 2. Use `polylogue 'repo:NAME since:7d'` for a query, `polylogue recall WORDS`
    to find earlier work, and `polylogue read ORIGIN:ID` to read a session.
    `polylogue brief --cwd PATH` gives the session-start context;
    `polylogue takeover ORIGIN:ID` gives context for continuing another session.
-3. Retain returned IDs and cursors. Follow the next cursor to page through
-   results or a budgeted read; read the complete relevant messages before
+3. Retain returned IDs and cursors. Follow the returned continuation to page
+   through results or a long read; read the complete relevant messages before
    making a claim about prior work. IDs are opaque and may contain colons.
-4. MCP tools come from the same command table, including `query`, `read`,
-   `recall`, `brief`, `takeover` and `status`. Use their exposed schemas for
+4. The installed MCP server exposes one tool per command (`query`, `read`,
+   `recall`, `brief`, `takeover`, `status`, ...). Use their schemas for
    arguments. When ingestion is unavailable,
    [claude-sessions](../claude-sessions/SKILL.md) reads raw Claude transcripts.
+
+The next deployed build changes this surface: reads take `session:ORIGIN:ID`,
+pages continue by running the returned `next` call unchanged, `similar:`
+replaces `near:`, and MCP has five tools (`polylogue_read`,
+`polylogue_context`, `polylogue_note`, `polylogue_chat`, `polylogue_act`) that
+take `{operation, arguments, request_id}`. Trust the schemas the server
+reports over this paragraph.
 
 ## Develop Polylogue
 

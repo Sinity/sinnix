@@ -599,7 +599,7 @@ ACTIONS: tuple[Action, ...] = (
         examples=(
             Example(title="Processes named rg", input={"name": "rg"}),
             Example(
-                title="Processes of a unit", input={"unit": {"name": "polylogued"}}
+                title="Processes of a unit", input={"unit": {"name": "polylogue-live"}}
             ),
         ),
     ),
@@ -641,7 +641,7 @@ ACTIONS: tuple[Action, ...] = (
         examples=(
             Example(
                 title="Subtree of a unit's main process",
-                input={"root": {"unit": {"name": "polylogued"}}, "max_depth": 4},
+                input={"root": {"unit": {"name": "polylogue-live"}}, "max_depth": 4},
             ),
         ),
     ),

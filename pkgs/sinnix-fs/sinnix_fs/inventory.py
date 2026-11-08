@@ -741,6 +741,10 @@ CONTENT_YAML_TITLE = re.compile(r"^title:\s*(.+?)\s*$", re.M)
 CONTENT_COLLECTION_BOUNDARIES = {
     "/realm/tmp": "temporary execution workspace; promote retained artifacts before cataloging",
     "/realm/state/polylogue": "Polylogue owns archive contents and native querying",
+    "/realm/state/polylogue-live": "Polylogue owns the live archive and its native querying",
+    "/realm/state/polylogue-census": "preserved Polylogue archive copy",
+    "/realm/state/polylogue-preserved": "preserved Polylogue archive copy",
+    "/realm/state/polylogue-prewipe": "preserved Polylogue archive copy",
     "/realm/project/polylogue/history/old-home": "preserved native Polylogue recovery collection",
     "/realm/state/stashbox": "Stashbox owns media catalog and derived resources",
 }

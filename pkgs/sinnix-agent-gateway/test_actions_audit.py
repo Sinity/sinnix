@@ -21,7 +21,7 @@ ROWS = [
     },
     {
         "kind": "service",
-        "name": "polylogued",
+        "name": "polylogue-live",
         "description": "Polylogue daemon",
         "enabled": False,
     },
@@ -107,7 +107,7 @@ def test_capabilities_search_and_describe(tmp_path: Path) -> None:
     described = call(
         rt,
         "capabilities.query",
-        {"request": {"operation": "describe", "name": "polylogued"}},
+        {"request": {"operation": "describe", "name": "polylogue-live"}},
         BY_NAME,
     )["data"]
     assert (

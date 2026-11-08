@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from .util import normalize_timestamp
-
 
 def format_number(
     value: int | float | None, divisor: int = 1, precision: int = 1
@@ -84,12 +82,15 @@ def render_human(report: dict[str, Any]) -> str:
             "  " + line for line in storage["iostat_xz"].rstrip().splitlines()[:40]
         )
 
-    archive = report.get("polylogue_live_attempts", {}).get("archive", {})
+    archive = report.get("polylogue_status", {}).get("archive", {})
     if archive:
         section("polylogue archive")
         lines.append(f"root={archive.get('root')}")
-        for tier in archive.get("tiers", []):
-            lines.append(f"  {tier.get('name'):<16} {tier.get('state')}")
+        for row in archive.get("files", []):
+            lines.append(
+                f"  {row.get('name'):<16} {row.get('state')} "
+                f"bytes={format_number(row.get('bytes'), precision=0)}"
+            )
 
     # Before the unit dump, so anyone reading top-down learns which of the
     # red lines below are already known about. The whole point is that a
@@ -204,19 +205,24 @@ def render_human(report: dict[str, Any]) -> str:
         lines.append(
             f"  {row.get('id')} {row.get('command')} {row.get('status')} "
             f"{row.get('started_at')} secs={row.get('duration_secs')} "
-            f"rss_mb={row.get('process_memory_usage_max_mb')}"
+            f"job={row.get('agentctl_job')}"
         )
 
-    section("polylogue live ingest")
-    poly = report.get("polylogue_live_attempts", {})
-    lines.append(f"db={poly.get('db')} available={poly.get('available')}")
-    for row in poly.get("rows", [])[:10]:
+    section("polylogue daemon")
+    poly = report.get("polylogue_status", {})
+    lines.append(
+        f"unit={poly.get('unit')} available={poly.get('available')} "
+        f"pid={poly.get('pid')} busy={poly.get('busy')} passes={poly.get('passes')}"
+    )
+    last = poly.get("last_pass") or {}
+    if last:
         lines.append(
-            f"  {normalize_timestamp(row.get('started_at'))} {row.get('attempt_id')} "
-            f"{row.get('status')} {row.get('phase')} "
-            f"parsed_raw={row.get('parsed_raw_count')} materialized={row.get('materialized_count')} "
-            f"payload_read={row.get('source_payload_read_bytes')}"
+            f"  last pass: inputs_seen={last.get('inputs_seen')} "
+            f"inputs_changed={last.get('inputs_changed')} bytes_read={last.get('bytes_read')} "
+            f"messages_written={last.get('messages_written')} seconds={last.get('seconds')}"
         )
+    for gap in poly.get("gaps", []):
+        lines.append(f"  gap: {gap}")
 
     section("below recent history")
     below = report.get("below", {})
