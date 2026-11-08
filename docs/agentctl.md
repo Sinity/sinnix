@@ -276,8 +276,9 @@ minute.
   An operation declaring `max_io_pressure` refuses to start above it, and
   long copies and offloads belong in the `background` pool, whose slice has
   the plane's lowest I/O weight. Benchmarks and measurements run in the
-  one-slot `measure` pool and full system builds in the one-slot
-  `system-build` pool, so neither holds a `bulk` slot a check is waiting for.
+  one-slot `measure` pool, and full system builds, including `switch` and
+  `boot`, in the one-slot `system-build` pool, so neither holds a `bulk` slot
+  a check is waiting for and an activation never waits behind a product check.
 - **Rust type and lint checks** (the Rust projects' `compile` operations and
   their Clippy operations) run in the one-slot `compile` pool. They write only
   metadata, so they neither wait behind test builds nor stop when `normal`
