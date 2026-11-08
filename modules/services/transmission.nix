@@ -55,12 +55,18 @@ mkServiceModule {
         # peer traffic through the workstation firewall without a VPN tunnel.
         openPeerPorts = true;
         package = pkgs.transmission_4;
-        user = username;
+        # Its own account: the daemon faces the internet, and its sandbox binds
+        # /run, which as the operator would include the operator's runtime
+        # directory (session bus and service sockets). Files stay in the
+        # shared `users` group so the operator manages downloads.
+        user = "transmission";
         group = "users";
         settings = {
           script-torrent-done-enabled = false;
           ratio-limit-enabled = false;
-          umask = 18;
+          # Group-writable, so the operator (group users) can move or remove
+          # finished downloads.
+          umask = 2;
           download-dir = torrentDownloadDir;
           incomplete-dir = torrentPartialDir;
           incomplete-dir-enabled = true;
@@ -87,13 +93,15 @@ mkServiceModule {
       };
 
       systemd.tmpfiles.rules = lib.mkAfter [
-        "d /var/lib/transmission/.config 0750 ${username} users -"
-        "d ${transmissionConfigDir} 0750 ${username} users -"
-        "d ${torrentMoveDir} 0755 ${username} users -"
+        "d /var/lib/transmission/.config 0750 transmission users -"
+        "d ${transmissionConfigDir} 0750 transmission users -"
+        # Earlier state was owned by the operator account.
+        "Z /var/lib/transmission - transmission users -"
+        "Z ${torrentPartialDir} - transmission users -"
+        "d ${torrentMoveDir} 2775 ${username} users -"
         "d ${torrentInbox} 2775 ${username} users -"
         "d ${torrentDownloadDir} 2775 ${username} users -"
-        "d ${torrentPartialDir} 2775 ${username} users -"
-        "f ${transmissionConfigDir}/queue.json 0644 ${username} users - []"
+        "f ${transmissionConfigDir}/queue.json 0644 transmission users - []"
       ];
 
       systemd.services.transmission = {
@@ -137,7 +145,7 @@ mkServiceModule {
             ExecStartPre = [
               "+${pkgs.coreutils}/bin/install -d -m 2775 -o ${username} -g users ${torrentInbox}"
               "+${pkgs.coreutils}/bin/install -d -m 2775 -o ${username} -g users ${torrentDownloadDir}"
-              "+${pkgs.coreutils}/bin/install -d -m 2775 -o ${username} -g users ${torrentPartialDir}"
+              "+${pkgs.coreutils}/bin/install -d -m 2775 -o transmission -g users ${torrentPartialDir}"
             ];
           }
           (lib.sinnix.mkRuntimeServiceConfig {

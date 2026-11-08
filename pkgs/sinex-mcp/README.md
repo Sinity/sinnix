@@ -1,6 +1,6 @@
 # Sinex MCP provider backport
 
-The workstation daemon runs Sinex `a45588bd2c2b7a86d7ba38118c49510c0c2f786e`:
+The workstation daemon runs Sinex `ba6cf2c601db2849e34c8c3c22019ec1bba09eb4`:
 schema-2 revision `a081818b6` plus two commits, bounded commit-log and window
 page reads and size-fitting of confirmed-stream messages (neither changes
 `sinexctl` code, so this patch still applies). The MCP provider builds only `sinexctl` from that same input with

@@ -88,6 +88,12 @@ let
     "mail-app-password".exportEnv = false;
     # Retained former runner registration material stays out of login shells.
     "github-runner-polylogue-token".exportEnv = false;
+    # Read from their files by the services that use them; no interactive
+    # tool needs them in every shell and user service.
+    "tailscale-authkey".exportEnv = false;
+    "airvpn-seed-key".exportEnv = false;
+    "airvpn-seed-psk".exportEnv = false;
+    "openai-tunnel-runtime-key".exportEnv = false;
   };
 
   secretSpecs = lib.mapAttrs (

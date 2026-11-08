@@ -23,6 +23,7 @@ let
   ];
 
   cfg = config.sinnix.networking;
+  operator = config.sinnix.user.name;
 in
 {
   options.sinnix.networking.enable = lib.mkOption {
@@ -31,7 +32,38 @@ in
     description = "Enable core networking configuration (NetworkManager, DNS, SSH)";
   };
 
+  options.sinnix.networking.operatorOnlyLocalPorts = lib.mkOption {
+    type = lib.types.listOf lib.types.port;
+    default = [ ];
+    description = ''
+      TCP ports that local processes may connect to only as the operator (or
+      root). Listeners such as Chrome's remote-debugging port and the hub
+      authorize every caller who can reach them, so a connection from any
+      other local account is refused before it reaches the socket.
+    '';
+  };
+
   config = lib.mkIf cfg.enable {
+    networking.firewall = lib.mkIf (cfg.operatorOnlyLocalPorts != [ ]) {
+      # Locally generated connections pass OUTPUT; the owner match sees the
+      # connecting account. The chain is rebuilt on every firewall reload.
+      extraCommands = ''
+        ip46tables -N sinnix-operator-only 2>/dev/null || true
+        ip46tables -F sinnix-operator-only
+        ip46tables -C OUTPUT -j sinnix-operator-only 2>/dev/null || ip46tables -I OUTPUT -j sinnix-operator-only
+        ${lib.concatMapStrings (port: ''
+          ip46tables -A sinnix-operator-only -p tcp --dport ${toString port} -m owner --uid-owner ${operator} -j RETURN
+          ip46tables -A sinnix-operator-only -p tcp --dport ${toString port} -m owner --uid-owner 0 -j RETURN
+          ip46tables -A sinnix-operator-only -p tcp --dport ${toString port} -m owner --uid-owner 1-4294967294 -j REJECT --reject-with tcp-reset
+        '') cfg.operatorOnlyLocalPorts}
+      '';
+      extraStopCommands = ''
+        ip46tables -D OUTPUT -j sinnix-operator-only 2>/dev/null || true
+        ip46tables -F sinnix-operator-only 2>/dev/null || true
+        ip46tables -X sinnix-operator-only 2>/dev/null || true
+      '';
+    };
+
     networking = {
       networkmanager = {
         enable = true;

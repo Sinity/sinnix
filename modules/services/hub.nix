@@ -515,6 +515,10 @@ mkServiceModule {
       # Per-interface, not networking.firewall.allowedTCPPorts: tailscale0 is
       # not a trusted interface under useRoutingFeatures = "none", so this is
       # the only place these ports are reachable from.
+      # The hub authorizes whoever reaches it through Caddy, so other local
+      # accounts are refused at the firewall; tailnet peers are unaffected.
+      sinnix.networking.operatorOnlyLocalPorts = [ cfg.port ];
+
       networking.firewall.interfaces.${tailscaleInterface}.allowedTCPPorts = [
         cfg.port
         cfg.reportsPort
