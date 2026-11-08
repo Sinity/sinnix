@@ -293,7 +293,36 @@ in
     services."btrfs-scrub-realm".serviceConfig = scrubServiceConfig;
     services."btrfs-scrub-outer\\x2drealm".serviceConfig = scrubServiceConfig;
     timers."btrfs-scrub--".timerConfig.OnCalendar = lib.mkForce "*-*-01 02:30:00";
-    timers."btrfs-scrub-realm".timerConfig.OnCalendar = lib.mkForce "*-*-08 02:30:00";
+    timers."btrfs-scrub-realm".timerConfig.OnCalendar = lib.mkForce "*-*-08 01:00:00";
+
+    # /realm holds the build targets, PostgreSQL and the live archives, and its
+    # scrub walks ~2.9 TiB. Unthrottled it ran for days alongside every build.
+    # It keeps running, but its read rate follows the clock: 300 MiB/s from
+    # 01:00, 10 MiB/s from 07:30. The per-device limit lives in sysfs, so each
+    # change is set by a oneshot and the scrub itself starts at the night rate.
+    services."btrfs-scrub-realm".serviceConfig.ExecStartPre =
+      "${pkgs.btrfs-progs}/bin/btrfs scrub limit --all --limit 300m /realm";
+    services.btrfs-scrub-realm-night = {
+      description = "Raise the /realm scrub read limit for the night";
+      serviceConfig.Type = "oneshot";
+      script = "${pkgs.btrfs-progs}/bin/btrfs scrub limit --all --limit 300m /realm";
+    };
+    services.btrfs-scrub-realm-day = {
+      description = "Lower the /realm scrub read limit for the day";
+      serviceConfig.Type = "oneshot";
+      script = "${pkgs.btrfs-progs}/bin/btrfs scrub limit --all --limit 10m /realm";
+    };
+    timers.btrfs-scrub-realm-night = {
+      wantedBy = [ "timers.target" ];
+      timerConfig.OnCalendar = "*-*-* 01:00:00";
+    };
+    timers.btrfs-scrub-realm-day = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnCalendar = "*-*-* 07:30:00";
+        Persistent = true;
+      };
+    };
     timers."btrfs-scrub-outer\\x2drealm".timerConfig.OnCalendar = lib.mkForce "*-*-15 02:30:00";
 
     timers.sinnix-fstrim = fstrimJob.systemd.timers.sinnix-fstrim;
