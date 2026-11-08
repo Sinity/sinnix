@@ -282,3 +282,32 @@ def test_a_queued_baseline_for_an_older_head_is_replaced(
     assert world["cancelled"].read_text().split() == ["baseline-1"]
     assert len(started(world)) == 2
     assert git("rev-parse", "HEAD", cwd=world["checkout"]) == head
+
+
+def test_leftover_changes_in_the_checkout_never_block_a_new_head(
+    world: dict, tmp_path: Path
+) -> None:
+    root = world["root"]
+    (root / "tracked.txt").write_text("first\n")
+    git("add", "tracked.txt", cwd=root)
+    git("commit", "-q", "-m", "add tracked", cwd=root)
+    git("push", "-q", "origin", "HEAD:master", cwd=root)
+    baseline(world)
+    checkout = world["checkout"]
+    (checkout / "tracked.txt").write_text("rewritten by a test\n")
+    (checkout / "stray.out").write_text("output\n")
+    (checkout / "target").mkdir()
+    (checkout / "target" / "unit").write_text("warm\n")
+
+    (root / "tracked.txt").write_text("second\n")
+    git("commit", "-q", "-am", "change tracked", cwd=root)
+    git("push", "-q", "origin", "HEAD:master", cwd=root)
+    baseline(world)
+
+    assert git("rev-parse", "HEAD", cwd=checkout) == git(
+        "rev-parse", "origin/master", cwd=root
+    )
+    assert (checkout / "tracked.txt").read_text() == "second\n"
+    assert not (checkout / "stray.out").exists()
+    assert (checkout / "target" / "unit").read_text() == "warm\n"
+    assert len(started(world)) == 2

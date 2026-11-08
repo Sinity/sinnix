@@ -513,7 +513,8 @@ declares these units:
 - `agentctl-baseline-<project>` (every ten minutes, for each of
   `masterBaselines`): `sinnix-master-baseline` fetches the default branch and,
   when its head is new and no baseline job is running, moves the reserved
-  detached checkout `<workspace root>/<project>-master` there and queues the
+  detached checkout `<workspace root>/<project>-master` there (forcibly,
+  discarding any leftover changes in it except `target/`) and queues the
   checkout's own `baseline` operation using `--project CHECKOUT`, with that
   same checkout as `--workspace`. Its descriptor supplies the environment and
   operation limits; its ProjectID must match the registered project. A failed
