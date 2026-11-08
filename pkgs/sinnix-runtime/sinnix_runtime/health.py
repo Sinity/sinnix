@@ -120,9 +120,14 @@ def delivery_path() -> Path:
 
 
 def record_delivery(delivered: bool, path: Path | None = None) -> None:
-    with modify_json(path or delivery_path(), {}, mode=0o664) as document:
-        document["status"] = "ok" if delivered else "failed"
-        document["at"] = utc_ts()
+    """Best-effort, like the notice itself: an unwritable runtime directory
+    must not turn a notification into a sweep failure."""
+    try:
+        with modify_json(path or delivery_path(), {}, mode=0o664) as document:
+            document["status"] = "ok" if delivered else "failed"
+            document["at"] = utc_ts()
+    except OSError:
+        pass
 
 
 # --------------------------------------------------------------------------

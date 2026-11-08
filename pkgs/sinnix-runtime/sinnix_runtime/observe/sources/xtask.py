@@ -35,12 +35,17 @@ def collect_sinex_xtask(limit: int) -> dict[str, Any]:
     ):
         source["gaps"] = ["sinex.xtask_history.invalid_schema"]
         return source
+    columns = sqlite_columns(db, "runs")
+    liveness = ", ".join(
+        name if name in columns else f"null as {name}"
+        for name in ("boot_id", "process_start")
+    )
     prior_errors = len(sqlite_errors())
     rows = sqlite_rows(
         db,
         """
         select id, command, args, checkout as cwd, pid, agentctl_job, status, failure,
-               boot_id, process_start,
+               {liveness},
                strftime('%Y-%m-%dT%H:%M:%SZ', started_ms / 1000, 'unixepoch') as started_at,
                case when duration_ms is null then null else
                  strftime('%Y-%m-%dT%H:%M:%SZ', (started_ms + duration_ms) / 1000, 'unixepoch')
@@ -50,7 +55,7 @@ def collect_sinex_xtask(limit: int) -> dict[str, Any]:
         where project = 'sinex'
         order by started_ms desc
         limit ?
-        """,
+        """.format(liveness=liveness),
         (limit,),
     )
     if len(sqlite_errors()) != prior_errors:
