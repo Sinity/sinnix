@@ -1103,6 +1103,10 @@ def test_reported_failure_outside_inventory_is_kept_until_it_recovers(tmp_path):
         ' "service:user:listed.service": {"status": "failed"},'
         ' "service:user:recovered.service": {"status": "healthy"}}'
     )
-    inventory = {"units": {"listed": {"kind": "service", "unit": "listed.service", "manager": "user"}}}
+    inventory = {
+        "observedServices": [
+            {"kind": "service", "unit": "listed.service", "manager": "user"}
+        ]
+    }
     found = health.reported_failures_outside(inventory, state)
     assert found == [{"unit": "agentctl-baseline-polylogue.service", "manager": "user"}]
