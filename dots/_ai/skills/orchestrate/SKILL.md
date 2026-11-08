@@ -31,11 +31,16 @@ next, not on supervising progress.
     is not what you want; a fork always inherits the parent model.
   - In Codex, native spawn takes `model`, `reasoning_effort`, and `fork_turns`
     (`'none'` by default; `'all'` for deliberate full-history inheritance,
-    with no model or effort override).
+    with no model or effort override). Wait for a Codex worker with one
+    `wait_agent` call whose timeout covers the work's expected duration;
+    repeated short waits are polling.
 - AgentCTL batch records are read-only history. Use `agent-runtime` for
   retained records and native jobs; use native agents for new work.
 - Add workers only when independent work benefits from parallelism. Keep one
   owner for a small connected change; available slots are not a dispatch target.
+- Size the number of writers to what the build queue can verify. Unverified
+  branches pile up and meet their errors together in one checkout, where they
+  are debugged one at a time.
 
 ## Shape the work
 
@@ -46,9 +51,10 @@ next, not on supervising progress.
   again. `write_scope` is a conflict-planning estimate, not a fence; when an
   edit lands in another owner's area, keep it focused and name it in the
   report so the coordinator can order merges.
-- A dependency that governs integration or acceptance is not a prerequisite
-  for writing the first patch. Start independent code now; serialize only
-  what truly shares a contract, and give that seam one owner.
+- Start independent work now. Work that builds on an unmerged change goes to
+  that change's owner, or waits until the change is on the default branch:
+  stacked work waits for the slower of the two and doubles conflict
+  resolution. Give a shared contract one owner.
 - The prompt names assigned outcomes, ownership, relevant source pointers,
   exclusions, and what to report. Include the base and a test selector when
   needed; avoid copied instructions, complete manifests, and unchanged history.
@@ -66,7 +72,7 @@ next, not on supervising progress.
 | Work                                                        | Claude   | Codex            |
 | ----------------------------------------------------------- | -------- | ---------------- |
 | Evidence collection, supervision, settled implementation    | `sonnet` | everyday, medium |
-| Substantial implementation, investigation, candidate review | `opus`   | strong, medium   |
+| Substantial implementation, investigation, change review    | `opus`   | strong, medium   |
 | Unresolved architecture, design-critical implementation     | `opus`   | strong, high     |
 
 Codex model IDs are not repeated here: the everyday model is `model` and the
@@ -94,12 +100,13 @@ allocation trials.
 
 Review composition and changed seams, using worker evidence for unchanged
 parts. Check the requested outcome, affected invariants, and honest test scope;
-do not repeat the worker's review of an unchanged prompt. Run broader regression
-at a useful integration milestone or for a concrete risk. Keep ordinary known
-failures visible without blocking independent progress. Preserve stronger
+do not repeat the worker's review of an unchanged prompt. Run the full check on
+the head being merged. Integration that needs repeated build-and-fix rounds
+goes to a worker with a fresh context; the coordinator keeps the decisions.
+Preserve stronger
 evidence for actual deployment, reset, data loss, or paid vector preservation.
-Add an independent reviewer only for a named risk, with one question and a
-pinned candidate; required hosted review stays with the forge.
+Add an independent reviewer only for a named risk, with one question and the
+exact commit to review; required hosted review stays with the forge.
 
 ## Land
 
@@ -118,9 +125,11 @@ pinned candidate; required hosted review stays with the forge.
   security-review usage-limit notice is unrelated. Request another
   review when protection requires it or a named new risk remains. An advisory
   review summary's commit or running state alone does not add a merge gate.
-  Use the repository's protected merge route and matching candidate SHA.
+  Use the repository's protected merge route with the head commit you
+  reviewed (`--match-head-commit`).
 - Verify required gates and publication before claiming the change
-  landed. A stacked merge counts as landed on the default branch. Report the
+  landed. A change has landed when its commit is on the default branch; a
+  merge into any other branch has not landed. Report the
   commit or PR, useful check results, and residuals without a ceremonial list.
   Preserve WIP and clean only worktrees and watches you own.
 - After landing, record the native verification and publication references in

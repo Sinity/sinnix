@@ -35,8 +35,7 @@ commits and never belong on a feature branch.
 ## Changing
 
 - Claim before working (`bd update <id> --claim`) and release what you will
-  not finish. `agentctl batch start` claims its members and `batch land`
-  closes the satisfied ones; batch workers never touch Beads.
+  not finish.
 - Record dated facts as you go with `bd note`: measurements, disproved
   hypotheses, operator decisions. Keep one current-state note per task,
   consolidating on contact, so a cold reader never mistakes a superseded
@@ -59,8 +58,9 @@ commits and never belong on a feature branch.
 
 Close when acceptance criteria are met under the project's delivery rules.
 Leave a compact evidence note: the commit or PR and useful result, or current
-code evidence for an already-completed task. Operational criteria stay open
-until their live evidence exists. Record known failures and unrelated follow-up
+code evidence for an already-completed task. A code task closes when its
+change is on the default branch and its named tests pass there; an operational
+task closes when its listed checks have run against the deployment. Record known failures and unrelated follow-up
 scope honestly without blocking other completed tasks or narrating a checklist.
 
 Split unfinished scope into a successor rather than stretching the closure.
@@ -89,14 +89,18 @@ enough that neither has to reconstruct intent.
   named command or inspection, with non-goals. Read them adversarially: could
   an executor satisfy the words and miss the point? Store them once in
   `metadata.acceptance_criteria` as `{id, text}` rows with stable IDs.
-- **Operational proof** (a live run, a measurement, an operator window) stays
-  an explicit criterion; a code-only delivery leaves it open.
+- **Code and operation are separate tasks.** A code task's acceptance is
+  behaviour on the default branch, each criterion checked by a named test or
+  command. A live run, deployment, measurement on real data or operator window
+  is its own task, depending on the code tasks it exercises, written once per
+  release as the fixed list of checks to run against that deployment.
 - Add metadata only when something consumes it.
 
 ## Shaping work
 
 - Slice implementation as tracer bullets: each task a narrow, complete path
-  through schema, logic, surface, and test, sized for one worker. Group tasks
+  through schema, logic, surface, and test, each landing as its own pull
+  request on the default branch. Group tasks
   that share files, evidence, or a verification boundary with
   `dispatch_group=<leader-id>` so one worker delivers them together; each keeps
   its own close. Remove the metadata when the leader closes.
