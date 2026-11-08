@@ -23,6 +23,16 @@ SWAP_PRE_FREEZE_PERCENT = 75.0
 MEMORY_STALL_PSI = 20.0
 
 PROC = Path("/proc")
+CGROUP_ROOT = Path("/sys/fs/cgroup")
+
+# I/O PSI full over five minutes: the share of that window in which every task
+# was waiting on I/O. At 50 the desktop visibly stalls (2026-11-08: builds
+# timing out and the session-start hook missing its budget at 70-98).
+IO_STALL_PSI_300 = 50.0
+IO_LANE_KEY = "pressure:io-stall"
+IO_LANE_TYPE = "io_stall"
+IO_LANE_UNIT = "disk I/O"
+IO_TOP = 3
 
 SWAP_LANE_KEY = "pressure:swap-headroom"
 SWAP_LANE_TYPE = "swap_headroom"
@@ -40,6 +50,7 @@ class Sample:
     memory_psi_full: float | None = None
     memory_psi_some: float | None = None
     io_psi_full: float | None = None
+    io_psi_full_300: float | None = None
     cpu_psi_some: float | None = None
 
     @property
@@ -61,7 +72,7 @@ class Sample:
         )
 
 
-def read_psi(path: Path) -> dict[str, float]:
+def read_psi(path: Path, window: str = "avg10") -> dict[str, float]:
     """`some`/`full` avg10 out of one /proc/pressure file.
 
     A kernel without PSI, or a container without the file, yields an empty
@@ -73,9 +84,9 @@ def read_psi(path: Path) -> dict[str, float]:
     except OSError:
         return {}
     return {
-        name: float(fields["avg10"])
+        name: float(fields[window])
         for name, fields in records.items()
-        if "avg10" in fields
+        if window in fields
     }
 
 
@@ -108,6 +119,7 @@ def sample(proc: Path = PROC) -> Sample:
         memory_psi_full=memory.get("full"),
         memory_psi_some=memory.get("some"),
         io_psi_full=io.get("full"),
+        io_psi_full_300=read_psi(proc / "pressure" / "io", "avg300").get("full"),
         cpu_psi_some=cpu.get("some"),
     )
 
@@ -162,6 +174,89 @@ def sweep_swap_headroom(reading: Sample, emitter: Any) -> None:
         return
     status, evidence = verdict
     emitter.emit(SWAP_LANE_KEY, SWAP_LANE_TYPE, SWAP_LANE_UNIT, status, evidence)
+
+
+def cgroup_read_bytes(root: Path = CGROUP_ROOT) -> dict[str, int]:
+    """Cumulative bytes read per leaf unit cgroup (services and scopes), from
+    each cgroup's own io.stat. Cheap: one small file per unit, no SQLite."""
+    totals: dict[str, int] = {}
+    for stat_file in root.glob("**/io.stat"):
+        name = stat_file.parent.name
+        if not name.endswith((".service", ".scope")):
+            continue
+        try:
+            text = stat_file.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        read = 0
+        for line in text.splitlines():
+            for field in line.split()[1:]:
+                key, _, value = field.partition("=")
+                if key == "rbytes" and value.isdigit():
+                    read += int(value)
+        totals[str(stat_file.parent.relative_to(root))] = read
+    return totals
+
+
+def top_readers(
+    before: dict[str, int], after: dict[str, int], top: int = IO_TOP
+) -> list[tuple[str, int]]:
+    deltas = [
+        (path, after[path] - before.get(path, 0))
+        for path in after
+        if after[path] - before.get(path, 0) > 0
+    ]
+    deltas.sort(key=lambda row: row[1], reverse=True)
+    return deltas[:top]
+
+
+def io_lane_status(
+    reading: Sample, readers: list[tuple[str, int]]
+) -> tuple[str, str] | None:
+    """(status, evidence) for the I/O-stall lane: degraded while five-minute
+    I/O PSI full stays at or above the stall line, naming who read the most
+    since the previous sweep so the cause is visible with the condition."""
+    if reading.io_psi_full_300 is None:
+        return None
+    top = ",".join(f"{path.rsplit('/', 1)[-1]}:{delta // 1048576}MiB" for path, delta in readers)
+    evidence = (
+        f"io_psi_full_avg300={reading.io_psi_full_300};"
+        f"stall_psi={IO_STALL_PSI_300};top_readers={top or 'none'}"
+    )
+    if reading.io_psi_full_300 >= IO_STALL_PSI_300:
+        return "degraded", evidence
+    return "healthy", evidence
+
+
+def sweep_io_stall(
+    reading: Sample, emitter: Any, sample_path: Path, root: Path = CGROUP_ROOT
+) -> None:
+    """The lane on the health sweep's tick. The previous per-cgroup totals are
+    the lane's own state (one small file in the runtime directory), so the
+    attribution covers exactly the window between two sweeps."""
+    from sinnix_lib.atomic_json import modify_json
+
+    if reading.io_psi_full_300 is None:
+        emitter.observe(IO_LANE_KEY)
+        return
+    after = cgroup_read_bytes(root)
+    readers: list[tuple[str, int]] = []
+    try:
+        with modify_json(sample_path, {}, mode=0o664) as document:
+            before = {k: int(v) for k, v in document.items() if isinstance(v, int)}
+            document.clear()
+            document.update(after)
+        readers = top_readers(before, after)
+    except OSError:
+        # No writable runtime directory: judge the condition without naming
+        # readers rather than skipping the lane.
+        pass
+    verdict = io_lane_status(reading, readers)
+    if verdict is None:
+        emitter.observe(IO_LANE_KEY)
+        return
+    status, evidence = verdict
+    emitter.emit(IO_LANE_KEY, IO_LANE_TYPE, IO_LANE_UNIT, status, evidence)
 
 
 def parse_cgroup(text: str) -> tuple[str, str]:

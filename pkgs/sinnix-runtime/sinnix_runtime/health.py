@@ -113,6 +113,23 @@ def ledger_path() -> Path:
     return runtime_dir() / "health-transitions.jsonl"
 
 
+def delivery_path() -> Path:
+    """Outcome of the last desktop notice: `sinnix status` shows a failed one
+    first, so a broken notifier is never silent."""
+    return runtime_dir() / "desktop-delivery.json"
+
+
+def record_delivery(delivered: bool, path: Path | None = None) -> None:
+    """Best-effort, like the notice itself: an unwritable runtime directory
+    must not turn a notification into a sweep failure."""
+    try:
+        with modify_json(path or delivery_path(), {}, mode=0o664) as document:
+            document["status"] = "ok" if delivered else "failed"
+            document["at"] = utc_ts()
+    except OSError:
+        pass
+
+
 # --------------------------------------------------------------------------
 # evidence and phrasing
 # --------------------------------------------------------------------------
@@ -377,7 +394,9 @@ class Emitter:
     @staticmethod
     def _notify(urgency: str, title: str, body: str) -> None:
         notify_phone(title, body, key=f"health:{title}:{body}")
-        notify_desktop(title, body, urgency=urgency, app_name=APP_NAME)
+        record_delivery(
+            notify_desktop(title, body, urgency=urgency, app_name=APP_NAME)
+        )
 
     def observe(self, key: str) -> None:
         """Register a key without judging it (mid-transition units).
@@ -1167,7 +1186,10 @@ def sweep(
     tick and would re-announce the same pre-freeze every couple of minutes.
     """
     captures = captures_of(inventory)
-    services = observed(inventory, "service")
+    services = [
+        *observed(inventory, "service"),
+        *reported_failures_outside(inventory, emitter.state),
+    ]
     sockets = observed(inventory, "socket")
     properties = unit_properties([*services, *sockets], prober)
     sweep_captures(captures, emitter, time.time() if now is None else now)
@@ -1176,9 +1198,9 @@ def sweep(
     sweep_mounts(mounts_of(inventory), emitter)
     sweep_services(services, properties, emitter)
     sweep_sockets(sockets, properties, emitter)
-    pressure.sweep_swap_headroom(
-        pressure.sample() if pressure_sample is None else pressure_sample, emitter
-    )
+    reading = pressure.sample() if pressure_sample is None else pressure_sample
+    pressure.sweep_swap_headroom(reading, emitter)
+    pressure.sweep_io_stall(reading, emitter, runtime_dir() / "io-read-sample.json")
     emitter.prune()
     return emitter
 
@@ -1229,6 +1251,31 @@ def emit_failure(
         f"manager={manager};source=onfailure;result={result or 'unknown'}",
         force_confirm=True,
     )
+
+
+def reported_failures_outside(
+    inventory: dict[str, Any], state: Path
+) -> list[dict[str, Any]]:
+    """Units the OnFailure hook reported failed that the inventory does not
+    list. The sweep judges them like inventory services until they recover, so
+    a failing timer unit keeps its record (and its reminder) instead of being
+    pruned on the next sweep and paging as new on its next failure; once it
+    succeeds the healthy verdict pairs with the outage and the key retires."""
+    listed = {
+        (str(entry.get("manager") or "system"), str(entry.get("unit") or ""))
+        for entry in observed(inventory, "service")
+    }
+    found: list[dict[str, Any]] = []
+    for key, entry in current_state(state).items():
+        if not key.startswith("service:"):
+            continue
+        _, manager, unit = key.split(":", 2)
+        status = entry.get("status") if isinstance(entry, dict) else entry
+        if status in (None, "", "healthy") or (manager, unit) in listed:
+            continue
+        if manager in MANAGERS:
+            found.append({"unit": unit, "manager": manager})
+    return found
 
 
 def current_state(state: Path | None = None) -> dict[str, Any]:

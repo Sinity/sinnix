@@ -23,8 +23,11 @@ from typing import Any, Callable
 
 from sinnix_lib.ledger import utc_ts
 
+from sinnix_lib.atomic_json import read_json
+
 from . import inventory as runtime_inventory
 from .client import UnixConnection
+from .health import delivery_path
 
 SCHEMA = "sinnix-status-v1"
 
@@ -94,7 +97,29 @@ def degraded_sources(sources: dict[str, Any] | None) -> list[str]:
     )
 
 
-def system_verdict(units: list[dict[str, Any]], degraded: list[str]) -> tuple[str, str]:
+# Lane statuses that mean something is wrong now, as opposed to "unknown"
+# (not yet sampled) or "healthy".
+FAILING_LANE_STATUSES = frozenset({"failed", "stale", "degraded", "stuck", "error"})
+
+
+def failing_lanes(freshness: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        row
+        for row in freshness.get("non_healthy") or []
+        if row.get("status") in FAILING_LANE_STATUSES
+    ]
+
+
+def desktop_delivery(path: Path | None = None) -> dict[str, Any]:
+    value = read_json(path or delivery_path(), {})
+    return value if isinstance(value, dict) else {}
+
+
+def system_verdict(
+    units: list[dict[str, Any]],
+    degraded: list[str],
+    lanes: list[dict[str, Any]] | None = None,
+) -> tuple[str, str]:
     """(status, one-line summary) -- the three-second read."""
     failed = [u for u in units if u.get("active_state") == "failed"]
     activating = [u for u in units if u.get("active_state") == "activating"]
@@ -112,6 +137,11 @@ def system_verdict(units: list[dict[str, Any]], degraded: list[str]) -> tuple[st
         problems.append(
             f"{len(degraded)} source{'s' if len(degraded) != 1 else ''} unavailable "
             f"({', '.join(degraded)})"
+        )
+    if lanes:
+        names = ", ".join(str(row["key"]) for row in lanes[:3])
+        problems.append(
+            f"{len(lanes)} health lane{'s' if len(lanes) != 1 else ''} failing ({names})"
         )
     if problems:
         return "attention", "Needs attention: " + "; ".join(problems) + "."
@@ -208,6 +238,7 @@ def compose(
     fetch: Callable[[Path, str], dict[str, Any] | None] = fetch_socket_json,
     read_static: Callable[[Path], dict[str, Any] | None] = read_static_inventory,
     bd_head: Callable[[], dict[str, Any]] = bd_ready_head,
+    read_delivery: Callable[[], dict[str, Any]] = desktop_delivery,
 ) -> dict[str, Any]:
     if static_inventory_path is None:
         static_inventory_path = runtime_inventory.default_path()
@@ -221,6 +252,8 @@ def compose(
         inventory = read_static(static_inventory_path)
 
     result: dict[str, Any] = {"schema": SCHEMA, "generated_at": utc_ts()}
+    freshness = capture_freshness(lanes)
+    result["desktop_delivery"] = read_delivery()
     if not isinstance(snapshot, dict) or state == {}:
         result["system"] = {
             "status": "unavailable",
@@ -231,7 +264,7 @@ def compose(
         degraded = degraded_sources(
             snapshot.get("sources") if isinstance(snapshot.get("sources"), dict) else {}
         )
-        status, summary = system_verdict(units, degraded)
+        status, summary = system_verdict(units, degraded, failing_lanes(freshness))
         result["system"] = {
             "status": status,
             "summary": summary,
@@ -242,7 +275,7 @@ def compose(
             "degraded_sources": degraded,
         }
     result["acknowledged_outages"] = acknowledged_outages(inventory)
-    result["capture_freshness"] = capture_freshness(lanes)
+    result["capture_freshness"] = freshness
     result["beads"] = bd_head()
     return result
 
@@ -257,6 +290,13 @@ def render_human(data: dict[str, Any]) -> str:
     system = data.get("system") or {}
     lines.append(f"sinnix status — {data.get('generated_at', '?')}")
     lines.append("")
+    delivery = data.get("desktop_delivery") or {}
+    if delivery.get("status") == "failed":
+        lines.append(
+            "Desktop notices are not being delivered (last attempt failed at "
+            f"{delivery.get('at', '?')}: notify-send missing or no session bus)."
+        )
+        lines.append("")
     lines.append(str(system.get("summary", "system status unknown")))
     for unit in system.get("failed_units") or []:
         lines.append(f"  FAILED      {unit.get('unit')} ({unit.get('manager')})")
@@ -298,40 +338,40 @@ def render_human(data: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def render_acknowledged_only(acked: list[dict[str, Any]]) -> str:
-    """The outages part of the session-start context (sessionstart-context.sh):
-    empty string (print nothing) when there is nothing acknowledged."""
-    if not acked:
+def render_attention(data: dict[str, Any]) -> str:
+    """The machine part of the session-start context: only what needs
+    attention, one line each; empty when the machine is healthy."""
+    lines: list[str] = []
+    delivery = data.get("desktop_delivery") or {}
+    if delivery.get("status") == "failed":
+        lines.append(
+            f"- desktop notices failing since {delivery.get('at', '?')} "
+            "(alerts are not reaching the operator)"
+        )
+    system = data.get("system") or {}
+    if system.get("status") == "unavailable":
+        lines.append(f"- {system.get('summary')}")
+    for unit in system.get("failed_units") or []:
+        lines.append(f"- unit failed: {unit.get('unit')} ({unit.get('manager')})")
+    for unit in system.get("attention_units") or []:
+        lines.append(f"- unit stuck activating: {unit.get('unit')}")
+    for name in system.get("degraded_sources") or []:
+        lines.append(f"- source unavailable: {name}")
+    for row in failing_lanes(data.get("capture_freshness") or {}):
+        lines.append(f"- health lane {row['status']}: {row['key']}")
+    acked = data.get("acknowledged_outages") or []
+    if not lines and not acked:
         return ""
-    lines = ["## Acknowledged outages (known-down, do not re-report as incidents)", ""]
-    for row in acked:
-        lines.append(f"- {row['surface']} ({row.get('unit') or '?'}) — {row['reason']}")
-    lines.append("")
-    lines.append(
-        "These are declared in the runtime inventory with a tracking reference. "
-        "Treat them as\nexpected state. If one looks stale, check its reference "
-        "rather than raising it as new."
-    )
-    return "\n".join(lines) + "\n"
-
-
-def acknowledged_only_report(
-    *,
-    socket_path: Path,
-    static_inventory_path: Path,
-    fetch: Callable[[Path, str], dict[str, Any] | None] = fetch_socket_json,
-    read_static: Callable[[Path], dict[str, Any] | None] = read_static_inventory,
-) -> str:
-    """The fast path the folded session-start hook actually takes: a direct
-    static-file read, same as the shell hook it replaces, with the socket as
-    fallback only -- so a healthy host pays no hub server round trip for
-    something a `jq` one-liner used to answer alone."""
-    inventory = read_static(static_inventory_path)
-    if inventory is None:
-        snapshot = fetch(socket_path, "/v1/snapshot")
-        state = snapshot.get("state") if isinstance(snapshot, dict) else None
-        inventory = state.get("runtime_inventory") if isinstance(state, dict) else None
-    return render_acknowledged_only(acknowledged_outages(inventory))
+    out = []
+    if lines:
+        out.append("Machine needs attention (`sinnix status` for detail):")
+        out.extend(lines)
+    if acked:
+        out.append(
+            "Known-down on purpose (do not re-report): "
+            + ", ".join(f"{row['surface']} ({row['reason']})" for row in acked)
+        )
+    return "\n".join(out) + "\n"
 
 
 def default_socket_path() -> Path:
@@ -348,12 +388,11 @@ def main(argv: list[str] | None = None) -> int:
         "--json", action="store_true", help="Emit the composed document as JSON."
     )
     parser.add_argument(
-        "--acknowledged-only",
+        "--attention",
         action="store_true",
         help=(
-            "Print only the acknowledged-outages block that the session-start "
-            "context (sessionstart-context.sh) injects; silent when there "
-            "is nothing acknowledged."
+            "Print only what needs attention, one line each (the session-start "
+            "context); silent when the machine is healthy."
         ),
     )
     parser.add_argument("--socket", type=Path, default=default_socket_path())
@@ -362,10 +401,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    if args.acknowledged_only:
-        text = acknowledged_only_report(
-            socket_path=args.socket, static_inventory_path=args.inventory
+    if args.attention:
+        data = compose(
+            socket_path=args.socket,
+            static_inventory_path=args.inventory,
+            bd_head=lambda: {"available": False},
         )
+        text = render_attention(data)
         if text:
             sys.stdout.write(text)
         return 0

@@ -1092,3 +1092,37 @@ def test_default_alarm_fans_out_to_phone_and_desktop(monkeypatch):
         {"key": "health:failed fixture.service:exit-code"},
     )
     assert calls[1][0] == "desktop"
+
+
+def test_reported_failure_outside_inventory_is_kept_until_it_recovers(tmp_path):
+    from sinnix_runtime import health
+
+    state = tmp_path / "state.json"
+    state.write_text(
+        '{"service:user:agentctl-baseline-polylogue.service": {"status": "failed"},'
+        ' "service:user:listed.service": {"status": "failed"},'
+        ' "service:user:recovered.service": {"status": "healthy"}}'
+    )
+    inventory = {
+        "observedServices": [
+            {"kind": "service", "unit": "listed.service", "manager": "user"}
+        ]
+    }
+    found = health.reported_failures_outside(inventory, state)
+    assert found == [{"unit": "agentctl-baseline-polylogue.service", "manager": "user"}]
+
+
+def test_io_stall_lane_degrades_and_names_top_readers():
+    from sinnix_runtime import pressure
+
+    reading = pressure.Sample(io_psi_full_300=72.0)
+    readers = pressure.top_readers(
+        {"system.slice/postgresql.service": 0, "user.slice/a.scope": 10},
+        {"system.slice/postgresql.service": 3 * 1048576, "user.slice/a.scope": 10},
+    )
+    status, evidence = pressure.io_lane_status(reading, readers)
+    assert status == "degraded"
+    assert "postgresql.service:3MiB" in evidence
+    calm = pressure.io_lane_status(pressure.Sample(io_psi_full_300=4.0), [])
+    assert calm[0] == "healthy"
+    assert pressure.io_lane_status(pressure.Sample(), []) is None

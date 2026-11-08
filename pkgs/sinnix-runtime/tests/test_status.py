@@ -294,73 +294,52 @@ def test_render_human_includes_every_populated_section() -> None:
     assert "Beads ready (1 of 2):" in text
 
 
-def test_render_acknowledged_only_matches_hook_contract() -> None:
-    acked = [
-        {
-            "surface": "sinex",
-            "unit": "sinex.service",
-            "reason": "repair in progress (sinnix-abcd, since 2026-07-10)",
-        }
-    ]
-    text = hub_status.render_acknowledged_only(acked)
-    assert text.startswith(
-        "## Acknowledged outages (known-down, do not re-report as incidents)\n\n"
-    )
-    assert (
-        "- sinex (sinex.service) — repair in progress (sinnix-abcd, since 2026-07-10)"
-        in text
-    )
-    assert text.endswith("rather than raising it as new.\n")
+# --------------------------------------------------------------------------
+# visibility: failed desktop delivery, failing lanes, the attention block
+# --------------------------------------------------------------------------
 
 
-def test_render_acknowledged_only_empty_when_nothing_acknowledged() -> None:
-    assert hub_status.render_acknowledged_only([]) == ""
+def _fetch_mixed(_socket: Path, route: str) -> dict[str, Any] | None:
+    return {"/v1/snapshot": SNAPSHOT_HEALTHY, "/v1/health/lanes": LANES_MIXED}[route]
 
 
-def test_acknowledged_only_report_prefers_static_file(tmp_path: Path) -> None:
-    static_inventory = tmp_path / "runtime-inventory.json"
-    static_inventory.write_text(
-        json.dumps(SNAPSHOT_HEALTHY["state"]["runtime_inventory"]), encoding="utf-8"
-    )
-    calls: list[str] = []
-
-    def fetch(_socket: Path, route: str) -> dict[str, Any] | None:
-        calls.append(route)
-        return None
-
-    text = hub_status.acknowledged_only_report(
+def test_failed_desktop_delivery_is_the_first_line() -> None:
+    data = hub_status.compose(
         socket_path=Path("/nonexistent/hub.sock"),
-        static_inventory_path=static_inventory,
-        fetch=fetch,
+        fetch=_fetch_mixed,
+        bd_head=lambda: {"available": False},
+        read_delivery=lambda: {"status": "failed", "at": "2026-11-08T23:00:00Z"},
     )
-    assert "sinex" in text
-    assert calls == []  # the socket was never touched
+    text = hub_status.render_human(data)
+    assert text.splitlines()[2].startswith("Desktop notices are not being delivered")
 
 
-def test_acknowledged_only_report_falls_back_to_socket(tmp_path: Path) -> None:
-    missing = tmp_path / "does-not-exist.json"
-
-    def fetch(_socket: Path, route: str) -> dict[str, Any] | None:
-        assert route == "/v1/snapshot"
-        return SNAPSHOT_HEALTHY
-
-    text = hub_status.acknowledged_only_report(
+def test_failing_lanes_are_counted_in_the_headline() -> None:
+    data = hub_status.compose(
         socket_path=Path("/nonexistent/hub.sock"),
-        static_inventory_path=missing,
-        fetch=fetch,
+        fetch=_fetch_mixed,
+        bd_head=lambda: {"available": False},
+        read_delivery=lambda: {},
     )
-    assert "sinex" in text
+    assert "2 health lanes failing" in data["system"]["summary"]
 
 
-def test_default_inventory_path_honors_env_override(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("SINNIX_RUNTIME_INVENTORY_FILE", "/tmp/fixture-inventory.json")
-    assert inventory.default_path() == Path("/tmp/fixture-inventory.json")
+def test_attention_block_lists_problems_and_is_empty_when_healthy() -> None:
+    data = hub_status.compose(
+        socket_path=Path("/nonexistent/hub.sock"),
+        fetch=_fetch_mixed,
+        bd_head=lambda: {"available": False},
+        read_delivery=lambda: {"status": "failed", "at": "t"},
+    )
+    text = hub_status.render_attention(data)
+    assert "desktop notices failing since t" in text
+    assert "unit failed: sinnix-capture-kitty-scrollback.service" in text
+    assert "health lane stale: capture:video-resolve" in text
 
-
-def test_default_inventory_path_falls_back_to_etc(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("SINNIX_RUNTIME_INVENTORY_FILE", raising=False)
-    assert inventory.default_path() == Path("/etc/sinnix/runtime-inventory.json")
+    healthy = {
+        "system": {"status": "healthy"},
+        "capture_freshness": {"available": True, "non_healthy": []},
+        "acknowledged_outages": [],
+        "desktop_delivery": {"status": "ok"},
+    }
+    assert hub_status.render_attention(healthy) == ""
