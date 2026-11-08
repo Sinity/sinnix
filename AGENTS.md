@@ -125,9 +125,11 @@ outside it; `agentctl job start sinnix switch` queues the same command), never
 a bare `nh os switch` or a duplicate preflight evaluation. State the units,
 files, mounts, or packages affected first. Afterwards compare
 `nixos-version --configuration-revision` with the intended commit and check
-the direct live fact (unit generation, executable path, rendered file). Do not
-restart services, remove persistent state, or change storage layouts without
-explicit authority and preservation checks.
+the direct live fact (unit generation, executable path, rendered file).
+Restarts, activations and declared storage-layout changes are ordinary work.
+Before a change that removes persistent state, confirm where the original
+bytes survive (the source's own location, a Borg archive, a set-aside copy)
+and name it in the commit or Bead.
 
 ## Documentation
 
