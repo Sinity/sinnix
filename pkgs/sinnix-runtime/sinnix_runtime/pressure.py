@@ -236,12 +236,22 @@ def sweep_io_stall(
     attribution covers exactly the window between two sweeps."""
     from sinnix_lib.atomic_json import modify_json
 
+    if reading.io_psi_full_300 is None:
+        emitter.observe(IO_LANE_KEY)
+        return
     after = cgroup_read_bytes(root)
-    with modify_json(sample_path, {}, mode=0o664) as document:
-        before = {k: int(v) for k, v in document.items() if isinstance(v, int)}
-        document.clear()
-        document.update(after)
-    verdict = io_lane_status(reading, top_readers(before, after))
+    readers: list[tuple[str, int]] = []
+    try:
+        with modify_json(sample_path, {}, mode=0o664) as document:
+            before = {k: int(v) for k, v in document.items() if isinstance(v, int)}
+            document.clear()
+            document.update(after)
+        readers = top_readers(before, after)
+    except OSError:
+        # No writable runtime directory: judge the condition without naming
+        # readers rather than skipping the lane.
+        pass
+    verdict = io_lane_status(reading, readers)
     if verdict is None:
         emitter.observe(IO_LANE_KEY)
         return
