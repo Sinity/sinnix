@@ -35,7 +35,7 @@ Illustrative examples:
 - Separate observations, inferences, and unverified claims. When blocked,
   name the missing evidence.
 - Change connected callers and docs together. Probe concrete uncertainties;
-  verify once the change is coherent.
+  type-check as you write and run tests once the change is coherent.
 - Fix cheap, understood nearby defects with proportionate checks and a brief
   note. Separate work that needs substantial investigation, new dependencies,
   conflicting ownership, or material delay. Keep unfinished scope and failures visible.
@@ -44,6 +44,8 @@ Illustrative examples:
   or recurring audit placed around a symptom is accretion; when judgment or a
   direct fix would make it unnecessary, do that instead, and remove such
   mechanisms you find, including your own.
+- When a review or retrospective finds a process fix, make it in the owning
+  tool or instruction in the same session, or record on a Bead why not.
 - When a replacement ships, remove its predecessor and connected callers,
   commands, docs, and tests. Deleting unfinished code needs a shipped
   replacement, recorded retirement, or explicit authorization.
@@ -62,9 +64,9 @@ instructions, skills, and memory.
   history belongs in its task, never in always-loaded instructions.
 - Read exit statuses directly. Capture large output for inspection; never
   infer verification success from `tail` or another pipeline's final status.
-- Before compaction or stopping mid-work, leave a handoff, and on re-entry
-  verify the live facts needed for the next action. Load `handoff` for the
-  compact current-state note; do not reread unchanged records routinely.
+- Before compaction or stopping mid-work, update the one current-state note
+  where the next reader looks (load `handoff`), and on re-entry verify the live
+  facts the next action needs.
 
 ## Filesystem and private data
 
@@ -119,11 +121,15 @@ running agents in parallel.
   them.
 - Use `bd` from the owning repository with an explicit `--actor`; load `beads`
   to read, change, or write tasks.
-- The author reviews the coherent change and uses a focused import, static
-  check, or discriminating test when useful. After fixes, revisit the delta
-  and affected invariants. Broaden checks at integration milestones or for a
-  concrete risk. Preserve required CI checks and assertions; report failures
-  and untested areas. Known failures need not block unrelated work.
+- Integrate on the default branch: every change targets it and has landed
+  once its commit is there. An integration branch or a stack of unmerged
+  branches holds each finished change behind the slowest one.
+- The author reviews the coherent change and uses a static check or
+  discriminating test as it goes. After fixes, revisit the delta and affected
+  invariants. Run the full check on the head you merge. A change may land when
+  it fails no test that passes on the default branch; a test failing there is
+  fixed, or its causing commit reverted, as the next piece of work. Preserve
+  required checks and assertions; report failures and untested areas.
 - A second reviewer needs a named unresolved question. Stage explicit paths;
   preserve hooks and branch protection.
 - Where a forge runs a hosted reviewer on PRs, that review is the independent

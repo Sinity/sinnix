@@ -21,15 +21,16 @@ self-contained: read what it points to rather than assuming shared history.
 - Briefly review the actual delivery for the assigned outcome, affected
   callers and invariants. After fixes, review the new delta and recheck only
   invalidated evidence. Consult project guides for relevant risks; no narrated
-  per-item checklist or restart loop. Keep ordinary known reds visible without
-  blocking unrelated progress.
+  per-item checklist or restart loop. A change may land when it fails no test
+  that passes on the default branch.
 - Commit in logical units and publish through the repository's normal route.
   For a PR, answer review findings with fixes or concrete refutations and
   follow the repository's required checks and review rules. Arm auto-merge on
   that head when the prompt says to.
-- Leave one current-state note per task: implemented (PR), already on the
-  default branch (commit), blocked by a named decision, or waiting on
-  operational evidence. Close tasks only after the change merges.
+- Leave one current-state note per task: merged (commit), already on the
+  default branch (commit), pull request open (head), or blocked by a named
+  decision. Close a task when its change is on the default branch with its
+  named tests passing.
 - The turn limit is a backstop, not a budget. Commit work in progress so an
   interruption loses nothing.
 

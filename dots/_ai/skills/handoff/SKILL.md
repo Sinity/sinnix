@@ -12,7 +12,7 @@ Bead's notes for task work, otherwise the final message.
 
 ## Leaving a handoff
 
-Keep one compact current-state note: the outcome, active owner and worktree,
+Keep one compact current-state note, updated in place: the outcome, active owner and worktree,
 uncommitted WIP, active job or PR pointers, useful verification results,
 blockers, and the next action. Include only facts needed to continue. Preserve
 uncommitted work; a handoff does not require a cleanliness commit. Link detailed

@@ -39,7 +39,7 @@ to the operator's live archive. Builds and tests run through the checkout's
 declared AgentCTL operations.
 
 Sinnix owns installed commands, capture hooks, MCP launchers and the
-`polylogue-live.service` user unit. A source edit requires a separately
-authorized activation and verification of the installed executable and live
-archive. Lynchpin reads its other owner-native sources independently; it has
+`polylogue-live.service` user unit. A source edit changes nothing installed
+until a Sinnix activation, which follows Sinnix `AGENTS.md`; then verify the
+installed executable and live archive. Lynchpin reads its other owner-native sources independently; it has
 no Polylogue archive or library dependency.

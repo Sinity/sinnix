@@ -17,8 +17,7 @@ semantics and commands.
   time but creates a new interpretation ID and processing time.
 - Occurrence identity is stable source coordinates; event IDs identify one
   interpretation. Replay is intentionally non-idempotent.
-- Schema evolution is declarative convergence through `sinex-schema apply`,
-  not a migration chain.
+- Schema changes follow the repository `AGENTS.md`.
 
 Do not carry Polylogue's archive assumptions into Sinex. State is designed to
 survive and fix forward through archive cascade and replay. A wipe is evidence
@@ -29,10 +28,7 @@ preservation checks.
 
 `xtask` is the only Cargo frontend. Use `xtask check`, `fix`, `test`, `build`,
 `run`, `schema`, `history`, and `docs`; never invoke bare Cargo. Discover the
-registered heavy routes with `agentctl project operations sinex`. Current core
-operations include `check_default`, `build_default`, `fix_default`,
-`test_default`, `run_core`, `run_all_automatons`, `run_all_sources`,
-`vm_smoke`, and `vm_validate`.
+registered heavy routes with `agentctl project operations sinex`.
 
 Read the descriptor for each database-backed operation's service requirements.
 An operation declaring `requires` owns those services inside its job unit.
@@ -42,15 +38,10 @@ SQLx compiles against the live dev database; do not create an offline cache.
 
 ## Verification and deployment
 
-Run the narrow semantic command while iterating. Select a broad `xtask check
---full` or `xtask test --impact-mode=off --all` only when the task, project
-policy, or operator requests it. Follow the repository's delivery policy; the
-local gate is authoritative for the scope it ran.
+Type-check and run focused tests while iterating, and the full check on the
+head that lands (repository `AGENTS.md`).
 
 Production deployment is owned by Sinnix. Pin the Sinex revision and run the
 Sinnix `switch` wrapper. Workstation activation does not restart `sinexd`;
 restart it explicitly when immediate rollout is intended, then verify the
 active binary, unit generation, and schema convergence.
-
-Query the live wipe campaign through Beads (`bd show sinex-poma` and its
-dependency graph) rather than copying status into instructions.
