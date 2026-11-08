@@ -290,7 +290,9 @@ in
     # One scrub a week rather than all three on the 1st at midnight, where they
     # met the snapshot and the realm Borg run.
     services."btrfs-scrub--".serviceConfig = scrubServiceConfig;
-    services."btrfs-scrub-realm".serviceConfig = scrubServiceConfig;
+    services."btrfs-scrub-realm".serviceConfig = scrubServiceConfig // {
+      ExecStartPre = "${pkgs.btrfs-progs}/bin/btrfs scrub limit --all --limit 300m /realm";
+    };
     services."btrfs-scrub-outer\\x2drealm".serviceConfig = scrubServiceConfig;
     timers."btrfs-scrub--".timerConfig.OnCalendar = lib.mkForce "*-*-01 02:30:00";
     timers."btrfs-scrub-realm".timerConfig.OnCalendar = lib.mkForce "*-*-08 01:00:00";
@@ -299,9 +301,8 @@ in
     # scrub walks ~2.9 TiB. Unthrottled it ran for days alongside every build.
     # It keeps running, but its read rate follows the clock: 300 MiB/s from
     # 01:00, 10 MiB/s from 07:30. The per-device limit lives in sysfs, so each
-    # change is set by a oneshot and the scrub itself starts at the night rate.
-    services."btrfs-scrub-realm".serviceConfig.ExecStartPre =
-      "${pkgs.btrfs-progs}/bin/btrfs scrub limit --all --limit 300m /realm";
+    # change is set by a oneshot and the scrub itself starts at the night rate
+    # (its ExecStartPre above).
     services.btrfs-scrub-realm-night = {
       description = "Raise the /realm scrub read limit for the night";
       serviceConfig.Type = "oneshot";
