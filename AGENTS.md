@@ -10,6 +10,9 @@ Tracked files, commits, task exports, and CI output are public. Never commit
 secrets, decrypted values, private captures, generated personal state, or
 machine-specific credentials. Secrets enter modules through declared secret
 inputs.
+Public docs state design intent in neutral language and never quote the
+operator's private sessions; PR bodies, review comments and commit messages
+carry no excerpts of captured data or private analyses.
 
 ## Layout
 
