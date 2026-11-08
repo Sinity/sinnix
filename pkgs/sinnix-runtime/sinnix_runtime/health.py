@@ -1193,9 +1193,9 @@ def sweep(
     sweep_mounts(mounts_of(inventory), emitter)
     sweep_services(services, properties, emitter)
     sweep_sockets(sockets, properties, emitter)
-    pressure.sweep_swap_headroom(
-        pressure.sample() if pressure_sample is None else pressure_sample, emitter
-    )
+    reading = pressure.sample() if pressure_sample is None else pressure_sample
+    pressure.sweep_swap_headroom(reading, emitter)
+    pressure.sweep_io_stall(reading, emitter, runtime_dir() / "io-read-sample.json")
     emitter.prune()
     return emitter
 
