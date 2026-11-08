@@ -1092,3 +1092,17 @@ def test_default_alarm_fans_out_to_phone_and_desktop(monkeypatch):
         {"key": "health:failed fixture.service:exit-code"},
     )
     assert calls[1][0] == "desktop"
+
+
+def test_reported_failure_outside_inventory_is_kept_until_it_recovers(tmp_path):
+    from sinnix_runtime import health
+
+    state = tmp_path / "state.json"
+    state.write_text(
+        '{"service:user:agentctl-baseline-polylogue.service": {"status": "failed"},'
+        ' "service:user:listed.service": {"status": "failed"},'
+        ' "service:user:recovered.service": {"status": "healthy"}}'
+    )
+    inventory = {"units": {"listed": {"kind": "service", "unit": "listed.service", "manager": "user"}}}
+    found = health.reported_failures_outside(inventory, state)
+    assert found == [{"unit": "agentctl-baseline-polylogue.service", "manager": "user"}]

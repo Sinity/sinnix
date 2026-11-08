@@ -1181,7 +1181,10 @@ def sweep(
     tick and would re-announce the same pre-freeze every couple of minutes.
     """
     captures = captures_of(inventory)
-    services = observed(inventory, "service")
+    services = [
+        *observed(inventory, "service"),
+        *reported_failures_outside(inventory, emitter.state),
+    ]
     sockets = observed(inventory, "socket")
     properties = unit_properties([*services, *sockets], prober)
     sweep_captures(captures, emitter, time.time() if now is None else now)
@@ -1243,6 +1246,31 @@ def emit_failure(
         f"manager={manager};source=onfailure;result={result or 'unknown'}",
         force_confirm=True,
     )
+
+
+def reported_failures_outside(
+    inventory: dict[str, Any], state: Path
+) -> list[dict[str, Any]]:
+    """Units the OnFailure hook reported failed that the inventory does not
+    list. The sweep judges them like inventory services until they recover, so
+    a failing timer unit keeps its record (and its reminder) instead of being
+    pruned on the next sweep and paging as new on its next failure; once it
+    succeeds the healthy verdict pairs with the outage and the key retires."""
+    listed = {
+        (str(entry.get("manager") or "system"), str(entry.get("unit") or ""))
+        for entry in observed(inventory, "service")
+    }
+    found: list[dict[str, Any]] = []
+    for key, entry in current_state(state).items():
+        if not key.startswith("service:"):
+            continue
+        _, manager, unit = key.split(":", 2)
+        status = entry.get("status") if isinstance(entry, dict) else entry
+        if status in (None, "", "healthy") or (manager, unit) in listed:
+            continue
+        if manager in MANAGERS:
+            found.append({"unit": unit, "manager": manager})
+    return found
 
 
 def current_state(state: Path | None = None) -> dict[str, Any]:
