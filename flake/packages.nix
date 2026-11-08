@@ -22,7 +22,6 @@
         "mcp-github"
         "sinnix"
         "sinnix-agent-cli-locks"
-        "sinnix-agent-environment-doc"
         "sinnix-agent-gateway"
         "agentctl"
         "sinnix-hub-server"

@@ -347,7 +347,6 @@ mkFeatureModule {
               scriptPkgs.claude-quota
               scriptPkgs.codex-worker
               scriptPkgs.claude-agents
-              scriptPkgs.claude-hang-capture
             ];
 
             xdg.configFile = {

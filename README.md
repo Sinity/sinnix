@@ -96,7 +96,6 @@ or establish responsiveness under real swap pressure.
 ## Subsystem guides
 
 - [Agent operations](docs/agentctl.md) and [gateway](docs/agent-gateway.md)
-- [Generated agent environment reference](docs/agent-environment.md)
 - [Local AI activation](docs/local-ai-activation.md)
 - [Interactive disk isolation](docs/interactive-io.md)
 - [Headless replica bootstrap](docs/ethereal-bootstrap.md)

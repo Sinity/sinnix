@@ -48,8 +48,6 @@ _: {
         # Gateway codegen output has exactly one correct form, checked byte
         # for byte by `sinnix-agent-gateway-generate --check`.
         "pkgs/sinnix-agent-gateway/sinnix_agent_gateway/generated_*"
-        # Rendered by `sinnix-agent-environment-doc`; its renderer owns the form.
-        "docs/agent-environment.md"
         # LazyVim rewrites its state file at runtime, without a final newline.
         "dots/nvim/lazyvim.json"
       ];

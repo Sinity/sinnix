@@ -217,8 +217,9 @@ let
     fi
     # One debug log per launch: a frozen session leaves a transcript that
     # simply stops, and this log shows what the process did last (hooks,
-    # messaging, file writes). `claude-hang-capture` collects it. The
-    # claude-* trees are retained and excluded from automatic scratch cleanup.
+    # messaging, file writes); the investigate skill's freeze checklist reads
+    # it. The claude-* trees are retained and excluded from automatic scratch
+    # cleanup.
     claude_debug_dir="$CLAUDE_CODE_TMPDIR/claude-debug"
     ${pkgs.coreutils}/bin/install -d -m 0700 "$claude_debug_dir"
     claude_args+=(--debug-file="$claude_debug_dir/$(${pkgs.coreutils}/bin/date +%Y%m%dT%H%M%S)-$$.log")

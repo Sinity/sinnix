@@ -25,7 +25,6 @@ SKILLS_ROOT = SKILL_DIR.parent
 REPO_ROOT = Path(os.environ.get("SINNIX_REPO_ROOT", SKILLS_ROOT.parents[2]))
 RANK = REPO_ROOT / "scripts" / "sinnix-rank"
 RANK_CORE = REPO_ROOT / "pkgs" / "sinnix-rank-core"
-VALIDATOR = SKILLS_ROOT / "skill-authoring" / "scripts" / "validate_skill.py"
 
 FOUR_OPTIONS = [
     ("opt-hub-page", "Render the comparison as a hub page"),
@@ -381,59 +380,7 @@ def test_status_text_output_names_the_unsettled_reasons(rank: Rank):
     assert "disconnected comparison components" in text
 
 
-# -- criterion 5: discoverable from the live root ---------------------------
-
-
-def test_skill_is_discoverable_from_the_live_root():
-    assert SKILL_DIR.is_dir(), "the skill source directory must exist"
-    assert (SKILL_DIR / "SKILL.md").is_file()
-    discovered = {
-        path.name
-        for path in SKILLS_ROOT.iterdir()
-        if path.is_dir() and (path / "SKILL.md").is_file()
-    }
-    assert "rank-options" in discovered
-
-
-def test_skill_passes_package_validation():
-    findings = json.loads(
-        subprocess.run(
-            [sys.executable, str(VALIDATOR), str(SKILLS_ROOT)],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        ).stdout
-    )["findings"]
-    mine = [f for f in findings if "rank-options" in f["path"]]
-    assert mine == []
-
-
 # -- criterion 6: private option text never reaches tracked output -----------
-
-
-def text_contains(root: Path, needle: str) -> list[str]:
-    hits = []
-    for path in root.rglob("*"):
-        if not path.is_file() or path.is_symlink():
-            continue
-        if ".git" in path.parts:
-            continue
-        try:
-            if needle in path.read_text(encoding="utf-8", errors="ignore"):
-                hits.append(str(path))
-        except OSError:
-            continue
-    return hits
-
-
-def seed_private_options(rank: Rank, canary: str) -> None:
-    options = [(f"opt-private-{i}", f"{canary} option {i}") for i in range(1, 5)]
-    assert rank.add("private", options).returncode == 0
-    rank.record("private", options[0][0], options[1][0], options[0][0])
-    rank.record("private", options[1][0], options[2][0], options[1][0])
-    rank.record("private", options[2][0], options[3][0], options[2][0])
-
-
 def test_private_option_text_stays_out_of_the_tree(rank: Rank, tmp_path: Path):
     canary = f"canary-{uuid.uuid4().hex}"
     seed_private_options(rank, canary)

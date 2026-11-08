@@ -73,19 +73,6 @@
           scripts = [ "sinnix-borg-prune-dumps" ];
           nativeBuildInputs = [ pkgs.borgbackup ];
         };
-        claude-hang-capture-suite = mkScriptSuite {
-          name = "claude-hang-capture";
-          suiteDir = ../../pkgs/claude-hang-capture/tests;
-          scripts = [ "claude-hang-capture" ];
-          nativeBuildInputs = with pkgs; [
-            bash
-            procps
-            gawk
-            gnugrep
-            findutils
-            jq
-          ];
-        };
         phone-score-suite = mkScriptSuite {
           name = "sinnix-score";
           suiteDir = ../../pkgs/sinnix-score/tests;
@@ -157,13 +144,6 @@
         # Provably fails when: the drift reporter stops distinguishing the
         # booted configuration revision from the current one, or stops
         # reporting a drift class its manifest describes.
-        config-drift-suite = mkScriptSuite {
-          name = "sinnix-config-drift";
-          suiteDir = ../../pkgs/sinnix-config-drift/tests;
-          scripts = [ "sinnix-config-drift" ];
-          extraPythonPackages = [ sinnix-lib ];
-          nativeBuildInputs = [ pkgs.systemd ];
-        };
         # Provably fails when: either direction of the /realm taxonomy
         # assertion is dropped, or a retired level-1 name is readmitted to the
         # manifest. Verified by all three mutations.
@@ -225,12 +205,6 @@
             pkgs.git
             pkgs.jq
           ];
-        };
-        git-store-repair-suite = mkScriptSuite {
-          name = "sinnix-git-store-repair";
-          suiteDir = ../../pkgs/sinnix-git-store-repair/tests;
-          scripts = [ "sinnix-git-store-repair" ];
-          nativeBuildInputs = [ pkgs.git ];
         };
         borg-check-suite = mkScriptSuite {
           name = "sinnix-borg-check";

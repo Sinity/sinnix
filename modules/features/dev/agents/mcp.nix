@@ -281,33 +281,6 @@ mkFeatureModule {
       codexLocalConfigFile = codexEndpointFiles.local;
     in
     lib.mkMerge [
-      # NixOS-level systemd.user (manager="user", preserving the unit's
-      # existing manager) rather than the previous home-manager.users.${user}
-      # block: neither unit had a registered runtime surface either way, so
-      # this is render-only aside from the namespace move and the gained
-      # OnFailure path every generated job carries by default.
-      (lib.sinnix.mkScheduledJob
-        {
-          inherit config;
-          unitName = "sinnix-settings-env-lint";
-          description = "Audit project agent settings environment paths";
-          surface = null;
-        }
-        {
-          manager = "user";
-          # A monthly read-only audit of project Claude settings. The two
-          # Polylogue /tmp roots are intentional workstation-local paths. Keep
-          # them explicit inputs so a new absolute path remains unexplained
-          # and fails loud.
-          execStart = "${pkgs.bash}/bin/bash -c 'install -d -m 0700 \"$XDG_STATE_HOME/sinnix/settings-env-lint\"; ${scriptPkgs.sinnix-settings-env-lint}/bin/sinnix-settings-env-lint --root /realm/project > \"$XDG_STATE_HOME/sinnix/settings-env-lint/latest.json\"'";
-          timer = {
-            onCalendar = "*-*-01 04:20:00";
-            persistent = true;
-            accuracySec = "15min";
-            description = "Monthly project agent settings environment audit";
-          };
-        }
-      )
       {
         # Codex reads this live system layer before its private overlay.
         environment.etc."codex/config.toml".source = codexSystemConfigFile;
@@ -317,9 +290,6 @@ mkFeatureModule {
         sinnix.features.dev.mcp-servers.codexLocalConfigSource = codexLocalConfigFile;
         sinnix.features.dev.mcp-servers.codexHooksSource = codexHooksFile;
         sinnix.features.dev.mcp-servers.antigravityMcpConfigSource = antigravityMcpConfigFile;
-        sinnix.persistence.home.directories = [
-          ".local/state/sinnix/settings-env-lint"
-        ];
 
         home-manager.users.${user} =
           {

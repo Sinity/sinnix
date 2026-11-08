@@ -91,15 +91,9 @@ Mark genuinely new or changed blocks with `data-added="YYYY-MM-DD"` or
 untouched content. Living reports keep a stable filename; one-shot reports use
 `<topic>-<YYYY-MM-DD>.html`.
 
-When revising, run:
-
-```bash
-python3 generators/check-superset.py OLD.html NEW.html
-```
-
-Use it as an omission detector. Inspect every dropped heading. Restore an
-accidental omission, pass `--rename "old=new"` for a real rename, or record a
-deliberate scope removal and its reason in the revision metadata. Superseded
+When revising, compare old and new headings. Restore an accidental omission,
+or record a rename or a deliberate scope removal and its reason in the
+revision metadata. Superseded
 reports carry a `superseded-by` pointer and banner; successors point back with
 `supersedes`. Living artifacts are republished at the same path when a
 publisher supports stable paths.

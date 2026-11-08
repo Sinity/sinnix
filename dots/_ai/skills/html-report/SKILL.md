@@ -46,10 +46,9 @@ only for the interaction patterns the artifact needs.
   process is not itself a pass, and a successful process is not proof that the
   required behavior ran. Check non-empty, fresh output and behavior-specific
   DOM evidence. If no route is available, report that rendering was not run.
-- When revising a report, use `generators/check-superset.py` as an omission
-  detector. Restore accidental drops or declare intentional scope removals,
-  renames, and their reasons in the revision metadata; a heading is not
-  immutable merely because an older version contained it.
+- When revising a report, compare the old and new headings and restore
+  accidental drops; state intentional removals and renames in the revision
+  metadata. A heading is not immutable merely because an older version had it.
 - For recurring reports, regenerate from current inputs. Generators may collect
   and derive facts, but human judgments remain attributed authored assessments
   and must not be emitted as unconditional predicates.

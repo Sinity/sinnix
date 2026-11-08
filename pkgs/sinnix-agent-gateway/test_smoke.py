@@ -718,7 +718,7 @@ def test_machine_query_selects_and_pages_large_collector_report(tmp_path: Path) 
         "generated_at": "2026-08-21T00:00:00Z",
         "window": {"start": "2026-08-20T00:00:00Z"},
         "live_pressure": {"state": "quiet"},
-        "config_drift": {"state": "clean"},
+        "system_generation": {"status": "healthy"},
         "gaps_summary": {"count": 0},
         "storage": {"available": True},
         "sources": {"observe": "live"},

@@ -283,13 +283,6 @@ pool = "normal"
 result = "exit"
 timeout_seconds = 1800
 
-[operations.agent_environment_doc]
-description = "Render the declared agent environment reference"
-exec = ["nix", "run", ".#sinnix-agent-environment-doc", "--", "--output", "docs/agent-environment.md"]
-pool = "normal"
-result = "exit"
-timeout_seconds = 1800
-
 [operations.build_system]
 description = "Build the declared workstation configuration without activation"
 exec = ["env", "SINNIX_SECRET_DECLARATIONS=/realm/state/secrets/sinnix/runtime.nix", "nix", "build", "--impure", "--no-link", ".#nixosConfigurations.sinnix-prime.config.system.build.toplevel"]
@@ -340,31 +333,12 @@ cache = "none"
 scratch = "nvme"
 timeout_seconds = 21600
 
-[operations.git_store_repair]
-description = "Preserve refs and package borrowed reachable Git objects independently"
-exec = ["python3", "scripts/sinnix-git-store-repair"]
-arguments = "required"
-pool = "normal"
-result = "exit"
-cache = "none"
-scratch = "nvme"
-timeout_seconds = 1800
-
 [operations.verify_report_navigation]
 description = "Verify report-index links in local and served contexts"
 exec = ["nix", "build", "--no-link", ".#checks.x86_64-linux.report-navigation-suite"]
 pool = "normal"
 result = "exit"
 cache = "tree+environment"
-
-[operations.clean_terminal_worktrees]
-description = "Release terminal managed worktrees through their lifecycle owner, retaining evidence and uncertain work"
-exec = ["agentctl", "worktree", "clean", "--json", "--project"]
-arguments = "required"
-pool = "normal"
-result = "exit"
-cache = "none"
-timeout_seconds = 3600
 
 [operations.xiaomi_cloud_login]
 description = "Authenticate the existing Xiaomi cloud capture through browser confirmation"

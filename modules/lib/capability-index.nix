@@ -394,7 +394,7 @@ let
       # Which file declared each surface / standalone lane. The module system
       # already tracks this per definition, so a lane's owner is looked up
       # rather than guessed from a naming convention that surfaces like
-      # `config-drift` and `phone-dispatcher` do not follow.
+      # `phone-dispatcher` do not follow.
       definitionFiles =
         option: reduce:
         builtins.foldl' (acc: definition: acc // reduce (relative definition.file) definition.value) { } (

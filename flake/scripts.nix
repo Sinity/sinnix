@@ -92,7 +92,7 @@ let
 in
 {
   packages = scriptPackages // {
-    inherit (externalPackages) sinnix-agent-environment-doc sinnix-agent-cli-locks;
+    inherit (externalPackages) sinnix-agent-cli-locks;
   };
   inherit packageSet;
   inherit registry;

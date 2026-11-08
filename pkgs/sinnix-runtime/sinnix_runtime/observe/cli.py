@@ -17,7 +17,7 @@ from .render import render_human
 from .sources.agent_gateway import collect_agent_gateway
 from .sources.below import collect_below
 from .sources.chrome import collect_chrome_io
-from .sources.drift import collect_config_drift
+from .sources.generation import collect_system_generation
 from .sources.polylogue import collect_polylogue_status
 from .sources.pressure import collect_blocked_tasks, collect_pressure
 from .sources.sqlite_util import clear_sqlite_errors, sqlite_errors
@@ -46,7 +46,7 @@ def _report_header(args: argparse.Namespace) -> dict[str, Any]:
 def _sources(
     sinex: dict[str, Any],
     polylogue: dict[str, Any],
-    config_drift: dict[str, Any] | None = None,
+    system_generation: dict[str, Any] | None = None,
     below: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     sources = {
@@ -59,12 +59,10 @@ def _sources(
             "available": polylogue.get("available"),
         },
     }
-    if config_drift is not None:
-        sources["config_drift"] = {
-            "available": config_drift.get("available"),
-            "status": config_drift.get("status"),
-            "drift_count": config_drift.get("drift_count", 0),
-            "unavailable_count": config_drift.get("unavailable_count", 0),
+    if system_generation is not None:
+        sources["system_generation"] = {
+            "available": system_generation.get("available"),
+            "status": system_generation.get("status"),
         }
     if below is not None:
         sources["below"] = {"available": below.get("available")}
@@ -121,8 +119,8 @@ def collect_report(args: argparse.Namespace) -> dict[str, Any]:
                         "observed_at": None,
                         "degradation": str(error)[:240],
                     }
-        elif section == "drift":
-            report["config_drift"] = collect_config_drift()
+        elif section == "generation":
+            report["system_generation"] = collect_system_generation()
         elif section == "pressure":
             report["live_pressure"] = collect_pressure(args.offline)
         elif section == "blocked_tasks":
@@ -188,19 +186,19 @@ def collect_report(args: argparse.Namespace) -> dict[str, Any]:
     below = collect_below(args.since, args.duration, args.limit, args.offline)
     chrome_io = collect_chrome_io(args.offline, below, args.limit)
     gateway = collect_agent_gateway(args.limit, below)
-    config_drift = collect_config_drift()
+    system_generation = collect_system_generation()
     workload_rows = build_workload_rows(
         systemd_units, sinex, polylogue, below
     ) + build_gateway_rows(gateway, below)
     return {
         **_report_header(args),
-        "sources": _sources(sinex, polylogue, config_drift, below),
+        "sources": _sources(sinex, polylogue, system_generation, below),
         "live_pressure": pressure,
         "blocked_tasks": blocked,
         "storage": storage,
         "systemd_units": systemd_units,
         "runtime_inventory": collect_runtime_inventory(args.offline),
-        "config_drift": config_drift,
+        "system_generation": system_generation,
         "resource_slices": slices,
         "chrome_io": chrome_io,
         "sinex_xtask_history": sinex,
@@ -229,7 +227,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         choices=[
             "overview",
             "current",
-            "drift",
+            "generation",
             "pressure",
             "blocked_tasks",
             "storage",
