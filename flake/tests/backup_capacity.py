@@ -22,3 +22,21 @@ after = dict(current, epoch=3 * 86400, available_bytes=900 * gib)
 assert trend([before, recovered], after)["net_bytes_per_day"] == 50 * gib
 assert trend([before], recovered)["after_large_reclamation"]
 print("capacity growth, cleanup, destination identity and minimum history passed")
+alert = runpy.run_path(sys.argv[1])["alert"]
+day = 86400
+# 557 GiB free shrinking by 10.3 GiB a day: 54 days left, no alert.
+plenty = trend(
+    [dict(old, epoch=0, available_bytes=round((557 + 8 * 10.3) * gib))],
+    dict(current, epoch=8 * day, available_bytes=557 * gib),
+)
+assert 53 < plenty["days_remaining"] < 55
+assert not alert(plenty)
+# 250 GiB free shrinking by 10 GiB a day: 25 days left, alert.
+short = trend(
+    [dict(old, epoch=0, available_bytes=330 * gib)],
+    dict(current, epoch=8 * day, available_bytes=250 * gib),
+)
+assert short["days_remaining"] == 25
+assert alert(short)
+assert not alert(trend([dict(old, epoch=86401)], current))
+print("capacity alerts on projected days remaining, not free bytes")

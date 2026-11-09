@@ -67,6 +67,16 @@ def trend(history, current):
     }
 
 
+# Long enough to buy and seed another disk. Free bytes alone say nothing:
+# the same headroom is weeks at one growth rate and years at another.
+ALERT_DAYS = 30
+
+
+def alert(trend_record):
+    days = trend_record["days_remaining"]
+    return days is not None and days < ALERT_DAYS
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", required=True, type=Path)
@@ -112,19 +122,14 @@ def main():
         "repository_allocated_bytes": sizes,
     }
     current["trend"] = trend(history, current)
-    days = current["trend"]["days_remaining"]
-    current["alert"] = current["available_bytes"] < 600 * GIB or (
-        days is not None and days < 14
-    )
+    current["alert"] = alert(current["trend"])
     args.state.parent.mkdir(parents=True, exist_ok=True)
     temporary = args.state.with_suffix(".tmp")
     temporary.write_text(json.dumps([*history, current], indent=2) + "\n")
     temporary.replace(args.state)
     print(json.dumps(current), flush=True)
     if current["alert"]:
-        raise SystemExit(
-            "Backup headroom below 600 GiB or projected exhaustion within 14 days"
-        )
+        raise SystemExit(f"Backup destination projected full within {ALERT_DAYS} days")
 
 
 if __name__ == "__main__":

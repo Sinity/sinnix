@@ -28,7 +28,7 @@ selection and statistics. A deferred run does not mean pruning completed.
 
 `borgbackup-capacity` runs every six hours at :45, recording allocated repository
 sizes and filesystem free bytes in `/persist/root/.cache/borg-drain/capacity.json`.
-It alerts below 600 GiB free or less than 14 projected days remaining. Its
+It alerts when the destination is projected full within 30 days, the time to buy and seed another disk; free bytes alone are recorded, not judged. Its
 advisory projection uses net free-space consumption over up to eight days,
 requires at least 24 hours of observations, and resets comparisons when the
 filesystem UUID changes or an observation gains at least 100 GiB of headroom.
@@ -63,8 +63,11 @@ paths. Neither measurement establishes that a directory is disposable.
 | Sinex content stores     | read in place: the running store, its producer spools, and the whole dated earlier deployment (stopped PostgreSQL cluster included) | nightly coordinator | `borg-sinex-blobs-v1` |
 | Sinex database dump      | `pg_dump` into `state/db-dumps/sinex`, archived with `/realm`          | dump daily at midnight                           | `borg-realm-v2`                    |
 | Polylogue state          | hooks archived directly from a read-only snapshot of its subvolume     | nightly coordinator                              | `borg-polylogue-state-v1`          |
+| Purchased embedding vectors | the 2026-07-10 stores on `/neo-outer-realm/archive/polylogue/embeddings`, in the same archive as Polylogue state; they never change, so Borg stores them once | nightly coordinator | `borg-polylogue-state-v1` |
 | Polylogue live archive   | `state/polylogue-live` (except `index.db`) inside the `/realm` btrbk snapshot; an atomic snapshot is consistent for Polylogue | same as `/realm` | `borg-realm-v2` |
 | Polylogue live spools    | `~/.local/state/polylogue` (hook, browser and collector spools; the AI Studio Drive token), persisted on `/persist` | same as `/persist` | `borg-persist-v1` |
+| Polylogue archive database, hourly | `.dump` of the whole `archive.db` in one read transaction, streamed into a `polylogue-archive-*` archive; it follows whatever schema is deployed, so no table list exists to fall behind | hourly at :47 | `borg-live-small-v1` |
+| Beads task databases and Sinex spools, hourly | the `state/tasks` tree (minus migration backups) and the producer spools, read in place | hourly at :47 | `borg-live-small-v1`, `live-small-*` series |
 | Telemetry database dumps | `--rsyncable` zstd copies in `state/db-dumps/`, archived with `/realm` | dumps before nightly cut, seal Sunday            | `borg-realm-v2`                    |
 
 Left out of the `/realm` archive (`realmExcludes` in `modules/backup.nix`):
@@ -271,7 +274,7 @@ the comparison. This checks a tree copy, not a Borg archive.
 | ------------------------ | --------------------------------- | -------------------------------- | ------------------------------------------------------------------------------- |
 | Repository integrity     | `borgbackup-verify`               | Sunday 13:00                     | Borg's segment CRCs, advanced in time-limited partial passes                    |
 | `/realm` coverage sample | `borgbackup-coverage-audit-realm` | nightly when due, at most weekly | all paths and metadata match, plus up to 128 files / 1 GiB of contents compared |
-| Beads restore check      | `sinnix-borg-beads-check`         | Thursday 05:00                   | a real restore of the Beads database from the latest archive                    |
+| Beads restore check      | `sinnix-borg-beads-check`         | Thursday 12:00                   | every task database restored from the latest realm archive and opened offline; waits up to three hours for the Borg lock and fails past that |
 | Sealed telemetry         | `machine-telemetry-seal`          | Sunday 04:30                     | each sealed SQLite file passes a structural check once                          |
 
 The coverage sample checks only the newest archive, so files that exist only

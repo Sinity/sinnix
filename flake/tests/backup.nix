@@ -507,6 +507,10 @@ assert lib.assertMsg (
           to = "$TMPDIR/repos/borg-polylogue-state-v1";
         }
         {
+          from = "/neo-outer-realm/archive/polylogue/embeddings";
+          to = "$TMPDIR/paid-vectors";
+        }
+        {
           # Must precede the plain ".cache/borg" pattern below:
           # replaceStrings matches earlier list entries first at a given
           # position, and "borg" is itself a prefix of "borg-drain".
@@ -543,10 +547,10 @@ assert lib.assertMsg (
         }
       ];
 
-      sinexBeadsCheckScript =
+      beadsCheckScript =
         assert lib.assertMsg
           (lib.hasInfix "authority/sinex/.beads" customAuthorityEval.config.systemd.services.sinnix-borg-beads-check.script)
-          "The Beads restore check must follow a configured Sinex task authority outside state/tasks";
+          "The Beads restore check must follow a configured task authority outside state/tasks";
         rewriteBackupHook backupRuntimeEval.config.systemd.services.sinnix-borg-beads-check.script [
           {
             from = "/outer-realm/backup/borg-realm-v2";
@@ -563,6 +567,12 @@ assert lib.assertMsg (
           {
             from = "${pkgs.dolt}/bin/dolt";
             to = "$TMPDIR/mock-bin/dolt";
+          }
+          {
+            # The production wait is three hours; one second shows the same
+            # failure when the lock stays held.
+            from = "flock -w 10800 9";
+            to = "flock -w 1 9";
           }
         ];
 
@@ -837,7 +847,7 @@ assert lib.assertMsg (
                     missing = missingRealmBorgDrainScript;
                     sinex = sinexBlobBorgScript;
                     polylogue = polylogueStateBorgScript;
-                    beads = sinexBeadsCheckScript;
+                    beads = beadsCheckScript;
                     liveLock = liveHolderLockScript;
                     deadLock = deadHolderLockScript;
                   }

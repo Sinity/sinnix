@@ -10,10 +10,10 @@
 #   and file-cache flags, so cache entries match. Its Borg cache lives on
 #   /realm so hourly cache commits (about 570 MB each) never land on the root
 #   SSD; the first run seeds that cache from the drain's.
-# - borgbackup-job-live-small: Polylogue's authored tables (a consistent
-#   read-transaction dump of archive.db), the Beads task databases (old and
-#   new layouts alike: the whole tasks tree minus copied migration backups),
-#   and the Sinex producer spools. The Sinex PostgreSQL dump stays daily: it
+# - borgbackup-job-live-small: Polylogue's archive.db (a consistent
+#   read-transaction dump of the whole database), the Beads task databases
+#   (old and new layouts alike: the whole tasks tree minus copied migration
+#   backups), and the Sinex producer spools. The Sinex PostgreSQL dump stays daily: it
 #   writes 2.7 GB over about 4.5 minutes, too heavy for every hour; the
 #   spools hold what the producers have not yet had acknowledged.
 #
@@ -45,23 +45,6 @@
 let
   persistHourlyCut = "/persist/.btrfs/borg-hourly-cut";
   polylogueArchiveDb = "${realmRoot}/state/polylogue-live/data/polylogue/archive.db";
-  # Every authored or operator-requested record in the standalone archive
-  # (the rewrite's store/schema: notes carry assertions, judgments and saved
-  # queries; settings, kept results, excisions, the request log and chat
-  # actions are authored too). Inputs, revisions and extents are captured
-  # bytes covered by the daily realm job.
-  polylogueAuthoredTables = [
-    "note"
-    "note_target"
-    "note_relation"
-    "setting"
-    "kept_result"
-    "excision"
-    "client_request"
-    "chat_action"
-    "chat_action_attachment"
-    "chat_action_event"
-  ];
   tasksRoot = "${realmRoot}/state/tasks";
   tasksExcludes = [
     "migration-backups"
@@ -162,7 +145,7 @@ in
   })
 
   (mkBackupJob "borgbackup-job-live-small" {
-    description = "Archive Polylogue authored records, Beads and Sinex spools into Borg every hour";
+    description = "Archive Polylogue's archive database, Beads and Sinex spools into Borg every hour";
     unit = {
       after = [
         "realm.mount"
@@ -177,10 +160,7 @@ in
         borgHourlyCacheDir
       ];
     };
-    serviceConfig = hourlyServiceConfig // {
-      RuntimeDirectory = "borg-live-small";
-      RuntimeDirectoryMode = "0711";
-    };
+    serviceConfig = hourlyServiceConfig;
     path = with pkgs; [
       borgbackup
       coreutils
@@ -202,21 +182,26 @@ in
         with_borg_lock borg init --encryption repokey-blake2 "$BORG_REPO"
       fi
 
-      # One read transaction gives a consistent cut while the daemon writes.
-      # It runs as the archive's owner so no root-owned WAL files appear. The
-      # dump lands in this unit's tmpfs runtime directory, never on a disk.
-      stage="$RUNTIME_DIRECTORY/polylogue"
-      install -d -m 0700 -o ${lib.escapeShellArg username} -g users "$stage"
-      sources=()
+      # Polylogue keeps no table list: its docs say a backup takes the whole
+      # database consistently (docs/operations.md, "Backup and restore").
+      # One read transaction gives a consistent cut while the daemon writes,
+      # so the dump follows whatever schema is deployed and cannot miss an
+      # authored table. It streams into its own archive, never onto a disk;
+      # a failing dump fails the unit. It runs as the archive's owner so no
+      # root-owned WAL files appear. The segment files holding captured bytes
+      # stay with the daily realm job.
       if [ -e ${lib.escapeShellArg polylogueArchiveDb} ]; then
-        runuser -u ${lib.escapeShellArg username} -- \
-          sqlite3 -readonly -bail ${lib.escapeShellArg polylogueArchiveDb} \
-          ".output $stage/authored.sql" \
-          ".dump ${lib.concatStringsSep " " polylogueAuthoredTables}"
-        test -s "$stage/authored.sql"
-        sources+=("$stage")
+        BORG_EXIT_CODES=modern borg create \
+          --compression auto,zstd,3 \
+          --lock-wait ${toString borgLockWaitSec} \
+          --stats \
+          --stdin-name polylogue-archive.sql \
+          --content-from-command \
+          "::polylogue-archive-$(date -u +%Y%m%dT%H%M%SZ)" \
+          -- runuser -u ${lib.escapeShellArg username} -- \
+          sqlite3 -readonly -bail ${lib.escapeShellArg polylogueArchiveDb} .dump
       fi
-      sources+=(${lib.escapeShellArg tasksRoot})
+      sources=(${lib.escapeShellArg tasksRoot})
       for spool in ${lib.escapeShellArgs sinexSpoolPaths}; do
         [ -d "$spool" ] && sources+=("$spool")
       done

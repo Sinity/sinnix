@@ -8,6 +8,7 @@
   scriptPkgs,
   username,
   polylogueStateRoot,
+  paidVectorRoot,
   polylogueBackupRoot,
   polylogueDbNames,
   polylogueDbExcludes,
@@ -125,7 +126,7 @@ let
       maintain_repo ${lib.escapeShellArg borgRepoSinexBlobs} 'sinex-blobs-*'
       maintain_repo ${lib.escapeShellArg borgRepoRootSnapshots} 'root-*'
       maintain_repo ${lib.escapeShellArg borgRepoPolylogueState} 'polylogue-state-*'
-      maintain_repo ${lib.escapeShellArg borgRepoLiveSmall} 'live-small-*'
+      maintain_repo ${lib.escapeShellArg borgRepoLiveSmall} 'live-small-* polylogue-archive-*'
       if [ "$dry_run" = 0 ]; then
         date +%s > "$marker.tmp"
         mv "$marker.tmp" "$marker"
@@ -272,8 +273,10 @@ in
   # append-only hook tree. SQLite is covered by the dump job above; hooks are
   # archived directly from a read-only state cut so writers can keep appending.
   # Failed provisional cuts remain in the private cache for owner recovery.
+  # The purchased embedding vectors ride in the same archive: they never
+  # change, so Borg stores them once.
   (mkBackupJob "borgbackup-job-polylogue-state" {
-    description = "Back up Polylogue state (blob CAS and non-live files) into Borg";
+    description = "Back up Polylogue state (blob CAS and non-live files) and the purchased vectors into Borg";
     unit = {
       after = [
         "realm.mount"
@@ -283,7 +286,10 @@ in
         "realm.mount"
         outerRealmMountUnit
       ];
-      unitConfig.RequiresMountsFor = [ polylogueStateRoot ];
+      unitConfig.RequiresMountsFor = [
+        polylogueStateRoot
+        paidVectorRoot
+      ];
     };
     serviceConfig = {
       TimeoutStartSec = "90min";
@@ -321,7 +327,8 @@ in
         } \
         --exclude ${lib.escapeShellArg "${polylogueStateRoot}/hooks/**"} \
         "::$archive_name" \
-        ${lib.escapeShellArg polylogueStateRoot}
+        ${lib.escapeShellArg polylogueStateRoot} \
+        ${lib.escapeShellArg paidVectorRoot}
       echo "polylogue state backup complete: $archive_name"
 
       install -d -m 0750 -o root -g users ${lib.escapeShellArg borgDrainStateRoot}
