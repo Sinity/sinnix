@@ -68,6 +68,8 @@ in
                   sinex.mode = mode;
                   liveRoot = "/fixture/live archive";
                 };
+                config.sinnix.user.name = "op";
+                config.users.users.op.home = "/fixture/home";
               };
             mcp =
               cli:
@@ -81,7 +83,7 @@ in
             export POLYLOGUE_HTTP_PORT=1
             export XDG_DATA_HOME=/foreign/data XDG_STATE_HOME=/foreign/state
             export POLYLOGUE_ARCHIVE=/foreign/archive POLYLOGUE_HOME=/foreign/home
-            export EXPECTED_STATE_HOME='/fixture/live archive/state'
+            export EXPECTED_STATE_HOME=/fixture/home/.local/state
             export EXPECTED_DATA_HOME='/fixture/live archive/data'
             ${wrapper "standalone"}/bin/polylogue mcp 'one argument'
             ${(mcp (wrapper "standalone"))}/bin/mcp-polylogue 'one argument'

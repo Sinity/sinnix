@@ -56,9 +56,10 @@ mkServiceModule {
       type = lib.types.str;
       default = "${config.sinnix.paths.stateRoot}/polylogue-live";
       description = ''
-        Everything the rewrite keeps: ``data/polylogue`` is the archive,
-        ``state/polylogue`` its spools, ``extension`` the unpacked browser
-        extension Chrome loads.
+        Everything the rewrite keeps except its spools: ``data/polylogue``
+        is the archive, ``extension`` the unpacked browser extension Chrome
+        loads. The spools are under ``~/.local/state/polylogue`` on the root
+        disk, persisted by modules/persistence.nix.
       '';
     };
   };

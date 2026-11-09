@@ -64,6 +64,7 @@ paths. Neither measurement establishes that a directory is disposable.
 | Sinex database dump      | `pg_dump` into `state/db-dumps/sinex`, archived with `/realm`          | dump daily at midnight                           | `borg-realm-v2`                    |
 | Polylogue state          | hooks archived directly from a read-only snapshot of its subvolume     | nightly coordinator                              | `borg-polylogue-state-v1`          |
 | Polylogue live archive   | `state/polylogue-live` (except `index.db`) inside the `/realm` btrbk snapshot; an atomic snapshot is consistent for Polylogue | same as `/realm` | `borg-realm-v2` |
+| Polylogue live spools    | `~/.local/state/polylogue` (hook, browser and collector spools; the AI Studio Drive token), persisted on `/persist` | same as `/persist` | `borg-persist-v1` |
 | Telemetry database dumps | `--rsyncable` zstd copies in `state/db-dumps/`, archived with `/realm` | dumps before nightly cut, seal Sunday            | `borg-realm-v2`                    |
 
 Left out of the `/realm` archive (`realmExcludes` in `modules/backup.nix`):
