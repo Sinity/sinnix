@@ -44,7 +44,9 @@ let
       status=$(btrfs scrub status ${fs.mountpoint} || true)
       if printf '%s\n' "$status" | grep -qE 'Status:[[:space:]]+(aborted|interrupted)'; then
         btrfs scrub resume -B ${fs.mountpoint}
-      elif [ ! -f "$stamp" ] || [ $(( $(date +%s) - $(date -r "$stamp" +%s) )) -ge ${toString (fs.cycleDays * 86400)} ]; then
+      elif [ ! -f "$stamp" ] || [ $(( $(date +%s) - $(date -r "$stamp" +%s) )) -ge ${
+        toString (fs.cycleDays * 86400)
+      } ]; then
         btrfs scrub start -B ${fs.mountpoint}
       else
         exit 0
@@ -214,6 +216,18 @@ in
         "noatime"
         "nofail"
       ];
+    };
+
+    # Nix build directories hold whole build trees (crane builds write their
+    # target dirs here); on the root SSD they were its largest writer.
+    "/var/cache/nix-build" = {
+      device = "${realmRoot}/state/cache/nix-build";
+      fsType = "none";
+      options = [
+        "bind"
+        "nofail"
+      ];
+      depends = [ "/realm" ];
     };
 
     # Retained Sinex cache mount. Its retirement belongs to the product's
@@ -475,6 +489,11 @@ in
       # regenerable-cache root that modules/core.nix declares. Excluded from
       # btrbk→borg — never persist-grade data.
       "d ${realmRoot}/state/cache/sinex 0775 ${username} users -"
+      "d ${realmRoot}/state/cache/nix-build 0755 root root -"
+      "h ${realmRoot}/state/cache/nix-build - - - - +C"
+      # The session producer fsyncs small appends; on CoW each one rewrote whole
+      # extents (5.6 GB written for 44 MB of frames). New segments inherit No_COW.
+      "H /home/${username}/.local/state/sinex-session/spool - - - - +C"
       # Stash's SQLite database is rewritten in place; new files inherit No_COW.
       "h ${realmRoot}/state/stashbox - - - - +C"
     ];

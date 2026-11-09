@@ -107,9 +107,10 @@ let
   borgPassphrasePath = config.sinnix.secrets.paths."borg-passphrase";
   outerRealmMountUnit = "outer\\x2drealm.mount";
   borgLockWaitSec = 60;
-  borgCacheDir = "/persist/root/.cache/borg";
-  # The hourly jobs' cache lives on /realm: a Borg cache commit rewrites the
-  # whole chunk index, which hourly on the worn root SSD would add ~14 GB/day.
+  # Both Borg caches live on /realm (regenerable, excluded from backups): a
+  # cache commit rewrites the whole chunk index and files cache, which on the
+  # worn root SSD added tens of GB per nightly run.
+  borgCacheDir = "${realmRoot}/state/cache/borg";
   borgHourlyCacheDir = "${realmRoot}/state/cache/borg-hourly";
   # Producer spools: frames not yet acknowledged by sinexd. The session
   # producer spools under the operator's home on /persist.

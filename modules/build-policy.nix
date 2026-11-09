@@ -121,6 +121,7 @@ in
     systemd.services = {
       sinnix-root-cache-attrs = {
         description = "Prepare root cache directories for write-heavy scratch";
+        unitConfig.WantsMountsFor = [ "/var/cache/nix-build" ];
         before = [ "nix-daemon.service" ];
         wantedBy = [ "multi-user.target" ];
         path = [
@@ -142,6 +143,9 @@ in
       nix-daemon = {
         requires = [ "sinnix-root-cache-attrs.service" ];
         after = [ "sinnix-root-cache-attrs.service" ];
+        # build-dir is a bind mount onto /realm (hosts/sinnix-prime/storage.nix);
+        # Wants, not Requires: without /realm the daemon still runs, building on /.
+        unitConfig.WantsMountsFor = [ "/var/cache/nix-build" ];
         serviceConfig = {
           # Places the daemon — and every build process it spawns — under the
           # slice's resource policy. flake/data/runtime-defaults.nix is the
