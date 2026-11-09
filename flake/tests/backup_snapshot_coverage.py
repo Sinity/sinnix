@@ -58,6 +58,13 @@ for store, database, project in (
             ),
         }
     )
+# Real stores list tens of thousands of archive entries. More than a pipe
+# buffer of names follows the sinnix metadata file, so a membership test that
+# stops reading early (grep -q under pipefail) fails here as on the host.
+for index in range(1500):
+    BEADS_STORES[
+        "state/tasks/sinnix/.beads/dolt/sinnix/.dolt/noms/" + f"{index:064d}"
+    ] = ""
 
 
 class BorgHostIdentityFixture(unittest.TestCase):
