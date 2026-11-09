@@ -80,6 +80,16 @@ let
     RestartSteps = 6;
     RestartMaxDelaySec = "5min";
   };
+  # PostgreSQL's shared buffers live in 2 MiB huge pages, which the kernel
+  # never swaps: under host reclaim the buffers went to zram nightly, so every
+  # buffer hit became a swap-in, whatever memory.low PostgreSQL carried. The
+  # pages are reserved at boot, when memory is still contiguous; on a running
+  # host fragmentation lets only a fraction be allocated (640 of 2,125 on
+  # 2026-11-09). Beyond the buffers, PostgreSQL's shared memory needs about
+  # 3.8% more (`SHOW shared_memory_size_in_huge_pages` gave 2,125 for 4 GiB),
+  # so the reservation is sized from shared_buffers with a 6% margin.
+  sharedBuffersMiB = 4096;
+  hugePages = (sharedBuffersMiB / 2) * 106 / 100 + 32;
 in
 {
   config = lib.mkIf (options.services ? sinex && cfg.enable) {
@@ -114,7 +124,10 @@ in
     # to temp files at 4MB work_mem. Spills of 16MB and more are logged so
     # the next one names its statement.
     services.postgresql.settings = {
-      shared_buffers = "4GB";
+      shared_buffers = "${toString sharedBuffersMiB}MB";
+      # `try` until the host has booted with the reservation: `on` would
+      # refuse to start PostgreSQL while the pages are missing.
+      huge_pages = "try";
       effective_cache_size = "12GB";
       work_mem = "64MB";
       maintenance_work_mem = "512MB";
@@ -122,6 +135,8 @@ in
       checkpoint_timeout = "30min";
       log_temp_files = "16MB";
     };
+
+    boot.kernelParams = [ "hugepages=${toString hugePages}" ];
 
     systemd.tmpfiles.rules = sqliteIndexRules;
 
