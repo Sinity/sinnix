@@ -90,6 +90,14 @@ CALM_STATUSES = frozenset({"unproduced"})
 # be the reminder.
 REMIND_AFTER_SECONDS = 24 * 3600
 
+# How long a fault must stay cleared before its recovery is believed. A unit
+# in a crash loop, a lane whose producer stalls every few minutes, or a gauge
+# hovering at its threshold otherwise announces a new outage and a new
+# recovery on every swing; holding the recovery makes the whole episode one
+# outage with one notice, a daily reminder while it lasts, and one recovery
+# once it has really held.
+RECOVERY_HOLD_SECONDS = 15 * 60
+
 PAYLOAD_SAMPLE_SIZE = 50
 PAYLOAD_MIN_SAMPLES = 5
 SERVICE_PROPERTIES = (
@@ -358,6 +366,11 @@ def _is_quiet(status: str, type_: str) -> bool:
     )
 
 
+def _was_announced(status: str, type_: str) -> bool:
+    """Whether entering this status sent a notice, so leaving it is news."""
+    return not _is_quiet(status, type_) or status in CALM_STATUSES
+
+
 def _needs_reminder(status: str, type_: str, notified_at: Any) -> bool:
     if _is_quiet(status, type_):
         return False
@@ -394,9 +407,7 @@ class Emitter:
     @staticmethod
     def _notify(urgency: str, title: str, body: str) -> None:
         notify_phone(title, body, key=f"health:{title}:{body}")
-        record_delivery(
-            notify_desktop(title, body, urgency=urgency, app_name=APP_NAME)
-        )
+        record_delivery(notify_desktop(title, body, urgency=urgency, app_name=APP_NAME))
 
     def observe(self, key: str) -> None:
         """Register a key without judging it (mid-transition units).
@@ -427,10 +438,12 @@ class Emitter:
                 confirmed = str(entry.get("status") or "")
                 pending = str(entry.get("pending") or "")
                 streak = int(entry.get("streak") or 0)
+                pending_since = entry.get("pending_since")
             else:
                 confirmed = str(entry or "")
                 pending = ""
                 streak = 0
+                pending_since = None
 
             notified_at = entry.get("notified_at") if isinstance(entry, dict) else None
             if status == confirmed:
@@ -460,12 +473,26 @@ class Emitter:
                 if force_confirm:
                     streak = self.confirm_samples
 
-                if streak < self.confirm_samples:
-                    document[key] = {
+                now = time.time()
+                if status != pending or not isinstance(pending_since, (int, float)):
+                    pending_since = now
+                recovering = (
+                    status == "healthy"
+                    and bool(confirmed)
+                    and not _is_quiet(confirmed, type_)
+                )
+                held = not recovering or now - pending_since >= RECOVERY_HOLD_SECONDS
+
+                if streak < self.confirm_samples or not held:
+                    kept_pending: dict[str, Any] = {
                         "status": confirmed,
                         "pending": status,
                         "streak": streak,
+                        "pending_since": pending_since,
                     }
+                    if notified_at is not None:
+                        kept_pending["notified_at"] = notified_at
+                    document[key] = kept_pending
                     return
 
                 # Evidence first: an append failure must not confirm debounce, and
@@ -503,15 +530,15 @@ class Emitter:
             # acknowledgement exists to remove.
             return
         if status == "healthy":
-            # Only notify a recovery if we announced the outage: an empty
-            # `confirmed` means this key has never transitioned before
-            # (steady-state startup), not "it came back".
-            if confirmed:
+            # A recovery is news only when it closes an outage the operator
+            # was told about: not startup (empty `confirmed`) and not the end
+            # of a quiet status that never paged.
+            if confirmed and _was_announced(confirmed, type_):
                 self.notifier("normal", title, body)
             return
-        calm = status in CALM_STATUSES or (
-            type_ == "capture_stale" and status == "unknown"
-        )
+        if _is_quiet(status, type_) and status not in CALM_STATUSES:
+            return
+        calm = status in CALM_STATUSES
         self.notifier("normal" if calm else "critical", title, body)
 
     def prune(self) -> None:
@@ -689,14 +716,17 @@ def sweep_captures(
             continue
         cadence = lane.get("expectedCadenceSeconds")
         stale_after = lane.get("expectedStaleAfterSeconds")
-        limits = [
-            value
-            for value in (
-                cadence * 2 if isinstance(cadence, (int, float)) else None,
-                stale_after if isinstance(stale_after, (int, float)) else None,
-            )
-            if value is not None
-        ]
+        # A declared stale budget is the lane's own statement of how long a
+        # gap may last; the cadence-derived limit only stands in when no
+        # budget is declared. Applying both let a 20 s cadence override a
+        # 30 min budget, so a phone that batches uploads read as stale
+        # every few minutes.
+        if isinstance(stale_after, (int, float)):
+            limits = [stale_after]
+        elif isinstance(cadence, (int, float)):
+            limits = [cadence * 2]
+        else:
+            limits = []
 
         marker_stamp: float | None = None
         marker_reason: str | None = None
@@ -715,6 +745,12 @@ def sweep_captures(
             and not _capture_is_fresh(newest, now, limits)
             and progress_stamp is None
         ):
+            if observation.reason == "budget":
+                # The bounded scan ran out before it could see the newest file
+                # (usually a busy disk). That is no evidence about the lane, so
+                # hold the previous verdict, as for a unit mid-transition.
+                emitter.observe(f"capture:{name}")
+                continue
             if marker_stamp is None:
                 marker_state = marker_reason or "marker-not-declared"
             else:

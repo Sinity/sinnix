@@ -55,12 +55,21 @@ let
     let
       unitName = "sinnix-${name}";
       unit = "${unitName}.service";
+      # A poller whose every lane declares how long a gap may last is judged by
+      # that freshness: one missed poll (a sensor slow to answer, a device
+      # between Wi-Fi wakes) is not an outage, and paging on the unit's failure
+      # announced a breakage and its recovery every few minutes. Streams and
+      # lanes without a budget keep the unit-failure notice.
+      judgedByFreshness =
+        producer.poll != null
+        && producer.outputs != [ ]
+        && lib.all (output: (output.staleAfterSeconds or null) != null) producer.outputs;
       surface = {
         inherit unit;
         manager = "user";
         resourceClass = "capture";
         inherit (producer) operatorRestart;
-        notifyOnFailure = true;
+        notifyOnFailure = !judgedByFreshness;
         captures = producer.outputs;
       };
       overrides = {
@@ -93,7 +102,10 @@ let
               resourceClass = "capture";
               serviceConfig = builtins.removeAttrs overrides [ "ExecStart" ];
               timer = lib.filterAttrs (_: v: v != null) producer.poll.timer;
-              unit.after = producer.poll.after;
+              unit = {
+                after = producer.poll.after;
+              }
+              // lib.optionalAttrs judgedByFreshness { onFailure = [ ]; };
             }
           ).systemd;
       session =

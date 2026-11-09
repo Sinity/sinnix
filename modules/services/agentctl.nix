@@ -346,6 +346,10 @@ mkServiceModule {
                   # Fetch and enqueue only; the operation owns the build's timeout.
                   TimeoutStartSec = "5min";
                 };
+                # Agent infrastructure, not a host fault the operator acts on: a
+                # failed enqueue is retried by the next tick and reported through
+                # agentctl, so it never notifies the desktop or phone.
+                unit.onFailure = [ ];
                 timer = {
                   intervalSec = 600;
                   onBootSec = 600;

@@ -137,6 +137,9 @@ class CaptureRecorder:
     def emit(self, key: str, type_: str, unit: str, status: str, evidence: str) -> None:
         self.events.append((key, status, evidence))
 
+    def observe(self, key: str) -> None:
+        self.events.append((key, "held", ""))
+
 
 @pytest.fixture
 def world(tmp_path: Path, monkeypatch):
@@ -516,9 +519,12 @@ def test_an_unproduced_lane_is_told_once_and_calmly(world) -> None:
     ]
 
 
-def test_unknown_capture_freshness_is_calm_without_demoting_other_unknowns(
+def test_unknown_capture_freshness_never_pages_without_demoting_other_unknowns(
     tmp_path,
 ):
+    """A freshness scan that could not finish says nothing about the lane, so
+    it pages no one (operator, 2026-11-09: notices that something broke and
+    then works again every few minutes); an unknown socket still pages."""
     recorder = Recorder()
     emitter = health.Emitter(
         tmp_path / "state.json", tmp_path / "ledger.jsonl", recorder
@@ -541,7 +547,6 @@ def test_unknown_capture_freshness_is_calm_without_demoting_other_unknowns(
     )
 
     assert [urgency for urgency, _title, _body in recorder.notifications] == [
-        "normal",
         "critical",
     ]
 
@@ -576,7 +581,8 @@ def test_a_settled_status_is_not_re_emitted(world) -> None:
     assert world["run"]() == settled
 
 
-def test_recovery_is_reported_once_the_lane_produces_again(world) -> None:
+def test_recovery_is_reported_once_the_lane_produces_again(world, monkeypatch) -> None:
+    monkeypatch.setattr(health, "RECOVERY_HOLD_SECONDS", 0)
     world["run"]()
     before = world["run"]()
     (world["lanes"] / "stale" / "current").write_text("x")
@@ -606,7 +612,8 @@ def test_one_disagreeing_sample_never_transitions(world) -> None:
     ] == [find(events, "capture_stale", "fixture")]
 
 
-def test_notification_rules(world) -> None:
+def test_notification_rules(world, monkeypatch) -> None:
+    monkeypatch.setattr(health, "RECOVERY_HOLD_SECONDS", 0)
     world["run"]()
     world["run"]()
     notifications = world["recorder"].notifications
@@ -792,7 +799,10 @@ def test_newest_mtime_handles_file_lane_paths(tmp_path):
 
 
 def test_newest_mtime_marks_populated_directory_fanout_incomplete(tmp_path):
-    """Mutation: treating a 512-entry prefix as exhaustion invents no-file."""
+    """Mutation: treating a 512-entry prefix as exhaustion invents no-file.
+
+    A scan that ran out of budget is no verdict at all: the sweep holds the
+    lane's previous status instead of emitting one."""
     from sinnix_runtime import health
 
     for index in range(512):
@@ -809,14 +819,7 @@ def test_newest_mtime_marks_populated_directory_fanout_incomplete(tmp_path):
     health.sweep_captures(
         [{"name": "fanout", "path": str(tmp_path)}], emitter, now=10_000
     )
-    assert emitter.events == [
-        (
-            "capture:fanout",
-            "unknown",
-            f"path={tmp_path};scan_complete=false;reason=budget;newest_age_seconds=;"
-            "progress=marker-not-declared",
-        )
-    ]
+    assert emitter.events == [("capture:fanout", "held", "")]
 
 
 def test_capped_flat_scan_uses_declared_append_only_directory_progress(
@@ -1066,14 +1069,20 @@ def test_an_unresolved_failure_is_repeated_daily(tmp_path: Path, monkeypatch) ->
     assert notifications[1][1].startswith("Still failing.")
     fail()
     assert len(notifications) == 2
-    emitter.emit(
-        "service:system:backup.service",
-        "service_failure",
-        "backup.service",
-        "healthy",
-        "result=success",
-        force_confirm=True,
-    )
+
+    def healthy() -> None:
+        emitter.emit(
+            "service:system:backup.service",
+            "service_failure",
+            "backup.service",
+            "healthy",
+            "result=success",
+            force_confirm=True,
+        )
+
+    healthy()
+    now[0] += health.RECOVERY_HOLD_SECONDS
+    healthy()
     assert notifications[-1][0] == "normal"
 
 
@@ -1126,3 +1135,67 @@ def test_io_stall_lane_degrades_and_names_top_readers():
     calm = pressure.io_lane_status(pressure.Sample(io_psi_full_300=4.0), [])
     assert calm[0] == "healthy"
     assert pressure.io_lane_status(pressure.Sample(), []) is None
+
+
+def _flapping_emitter(tmp_path: Path, monkeypatch):
+    notifications: list[tuple[str, str]] = []
+    emitter = health.Emitter(
+        tmp_path / "state.json",
+        tmp_path / "ledger.jsonl",
+        lambda urgency, title, body: notifications.append((urgency, title)),
+    )
+    now = [1_000_000.0]
+    monkeypatch.setattr(health.time, "time", lambda: now[0])
+
+    def sample(status: str) -> None:
+        emitter.emit(
+            "service:user:loop.service", "service_failure", "loop.service", status, "e"
+        )
+        now[0] += 60
+
+    return notifications, sample, now
+
+
+def test_a_crash_loop_is_one_outage_with_one_recovery(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A unit that fails, restarts and fails again every few minutes pages once,
+    and announces its recovery only after staying up for the hold. Mutation:
+    confirming a recovery after CONFIRM_SAMPLES alone pages on every swing."""
+    notifications, sample, _now = _flapping_emitter(tmp_path, monkeypatch)
+    for _ in range(6):
+        sample("failed")
+        sample("failed")
+        sample("healthy")
+        sample("healthy")
+        sample("healthy")
+    assert notifications == [("critical", "loop.service stopped working")]
+    for _ in range(int(health.RECOVERY_HOLD_SECONDS / 60) + 1):
+        sample("healthy")
+    assert len(notifications) == 2 and notifications[1][0] == "normal"
+
+
+def test_a_lane_with_a_declared_budget_is_not_stale_inside_it(tmp_path: Path) -> None:
+    """A 20 s cadence must not override a declared 30 min budget: a phone that
+    uploads in batches is not stale after a minute."""
+    import os
+
+    lane = tmp_path / "events"
+    lane.mkdir()
+    newest = lane / "batch.jsonl"
+    newest.write_text("x")
+    os.utime(newest, (10_000 - 61, 10_000 - 61))
+    emitter = CaptureRecorder()
+    health.sweep_captures(
+        [
+            {
+                "name": "phone-events",
+                "path": str(lane),
+                "expectedCadenceSeconds": 20,
+                "expectedStaleAfterSeconds": 1800,
+            }
+        ],
+        emitter,
+        now=10_000,
+    )
+    assert emitter.events[0][1] == "healthy"
