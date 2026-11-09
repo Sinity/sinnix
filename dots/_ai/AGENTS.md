@@ -162,7 +162,7 @@ running agents in parallel.
   branches holds each finished change behind the slowest one.
 - The author reviews the coherent change and uses a static check or
   discriminating test as it goes. After fixes, revisit the delta and affected
-  invariants. Run the full check on the head you merge. A change may land when
+  invariants. The required check on the PR head is the verification. A change may land when
   it fails no test that passes on the default branch; a test failing there is
   fixed, or its causing commit reverted, as the next piece of work. Preserve
   required checks and assertions; report failures and untested areas.

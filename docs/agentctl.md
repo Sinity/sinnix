@@ -484,8 +484,8 @@ declares these units:
   waits for.
   Its target supplies dependency units to other checkouts' targets
   (`docs/worktree-cleanup.md`).
-  Whether a failure is already on master comes from the projects' cloud
-  known-failure lists, not from this job.
+  Whether a failure is already on master comes from the master GitHub Actions
+  run (`gh run list -b master`), not from this job.
 
 pueued and the pool slices come from `modules/features/cli/core.nix` and
 `flake/data/runtime-defaults.nix`. The package's test suite drives a private

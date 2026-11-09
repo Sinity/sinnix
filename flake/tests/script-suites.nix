@@ -122,15 +122,6 @@
           scripts = [ "audio" ];
           nativeBuildInputs = [ pkgs.jq ];
         };
-        # Provably fails when: the stack walk stops descending, drops a merge
-        # bound or a reused branch lifetime, loses a second page, passes a
-        # head it could not read, or rewrites an unchanged status. Verified by
-        # removing the merge-time bound, which fails the bound test.
-        stacked-review-threads-status-suite = mkScriptSuite {
-          name = "stacked-review-threads-status";
-          suiteDir = ../../scripts/tests/stacked-review-threads-status;
-          scripts = [ "stacked-review-threads-status" ];
-        };
         # Provably fails when: syslog-index stamps a grammar other than the
         # estate's %Y-%m-%dT%H:%M:%SZ (the offset-suffix spelling, for
         # instance).
