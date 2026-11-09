@@ -45,6 +45,7 @@ echo 800 >/proc/self/oom_score_adj 2>/dev/null || true
 if [ -S "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/systemd/private" ]; then
   exec systemd-run --user --scope --quiet --collect \
     --expand-environment=no \
+    --description="Agent tool command" \
     --slice=agent-tool.slice -- "${cmd[@]}"
 fi
 exec "${cmd[@]}"

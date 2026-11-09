@@ -24,8 +24,11 @@ if [[ ! -o interactive && -r /proc/$$/cgroup &&
     [[ ${shell_argv[-1]} == '' ]] && shell_argv[-1]=()
     # Rank above browser tabs (200-300) as a global OOM victim.
     print 800 >/proc/self/oom_score_adj 2>/dev/null
+    # A fixed description: without one systemd logs the whole command line,
+    # heredocs included, to a journal that is kept, backed up and captured.
     exec /run/current-system/sw/bin/systemd-run --user --scope --quiet --collect \
       --expand-environment=no \
+      --description="Agent tool command" \
       --unit="agent-tool-$$" --slice=agent-tool.slice "${bind[@]}" -- "${shell_argv[@]}"
   }
 fi

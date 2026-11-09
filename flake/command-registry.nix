@@ -276,7 +276,7 @@ let
         # above), so this shell retains the lock until the build completes.
         ${rebuildOwner "test-vm" true}
         sudo ${pkgs.systemd}/bin/systemd-run \
-          --quiet --collect --pipe --service-type=exec --wait --unit="$_rebuild_unit" \
+          --quiet --collect --pipe --service-type=exec --wait --unit="$_rebuild_unit" --description="Sinnix rebuild" \
           --property="ConditionPathExists=$_rebuild_condition" \
           --setenv=PATH="${rebuildServicePath}:$PATH" \
           ${rebuildContainmentFlags}
@@ -304,7 +304,7 @@ let
         ${rebuildOwner "test-system" false}
         ${pkgs.systemd}/bin/systemd-run \
           --user \
-          --quiet --collect --pipe --service-type=exec --wait --unit="$_rebuild_unit" \
+          --quiet --collect --pipe --service-type=exec --wait --unit="$_rebuild_unit" --description="Sinnix rebuild" \
           --property="ConditionPathExists=$_rebuild_condition" \
           --setenv=PATH="${rebuildServicePath}:$PATH" \
           ${rebuildContainmentFlags}
@@ -334,7 +334,7 @@ let
         ${rebuildOwner "boot" false}
         ${pkgs.systemd}/bin/systemd-run \
           --user \
-          --quiet --collect --pipe --service-type=exec --wait --unit="$_rebuild_unit" \
+          --quiet --collect --pipe --service-type=exec --wait --unit="$_rebuild_unit" --description="Sinnix rebuild" \
           --property="ConditionPathExists=$_rebuild_condition" \
           --setenv=PATH="${rebuildServicePath}:$PATH" \
           ${rebuildContainmentFlags}
@@ -387,7 +387,7 @@ let
         ${rebuildOwner "switch" false}
         ${pkgs.systemd}/bin/systemd-run \
           --user \
-          --quiet --collect --pipe --service-type=exec --wait --unit="$_rebuild_unit" \
+          --quiet --collect --pipe --service-type=exec --wait --unit="$_rebuild_unit" --description="Sinnix rebuild" \
           --property="ConditionPathExists=$_rebuild_condition" \
           --setenv="SINNIX_ACTIVATION_SOURCE_REV=''${SINNIX_DEV_SHELL_REV:-}" \
           --setenv=PATH="${rebuildServicePath}:$PATH" \

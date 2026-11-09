@@ -692,8 +692,13 @@ class Output:
             print(text)
 
     def write(self, document: Any, summary: str) -> None:
-        """A write: the document on stdout, one summary line on stderr."""
-        print(json.dumps(document, indent=2, sort_keys=True))
+        """A write: the document on stdout, one summary line on stderr.
+
+        Off a terminal the document is one line: timer units send stdout to
+        the journal, where each indented line became its own entry.
+        """
+        indent = 2 if sys.stdout.isatty() else None
+        print(json.dumps(document, indent=indent, sort_keys=True))
         print(summary, file=sys.stderr)
 
     def run(self, run_id: str) -> str:

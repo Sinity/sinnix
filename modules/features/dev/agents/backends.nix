@@ -81,7 +81,7 @@ let
         # global OOM victims, and below the jobs and tools they start.
         echo 300 >/proc/self/oom_score_adj 2>/dev/null || true
         exec ${pkgs.systemd}/bin/systemd-run --user --scope --quiet \
-          --slice=agent-cli.slice -- "$0" "$@"
+          --description="Agent CLI" --slice=agent-cli.slice -- "$0" "$@"
         ;;
     esac
     # Build tools default to one job per core. Agents shell out to source
