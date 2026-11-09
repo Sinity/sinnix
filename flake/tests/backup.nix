@@ -495,6 +495,10 @@ assert lib.assertMsg (
               from = "/var/lib/sinex/daemon/store";
               to = "$TMPDIR/live-cas";
             }
+            {
+              from = "/var/lib/sinex/spool";
+              to = "$TMPDIR/live-sinex-spool";
+            }
           ];
 
       polylogueStateBorgScript = rewriteBackupHook polylogueStateBorgScriptChecked [

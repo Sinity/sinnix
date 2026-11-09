@@ -2551,6 +2551,7 @@ else: sys.exit(1)
             # mutable Polylogue databases. These use real Borg too.
             for relative, data in {
                 "live-cas/objects/ab/cdef": "synthetic CAS",
+                "live-sinex-spool/producer/frame": "synthetic spool frame",
                 "live-polylogue/blob/objects/cd/ef01": "synthetic blob",
                 "live-polylogue/source.db": "mutable database",
                 "live-polylogue/.salvage-internals-20261008/embeddings.db": "inert synthetic salvage",
@@ -2573,6 +2574,7 @@ else: sys.exit(1)
             (root / "logs/append-hooks").unlink()
             for repo, source, excluded in (
                 ("borg-sinex-blobs-v1", "live-cas/objects/ab/cdef", None),
+                ("borg-sinex-blobs-v1", "live-sinex-spool/producer/frame", None),
                 (
                     "borg-polylogue-state-v1",
                     "live-polylogue/blob/objects/cd/ef01",
