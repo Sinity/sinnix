@@ -1074,15 +1074,19 @@ let
         ++ lib.filter (path: !lib.hasPrefix "state/tasks/" path) (map (store: store.path) beadsArchivePaths)
       )
     })
+    # A set lookup, not `printf | grep -q`: grep stopping at the first match
+    # breaks the pipe, which pipefail reports as a failure.
+    declare -A archived=()
     stores=(${lib.escapeShellArgs (map (store: store.path) beadsArchivePaths)})
     for member in "''${members[@]}"; do
+      archived["$member"]=1
       if [[ "$member" =~ ^state/tasks/[^/]+/\.beads/metadata\.json$ ]]; then
         stores+=("''${member%/metadata.json}")
       fi
     done
     mapfile -t stores < <(printf '%s\n' "''${stores[@]}" | sort -u)
     for store in "''${stores[@]}"; do
-      if ! printf '%s\n' "''${members[@]}" | grep -Fxq "$store/metadata.json"; then
+      if [ -z "''${archived["$store/metadata.json"]:-}" ]; then
         echo "Beads store $store is missing from $archive" >&2
         exit 1
       fi
