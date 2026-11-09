@@ -22,7 +22,7 @@
   mkBorgCommonScript,
   realmExcludes,
   realmExcludeMatchesProtectedPath,
-  mkSinexBeadsCheckScript,
+  mkBeadsCheckScript,
 }:
 [
   {
@@ -223,15 +223,15 @@
     '';
   })
 
-  # The realm archive covers Sinex's external Beads task store. This restore
-  # check extracts that store into scratch and reads a task and commit offline.
+  # The realm archive covers the Beads task stores. This restore check extracts
+  # every store into scratch and reads a task and commit from each offline.
   #
   # Its failure notification comes from the renderer, not from a hand-wired
   # onFailure: the check is deliberately not an observed surface (its
   # evidence is its log, not unit state), so runtime.nix's
   # surface-driven attachment skips it and mkScheduledJob's does not.
   (mkBackupJob "sinnix-borg-beads-check" {
-    description = "Restore check for the external Sinex Beads task store";
+    description = "Restore check for every Beads task store";
     unit = {
       reloadIfChanged = false;
       stopIfChanged = false;
@@ -252,14 +252,15 @@
     ];
     serviceConfig = {
       PrivateTmp = true;
-      TimeoutStartSec = "30min";
+      # Up to three hours waiting for the Borg lock, then the restores.
+      TimeoutStartSec = "4h";
     };
     timer = {
-      # Follow the regular realm archive and stay clear of the repository
-      # integrity check on Sunday (borgbackup-verify).
-      onCalendar = "Thu 05:00:00";
+      # After the nightly coordinator (03:05 to about 08:30) has released the
+      # Borg lock, and clear of the repository integrity check on Sunday.
+      onCalendar = "Thu 12:00:00";
       persistent = true;
     };
-    script = mkSinexBeadsCheckScript;
+    script = mkBeadsCheckScript;
   })
 ]

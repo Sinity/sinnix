@@ -304,6 +304,11 @@ assert lib.assertMsg (
             to = "$TMPDIR/state/borg-cache";
           }
           {
+            # The Borg cache moved to /realm (b47fb2094).
+            from = "/realm/state/cache/borg";
+            to = "$TMPDIR/state/borg-cache";
+          }
+          {
             from = "/run/lock/sinnix-borg.lock";
             to = "$TMPDIR/state/sinnix-borg.lock";
           }
@@ -382,6 +387,11 @@ assert lib.assertMsg (
             to = "$TMPDIR/state/borg-cache";
           }
           {
+            # The Borg cache moved to /realm (b47fb2094).
+            from = "/realm/state/cache/borg";
+            to = "$TMPDIR/state/borg-cache";
+          }
+          {
             from = "/run/lock/sinnix-borg.lock";
             to = "$TMPDIR/state/sinnix-borg.lock";
           }
@@ -435,6 +445,11 @@ assert lib.assertMsg (
               to = "$TMPDIR/state/borg-cache";
             }
             {
+              # The Borg cache moved to /realm (b47fb2094).
+              from = "/realm/state/cache/borg";
+              to = "$TMPDIR/state/borg-cache";
+            }
+            {
               from = "/run/lock/sinnix-borg.lock";
               to = "$TMPDIR/state/sinnix-borg.lock";
             }
@@ -480,6 +495,11 @@ assert lib.assertMsg (
               to = "$TMPDIR/state/borg-cache";
             }
             {
+              # The Borg cache moved to /realm (b47fb2094).
+              from = "/realm/state/cache/borg";
+              to = "$TMPDIR/state/borg-cache";
+            }
+            {
               from = "/run/lock/sinnix-borg.lock";
               to = "$TMPDIR/state/sinnix-borg.lock";
             }
@@ -495,6 +515,10 @@ assert lib.assertMsg (
               from = "/var/lib/sinex/daemon/store";
               to = "$TMPDIR/live-cas";
             }
+            {
+              from = "/var/lib/sinex/spool";
+              to = "$TMPDIR/live-sinex-spool";
+            }
           ];
 
       polylogueStateBorgScript = rewriteBackupHook polylogueStateBorgScriptChecked [
@@ -507,6 +531,10 @@ assert lib.assertMsg (
           to = "$TMPDIR/repos/borg-polylogue-state-v1";
         }
         {
+          from = "/neo-outer-realm/archive/polylogue/embeddings";
+          to = "$TMPDIR/paid-vectors";
+        }
+        {
           # Must precede the plain ".cache/borg" pattern below:
           # replaceStrings matches earlier list entries first at a given
           # position, and "borg" is itself a prefix of "borg-drain".
@@ -515,6 +543,11 @@ assert lib.assertMsg (
         }
         {
           from = "/persist/root/.cache/borg";
+          to = "$TMPDIR/state/borg-cache";
+        }
+        {
+          # The Borg cache moved to /realm (b47fb2094).
+          from = "/realm/state/cache/borg";
           to = "$TMPDIR/state/borg-cache";
         }
         {
@@ -543,10 +576,10 @@ assert lib.assertMsg (
         }
       ];
 
-      sinexBeadsCheckScript =
+      beadsCheckScript =
         assert lib.assertMsg
           (lib.hasInfix "authority/sinex/.beads" customAuthorityEval.config.systemd.services.sinnix-borg-beads-check.script)
-          "The Beads restore check must follow a configured Sinex task authority outside state/tasks";
+          "The Beads restore check must follow a configured task authority outside state/tasks";
         rewriteBackupHook backupRuntimeEval.config.systemd.services.sinnix-borg-beads-check.script [
           {
             from = "/outer-realm/backup/borg-realm-v2";
@@ -563,6 +596,12 @@ assert lib.assertMsg (
           {
             from = "${pkgs.dolt}/bin/dolt";
             to = "$TMPDIR/mock-bin/dolt";
+          }
+          {
+            # The production wait is three hours; one second shows the same
+            # failure when the lock stays held.
+            from = "flock -w 10800 9";
+            to = "flock -w 1 9";
           }
         ];
 
@@ -582,6 +621,11 @@ assert lib.assertMsg (
             }
             {
               from = "/persist/root/.cache/borg";
+              to = "$TMPDIR/live-holder/cache";
+            }
+            {
+              # The Borg cache moved to /realm (b47fb2094).
+              from = "/realm/state/cache/borg";
               to = "$TMPDIR/live-holder/cache";
             }
             {
@@ -630,6 +674,11 @@ assert lib.assertMsg (
             }
             {
               from = "/persist/root/.cache/borg";
+              to = "$TMPDIR/dead-holder/cache";
+            }
+            {
+              # The Borg cache moved to /realm (b47fb2094).
+              from = "/realm/state/cache/borg";
               to = "$TMPDIR/dead-holder/cache";
             }
             {
@@ -765,7 +814,7 @@ assert lib.assertMsg (
             in
             backupRuntimeEval.config.systemd.services.borgbackup-job-sinex-blobs.serviceConfig.TimeoutStartSec
             == "6h"
-            && lib.all (lib.hasInfix " 129600") probes
+            && lib.all (lib.hasInfix " 108000") probes
             && lib.hasInfix "acquisition-freshness" genomeProbe
             && lib.hasInfix "--source /neo-outer-realm/content/genome" genomeProbe
             && lib.hasInfix "--max-observation-age 64800" genomeProbe
@@ -785,7 +834,7 @@ assert lib.assertMsg (
                   "genome"
                 ]
             && lib.hasInfix ''install -d -m 0750 -o root -g users "$acknowledgement_root"'' backupRuntimeEval.config.systemd.services.borgbackup-job-realm.script
-            && builtins.elem "d /persist/root/.cache/borg 0700 root root -" rules
+            && builtins.elem "d /realm/state/cache/borg 0700 root root -" rules
           )
           "Operator probes must read receipts with nightly/change-aware budgets while credentials stay private";
         assert lib.assertMsg (
@@ -837,7 +886,7 @@ assert lib.assertMsg (
                     missing = missingRealmBorgDrainScript;
                     sinex = sinexBlobBorgScript;
                     polylogue = polylogueStateBorgScript;
-                    beads = sinexBeadsCheckScript;
+                    beads = beadsCheckScript;
                     liveLock = liveHolderLockScript;
                     deadLock = deadHolderLockScript;
                   }

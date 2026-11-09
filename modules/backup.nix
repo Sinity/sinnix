@@ -52,6 +52,10 @@ let
   # Python archive any more, so these jobs run against a quiescent tree.
   polylogueStateRoot = config.sinnix.services.polylogue.dataDir;
   polylogueBackupRoot = "${realmRoot}/state/db-dumps/polylogue";
+  # The purchased embedding vectors (the 2026-07-10 stores). They no longer
+  # change and cost money to recompute; the nightly Polylogue state archive
+  # carries the copy on the disk that is not the Borg destination.
+  paidVectorRoot = "${config.sinnix.paths.neoOuterRealm}/archive/polylogue/embeddings";
   # The daemon's live SQLite databases at the top level of the state root.
   # index.db is deliberately NOT in this list: the symlink points into
   # .index-generations/ at a 40.5 GB derived rebuild-generation product --
@@ -121,29 +125,44 @@ let
     ++ [ "${config.users.users.${username}.home}/.local/state/sinex-session/spool" ];
   borgStaleLockMinutes = 120;
   borgGlobalLock = "/run/lock/sinnix-borg.lock";
-  sinexTaskAuthority = config.sinnix.projects.entries.sinex.taskAuthority;
-  sinexBeadsArchivePath =
+  # Every Beads task store a project declares as its task authority. The
+  # restore check requires each one in the archive; other trackers found
+  # under state/tasks are checked as well.
+  taskAuthorities = lib.filter (authority: authority != null) (
+    map (project: project.taskAuthority or null) (lib.attrValues config.sinnix.projects.entries)
+  );
+  beadsArchivePaths = map (
+    authority:
     assert lib.assertMsg (
-      sinexTaskAuthority != null
-      && lib.hasPrefix "${realmRoot}/" sinexTaskAuthority.workspace
-      && lib.hasPrefix "${sinexTaskAuthority.workspace}/" sinexTaskAuthority.database
-    ) "The Sinex Beads restore check requires a task authority and database inside /realm";
-    lib.removePrefix "${realmRoot}/" sinexTaskAuthority.workspace;
-  sinexBeadsDatabaseRelativePath = lib.removePrefix "${sinexTaskAuthority.workspace}/" sinexTaskAuthority.database;
+      lib.hasPrefix "${realmRoot}/" authority.workspace
+      && lib.hasPrefix "${authority.workspace}/" authority.database
+    ) "Beads task authorities must keep their workspace and database inside /realm";
+    {
+      path = lib.removePrefix "${realmRoot}/" authority.workspace;
+      database = lib.removePrefix "${authority.workspace}/" authority.database;
+      projectUuid = authority.projectUuid or null;
+    }
+  ) taskAuthorities;
+  # The Beads restore check waits this long for another Borg operation; the
+  # nightly coordinator holds the lock up to about 2.5 hours.
+  beadsCheckLockWaitSec = 3 * 60 * 60;
   # The file keeps its historical name: Lynchpin reads it by path.
-  sinexBeadsCheckLog = "${config.sinnix.paths.machineRoot}/borg_beads_drill.jsonl";
+  beadsCheckLog = "${config.sinnix.paths.machineRoot}/borg_beads_drill.jsonl";
   # Ranking domains (items and the append-only comparison log): operator
   # judgments that cannot be recomputed from anything.
   rankingArchivePath = "activity/shared/ranking";
   # Paths under /realm no exclude pattern may cover, ancestors included.
-  protectedRealmArchivePaths = [
-    sinexBeadsArchivePath
-    "${sinexBeadsArchivePath}/metadata.json"
-    "${sinexBeadsArchivePath}/config.yaml"
-    "${sinexBeadsArchivePath}/${sinexBeadsDatabaseRelativePath}"
-    rankingArchivePath
-    "library/model/control-vector"
-  ];
+  protectedRealmArchivePaths =
+    lib.concatMap (store: [
+      store.path
+      "${store.path}/metadata.json"
+      "${store.path}/config.yaml"
+      "${store.path}/${store.database}"
+    ]) beadsArchivePaths
+    ++ [
+      rankingArchivePath
+      "library/model/control-vector"
+    ];
   # Nightly archival permits a day between accepted source cuts, plus 6h
   # grace; any backup older than 30h is reported stale (DUR-2).
   borgDataFreshnessMaxAgeSec = 30 * 60 * 60;
@@ -1023,27 +1042,55 @@ let
     paths = protectedRealmArchivePaths;
   };
 
-  mkSinexBeadsCheckScript = ''
+  mkBeadsCheckScript = ''
     set -euo pipefail
 
-    archive_path=${lib.escapeShellArg sinexBeadsArchivePath}
-
     exec 9>${lib.escapeShellArg borgGlobalLock}
-    if ! flock -n 9; then
-      echo "another Borg operation is active; skipping Beads restore check" >&2
-      exit 0
+    if ! flock -w ${toString beadsCheckLockWaitSec} 9; then
+      echo "another Borg operation held the lock for ${toString beadsCheckLockWaitSec} s; the Beads restore check did not run" >&2
+      exit 1
     fi
 
     mapfile -t archives < <(borg list --short --glob-archives 'realm-*' ${lib.escapeShellArg borgRepoRealm} | sort)
     if [ "''${#archives[@]}" -eq 0 ]; then
-      echo "no realm Borg archive is available for the Sinex Beads restore check" >&2
+      echo "no realm Borg archive is available for the Beads restore check" >&2
       exit 1
     fi
     archive="''${archives[$(( ''${#archives[@]} - 1 ))]}"
 
-    borg list --short "${borgRepoRealm}::''${archive}" "$archive_path" | grep -Fxq "$archive_path"
+    # Declared task authorities must be in the archive; every other tracker
+    # the archive holds under state/tasks is checked too.
+    declare -A project_uuid=(${
+      lib.concatMapStrings (
+        store:
+        "[${lib.escapeShellArg store.path}]=${
+          lib.escapeShellArg (if store.projectUuid == null then "" else store.projectUuid)
+        } "
+      ) beadsArchivePaths
+    })
+    mapfile -t members < <(borg list --short "${borgRepoRealm}::''${archive}" ${
+      lib.escapeShellArgs (
+        [ "state/tasks" ]
+        ++ lib.filter (path: !lib.hasPrefix "state/tasks/" path) (map (store: store.path) beadsArchivePaths)
+      )
+    })
+    stores=(${lib.escapeShellArgs (map (store: store.path) beadsArchivePaths)})
+    for member in "''${members[@]}"; do
+      if [[ "$member" =~ ^state/tasks/[^/]+/\.beads/metadata\.json$ ]]; then
+        stores+=("''${member%/metadata.json}")
+      fi
+    done
+    mapfile -t stores < <(printf '%s\n' "''${stores[@]}" | sort -u)
+    for store in "''${stores[@]}"; do
+      if ! printf '%s\n' "''${members[@]}" | grep -Fxq "$store/metadata.json"; then
+        echo "Beads store $store is missing from $archive" >&2
+        exit 1
+      fi
+    done
 
-    restore_root="$(mktemp -d)"
+    # The stores together are a few gigabytes, too much for the /tmp tmpfs.
+    mkdir -p ${lib.escapeShellArg "${realmRoot}/tmp"}
+    restore_root="$(mktemp -d -p ${lib.escapeShellArg "${realmRoot}/tmp"} beads-restore.XXXXXX)"
     cleanup() {
       rm -rf "$restore_root"
     }
@@ -1051,42 +1098,54 @@ let
 
     (
       cd "$restore_root"
-      borg extract "${borgRepoRealm}::''${archive}" "$archive_path"
+      borg extract "${borgRepoRealm}::''${archive}" "''${stores[@]}"
     )
 
-    beads_path="$restore_root/$archive_path"
-    test -s "$beads_path/metadata.json"
-    jq -e 'type == "object"' "$beads_path/metadata.json" >/dev/null
-    test -s "$beads_path/config.yaml"
-    database_path="$beads_path/${sinexBeadsDatabaseRelativePath}"
-    database_name="$(jq -er '.dolt_database | select(type == "string" and test("^[A-Za-z0-9_-]+$"))' "$beads_path/metadata.json")"
-    ${lib.optionalString (sinexTaskAuthority.projectUuid != null) ''
-      jq -e --arg project_id ${lib.escapeShellArg sinexTaskAuthority.projectUuid} '.project_id == $project_id' "$beads_path/metadata.json" >/dev/null
-    ''}
-    test -d "$database_path/$database_name/.dolt"
+    records=()
+    for store in "''${stores[@]}"; do
+      beads_path="$restore_root/$store"
+      test -s "$beads_path/metadata.json"
+      jq -e 'type == "object"' "$beads_path/metadata.json" >/dev/null
+      test -s "$beads_path/config.yaml"
+      database_name="$(jq -er '.dolt_database | select(type == "string" and test("^[A-Za-z0-9_-]+$"))' "$beads_path/metadata.json")"
+      expected_uuid="''${project_uuid[$store]:-}"
+      if [ -n "$expected_uuid" ]; then
+        jq -e --arg project_id "$expected_uuid" '.project_id == $project_id' "$beads_path/metadata.json" >/dev/null
+      fi
+      # A server-mode store keeps its databases under dolt/, an embedded one
+      # under embeddeddolt/.
+      if jq -e '.dolt_mode == "server"' "$beads_path/metadata.json" >/dev/null; then
+        database_path="$beads_path/dolt"
+      else
+        database_path="$beads_path/embeddeddolt"
+      fi
+      test -d "$database_path/$database_name/.dolt"
 
-    # A restored server configuration can name a live port. Open the database
-    # in a separate scratch data directory without that configuration.
-    offline_root="$restore_root/offline"
-    mkdir "$offline_root"
-    mv "$database_path/$database_name" "$offline_root/$database_name"
-    dolt_commit="$(${pkgs.dolt}/bin/dolt --data-dir "$offline_root" --use-db "$database_name" sql \
-      -q 'SELECT commit_hash FROM dolt_log LIMIT 1' -r json \
-      | jq -er '.rows[0].commit_hash | select(test("^[0-9a-v]{32}$"))')"
-    issue="$(${pkgs.dolt}/bin/dolt --data-dir "$offline_root" --use-db "$database_name" sql \
-      -q 'SELECT id, title FROM issues ORDER BY id LIMIT 1' -r json \
-      | jq -cer '.rows[0] | select(.id != null and .id != "" and .title != null and .title != "")')"
+      # A restored server configuration can name a live port. Open the
+      # database in a separate scratch data directory without that
+      # configuration.
+      offline_root="$restore_root/offline/$store"
+      mkdir -p "$offline_root"
+      mv "$database_path/$database_name" "$offline_root/$database_name"
+      dolt_commit="$(${pkgs.dolt}/bin/dolt --data-dir "$offline_root" --use-db "$database_name" sql \
+        -q 'SELECT commit_hash FROM dolt_log LIMIT 1' -r json \
+        | jq -er '.rows[0].commit_hash | select(test("^[0-9a-v]{32}$"))')"
+      issue="$(${pkgs.dolt}/bin/dolt --data-dir "$offline_root" --use-db "$database_name" sql \
+        -q 'SELECT id, title FROM issues ORDER BY id LIMIT 1' -r json \
+        | jq -cer '.rows[0] | select(.id != null and .id != "" and .title != null and .title != "")')"
+      records+=("$(jq -nc \
+        --arg type beads_restore_drill \
+        --arg archive "$archive" \
+        --arg store "$store" \
+        --arg dolt_commit "$dolt_commit" \
+        --argjson issue "$issue" \
+        --arg ts "$(date -Iseconds)" \
+        '{ts:$ts,type:$type,archive:$archive,store:$store,dolt_commit:$dolt_commit,issue:$issue,ok:true}')")
+    done
 
-    install -d -m 0755 ${lib.escapeShellArg (builtins.dirOf sinexBeadsCheckLog)}
-    jq -nc \
-      --arg type sinex_beads_restore_drill \
-      --arg archive "$archive" \
-      --arg authority_path "$archive_path" \
-      --arg dolt_commit "$dolt_commit" \
-      --argjson issue "$issue" \
-      --arg ts "$(date -Iseconds)" \
-      '{ts:$ts,type:$type,archive:$archive,authority_path:$authority_path,dolt_commit:$dolt_commit,issue:$issue,ok:true}' \
-      | tee -a ${lib.escapeShellArg sinexBeadsCheckLog}
+    # Records are written only after every store restored.
+    install -d -m 0755 ${lib.escapeShellArg (builtins.dirOf beadsCheckLog)}
+    printf '%s\n' "''${records[@]}" | tee -a ${lib.escapeShellArg beadsCheckLog}
   '';
 
   # Persist and realm freshness probes read snapshot timestamps from their
@@ -1444,7 +1503,7 @@ in
               captures = [
                 {
                   name = "borg-beads-check";
-                  path = sinexBeadsCheckLog;
+                  path = beadsCheckLog;
                   eventDriven = true;
                   staleAfterSeconds = 1814400;
                 }
@@ -1500,6 +1559,7 @@ in
           username
           polylogueStateRoot
           polylogueBackupRoot
+          paidVectorRoot
           polylogueDbNames
           polylogueDbExcludes
           borgDrainStateRoot
@@ -1636,7 +1696,7 @@ in
           mkBorgCommonScript
           realmExcludes
           realmExcludeMatchesProtectedPath
-          mkSinexBeadsCheckScript
+          mkBeadsCheckScript
           ;
       })
     )

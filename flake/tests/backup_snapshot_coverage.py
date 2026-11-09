@@ -31,6 +31,34 @@ SPEC = importlib.util.spec_from_file_location("coverage", ARGS.verifier)
 COVERAGE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(COVERAGE)
 
+# Every task store the default configuration declares, plus one tracker the
+# configuration does not name, which the check must find in the archive.
+BEADS_STORES = {}
+for store, database, project in (
+    ("sinnix", "sinnix", None),
+    ("sinex-next", "sxnext", "9a23622c-4af5-4f3a-99d9-467edd816653"),
+    ("polylogue-next", "plnext", "d06821b6-158a-4b18-add6-6d26e936a97e"),
+    ("lynchpin", "lynchpin", None),
+    ("stashbox", "stashbox", None),
+):
+    metadata = {"dolt_database": database}
+    if project:
+        metadata["project_id"] = project
+    root_path = "state/tasks/" + store + "/.beads"
+    BEADS_STORES.update(
+        {
+            root_path + "/metadata.json": json.dumps(metadata),
+            root_path + "/config.yaml": "issue-prefix: " + database,
+            root_path
+            + "/embeddeddolt/"
+            + database
+            + "/.dolt/HEAD": "0123456789abcdefghijklmnopqrstuv",
+            root_path + "/embeddeddolt/" + database + "/issue.json": json.dumps(
+                {"id": database + "-task", "title": "Current task"}
+            ),
+        }
+    )
+
 
 class BorgHostIdentityFixture(unittest.TestCase):
     @unittest.skipUnless(ARGS.scripts, "requires rendered owner scripts")
@@ -2174,6 +2202,7 @@ elif command=='btrfs':
         print('Gen at creation: '+str(generations[args[2]]))
         print('Subvolume ID: '+str(100+generations[args[2]]))
     elif args[:2]==['property','get']: print('ro=true')
+    elif args[:2]==['subvolume','sync']: pass
     elif args[:2]==['subvolume','delete']:
         assert args[2] in identities
         if (root/'fail-delete').exists(): sys.exit(1)
@@ -2276,10 +2305,7 @@ else: sys.exit(1)
                     "inbox/download": "canonical",
                     "tmp/scratch": "scratch",
                     "project/sinex/.beads/issues.jsonl": '{"id":"stale-checkout-decoy"}\n',
-                    "state/tasks/sinex-next/.beads/metadata.json": '{"dolt_database":"sxnext","project_id":"9a23622c-4af5-4f3a-99d9-467edd816653"}',
-                    "state/tasks/sinex-next/.beads/config.yaml": "issue-prefix: sinex",
-                    "state/tasks/sinex-next/.beads/embeddeddolt/sxnext/.dolt/HEAD": "0123456789abcdefghijklmnopqrstuv",
-                    "state/tasks/sinex-next/.beads/embeddeddolt/sxnext/issue.json": '{"id":"canonical-task","title":"Current task"}',
+                    **BEADS_STORES,
                     "project/build/precious": "source build material",
                     "project/dist/precious": "source distribution material",
                     "project/node_modules/precious": "source package material",
@@ -2479,10 +2505,7 @@ else: sys.exit(1)
                 {
                     "same-name": "interrupted proof",
                     "project/sinex/.beads/issues.jsonl": '{"id":"stale-checkout-decoy"}\n',
-                    "state/tasks/sinex-next/.beads/metadata.json": '{"dolt_database":"sxnext","project_id":"9a23622c-4af5-4f3a-99d9-467edd816653"}',
-                    "state/tasks/sinex-next/.beads/config.yaml": "issue-prefix: sinex",
-                    "state/tasks/sinex-next/.beads/embeddeddolt/sxnext/.dolt/HEAD": "0123456789abcdefghijklmnopqrstuv",
-                    "state/tasks/sinex-next/.beads/embeddeddolt/sxnext/issue.json": '{"id":"canonical-task","title":"Current task"}',
+                    **BEADS_STORES,
                 },
             )
             before = latest_marker.read_bytes()
@@ -2528,11 +2551,13 @@ else: sys.exit(1)
             # mutable Polylogue databases. These use real Borg too.
             for relative, data in {
                 "live-cas/objects/ab/cdef": "synthetic CAS",
+                "live-sinex-spool/producer/frame": "synthetic spool frame",
                 "live-polylogue/blob/objects/cd/ef01": "synthetic blob",
                 "live-polylogue/source.db": "mutable database",
                 "live-polylogue/.salvage-internals-20261008/embeddings.db": "inert synthetic salvage",
                 "live-polylogue/hooks/codex-session-live.jsonl": '{"event":"sealed-before-create"}\n',
                 "live-polylogue/hooks/carriers/codex/2026-09-27/4242.ndjson": '{"event":"carrier-before-create"}\n',
+                "paid-vectors/2026-07-10-synthetic-3.db": "synthetic purchased vectors",
             }.items():
                 file = root / relative
                 file.parent.mkdir(parents=True, exist_ok=True)
@@ -2549,6 +2574,7 @@ else: sys.exit(1)
             (root / "logs/append-hooks").unlink()
             for repo, source, excluded in (
                 ("borg-sinex-blobs-v1", "live-cas/objects/ab/cdef", None),
+                ("borg-sinex-blobs-v1", "live-sinex-spool/producer/frame", None),
                 (
                     "borg-polylogue-state-v1",
                     "live-polylogue/blob/objects/cd/ef01",
@@ -2590,6 +2616,36 @@ else: sys.exit(1)
             polylogue_archive = subprocess.check_output(
                 ["borg", "list", "--short", polylogue_repo], env=env, text=True
             ).splitlines()[0]
+            # The purchased vectors travel in the nightly Polylogue state archive.
+            vector_members = [
+                path
+                for path in subprocess.check_output(
+                    [
+                        "borg",
+                        "list",
+                        "--short",
+                        polylogue_repo + "::" + polylogue_archive,
+                    ],
+                    env=env,
+                    text=True,
+                ).splitlines()
+                if path.endswith("paid-vectors/2026-07-10-synthetic-3.db")
+            ]
+            self.assertEqual(len(vector_members), 1)
+            self.assertEqual(
+                subprocess.check_output(
+                    [
+                        "borg",
+                        "extract",
+                        "--stdout",
+                        polylogue_repo + "::" + polylogue_archive,
+                        vector_members[0],
+                    ],
+                    env=env,
+                    text=True,
+                ),
+                "synthetic purchased vectors",
+            )
             for relative, original in (
                 (
                     "hooks/codex-session-live.jsonl",
@@ -2670,19 +2726,37 @@ else: sys.exit(1)
                 if "/hooks/" in path
             ]
             self.assertEqual(empty_hook_members, [])
+            # A held Borg lock past the wait fails the check instead of
+            # reporting success without a restore.
+            with open(root / "state/sinnix-borg.lock", "w") as held:
+                fcntl.flock(held, fcntl.LOCK_EX)
+                run("beads", ok=False)
+            self.assertFalse(any((root / "realm-data").rglob("borg_beads_drill.jsonl")))
             run("beads")
             receipt = next((root / "realm-data").rglob("borg_beads_drill.jsonl"))
-            evidence = json.loads(receipt.read_text())
-            self.assertTrue(evidence["ok"])
+            evidence = {
+                record["store"]: record
+                for record in map(json.loads, receipt.read_text().splitlines())
+            }
             self.assertEqual(
-                evidence["authority_path"], "state/tasks/sinex-next/.beads"
+                sorted(evidence),
+                sorted(
+                    "state/tasks/" + store + "/.beads"
+                    for store in (
+                        "sinnix",
+                        "sinex-next",
+                        "polylogue-next",
+                        "lynchpin",
+                        "stashbox",
+                    )
+                ),
             )
+            sinex = evidence["state/tasks/sinex-next/.beads"]
+            self.assertTrue(sinex["ok"])
             self.assertEqual(
-                evidence["issue"], {"id": "canonical-task", "title": "Current task"}
+                sinex["issue"], {"id": "sxnext-task", "title": "Current task"}
             )
-            self.assertEqual(
-                evidence["dolt_commit"], "0123456789abcdefghijklmnopqrstuv"
-            )
+            self.assertEqual(sinex["dolt_commit"], "0123456789abcdefghijklmnopqrstuv")
             self.assertNotIn("stale-checkout-decoy", receipt.read_text())
 
             snapshot(
@@ -2697,15 +2771,13 @@ else: sys.exit(1)
                 "realm.20260402T100000+0000",
                 {
                     "project/sinex/.beads/issues.jsonl": '{"id":"stale-checkout-decoy"}\n',
-                    "state/tasks/sinex-next/.beads/metadata.json": '{"dolt_database":"sxnext","project_id":"9a23622c-4af5-4f3a-99d9-467edd816653"}',
-                    "state/tasks/sinex-next/.beads/config.yaml": "issue-prefix: sinex",
+                    **BEADS_STORES,
                     "state/tasks/sinex-next/.beads/embeddeddolt/sxnext/.dolt/HEAD": "corrupt",
-                    "state/tasks/sinex-next/.beads/embeddeddolt/sxnext/issue.json": '{"id":"canonical-task","title":"Current task"}',
                 },
             )
             run()
             run("beads", ok=False)
-            self.assertEqual(len(receipt.read_text().splitlines()), 1)
+            self.assertEqual(len(receipt.read_text().splitlines()), 5)
 
             older = snapshot("realm.20260403T010000+0000", {"old-only": "older bytes"})
             middle = snapshot("realm.20260403T020000+0000", {"same-name": "middle"})
