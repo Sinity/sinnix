@@ -834,7 +834,7 @@ assert lib.assertMsg (
                   "genome"
                 ]
             && lib.hasInfix ''install -d -m 0750 -o root -g users "$acknowledgement_root"'' backupRuntimeEval.config.systemd.services.borgbackup-job-realm.script
-            && builtins.elem "d /persist/root/.cache/borg 0700 root root -" rules
+            && builtins.elem "d /realm/state/cache/borg 0700 root root -" rules
           )
           "Operator probes must read receipts with nightly/change-aware budgets while credentials stay private";
         assert lib.assertMsg (
