@@ -4,9 +4,9 @@
 # The Python predecessor's archive at dataDir stays under its backup policy.
 #
 # `sinex.mode` chooses where the archive lives. Standalone keeps it under
-# `liveRoot/data`. Primary stores it in the host's Sinex as the `polylogue`
-# producer, over a separate, initially empty archive under `liveRoot/sinex-data`,
-# so the standalone archive stays as it was. Moving to primary follows
+# `dataHome` (default `liveRoot/data`). Primary stores it in the host's Sinex
+# as the `polylogue` producer, over a separate, initially empty archive under
+# `liveRoot/sinex-data`, so the standalone archive stays as it was. Moving to primary follows
 # "Moving to primary mode" in the rewrite's docs/architecture.md; the switch is
 # the operator's call. The operator's systemd user manager needs the sinex
 # group (granted by the Sinex session), so it must have started after that
@@ -56,10 +56,35 @@ mkServiceModule {
       type = lib.types.str;
       default = "${config.sinnix.paths.stateRoot}/polylogue-live";
       description = ''
-        Everything the rewrite keeps except its spools: ``data/polylogue``
-        is the archive, ``extension`` the unpacked browser extension Chrome
-        loads. The spools are under ``~/.local/state/polylogue`` on the root
-        disk, persisted by modules/persistence.nix.
+        Everything the rewrite keeps except its spools: the archive's data
+        home (``dataHome``) and ``extension``, the unpacked browser extension
+        Chrome loads. The spools are under ``~/.local/state/polylogue`` on
+        the root disk, persisted by modules/persistence.nix.
+      '';
+    };
+
+    dataHome = lib.mkOption {
+      type = lib.types.str;
+      default =
+        if config.sinnix.services.polylogue.sinex.mode == "primary" then
+          "${config.sinnix.services.polylogue.liveRoot}/sinex-data"
+        else
+          "${config.sinnix.services.polylogue.liveRoot}/data";
+      defaultText = lib.literalExpression ''"''${liveRoot}/data"'';
+      description = ''
+        The XDG data home every polylogue command runs with; the live
+        archive is its ``polylogue`` directory. A new archive is built in a
+        new data home beside the old one and the switch is this option.
+      '';
+    };
+
+    retainedArchives = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      description = ''
+        Archive directories set aside read-only after a cutover. They stay
+        covered by the realm backup; their derived index.db is excluded like
+        the live archive's.
       '';
     };
   };

@@ -118,11 +118,7 @@ let
     }
     // {
       # The archive root is configuration, not a guessed XDG sibling.
-      polylogue.archiveRoot =
-        let
-          cfg = config.sinnix.services.polylogue;
-        in
-        "${cfg.liveRoot}/${if cfg.sinex.mode == "primary" then "sinex-data" else "data"}/polylogue";
+      polylogue.archiveRoot = "${config.sinnix.services.polylogue.dataHome}/polylogue";
     };
 in
 {

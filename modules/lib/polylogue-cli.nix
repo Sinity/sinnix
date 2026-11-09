@@ -13,8 +13,7 @@
 }:
 let
   cfg = config.sinnix.services.polylogue;
-  dataHome =
-    if cfg.sinex.mode == "primary" then "${cfg.liveRoot}/sinex-data" else "${cfg.liveRoot}/data";
+  inherit (cfg) dataHome;
   package = inputs.polylogue-rewrite.packages.${pkgs.stdenv.hostPlatform.system}.polylogue;
   # Spools live on the root disk, not /realm: each hook line is synced before
   # the hook returns, and a sync behind /realm's bulk writeback stalls for

@@ -85,6 +85,20 @@ let
     "${name}-shm"
   ]) polylogueDbNames;
 
+  # The live archive and every archive set aside after a cutover, relative to
+  # the realm root: their derived index.db (rebuilt from archive.db) is left
+  # out of the realm drain.
+  polylogueCfg = config.sinnix.services.polylogue;
+  polylogueArchiveRoot = config.sinnix.runtime.inventory.polylogue.archiveRoot;
+  polylogueIndexExcludes = lib.concatMap (
+    archive:
+    map (name: lib.removePrefix "${realmRoot}/" "${archive}/${name}") [
+      "index.db"
+      "index.db-wal"
+      "index.db-shm"
+    ]
+  ) ([ polylogueArchiveRoot ] ++ polylogueCfg.retainedArchives);
+
   # Snapshot directories
   realmSnapshots = "${realmRoot}/.btrfs/snapshot";
   persistSnapshots = "/persist/.btrfs/snapshot";
@@ -917,9 +931,9 @@ let
     # subvolume, so the drain reads it from an atomic btrbk snapshot while the
     # daemon runs. Polylogue's docs/operations.md accepts an atomic snapshot of
     # the archive directory as a consistent backup; no dump step is needed.
-    "state/polylogue-live/data/polylogue/index.db"
-    "state/polylogue-live/data/polylogue/index.db-wal"
-    "state/polylogue-live/data/polylogue/index.db-shm"
+  ]
+  ++ polylogueIndexExcludes
+  ++ [
     "state/stashbox/analysis-cache"
     "state/stashbox/generated"
     "state/stashbox/gpu-venv"
@@ -975,67 +989,69 @@ let
     ]
     ++ chromeCacheRoots
   );
-  realmNoncanonical = lib.intersectLists realmExcludes [
-    "library/game/steam/steamapps"
-    "library/model/ollama"
-    "library/model/gguf"
-    "library/model/sherpa"
-    "library/model/photoprism"
-    "library/model/sd-checkpoints"
-    "library/model/tts"
-    # Historical snapshots retain these native addresses.
-    "library/games/steam/steamapps"
-    "library/models"
-    "state/cache"
-    "health/genome/cache"
-    "state/containers"
-    # Codex installs its app-server releases here; it re-fetches them.
-    "state/codex/home/packages"
-    "tmp"
-    "worktree"
-    "worktrees"
-    # Pytest writes these caches from subprocess runs rooted at /realm and
-    # /realm/project. Borg excludes them through **/.pytest_cache; these
-    # exact roots are disposable and may be absent from an archive.
-    ".pytest_cache"
-    "project/.pytest_cache"
-    # Freedesktop trash: deleted-by-the-operator content. Its absence from an
-    # archive is the intended state, not missing canonical data. Without this
-    # the coverage checker reports "canonical content missing from archive"
-    # and correctly retains every snapshot -- which stalled the realm drain
-    # from 2026-09-14 and starved three other borg repositories behind its
-    # lock. 23 GB / ~1.55M entries at the time of diagnosis.
-    ".Trash-1000"
-    # Regenerable build and environment trees, each checked to hold only
-    # rebuildable content: Cargo targets (CACHEDIR.TAG), Python virtualenvs,
-    # Stash's analysis cache and generated media (tagged by sinnix), and
-    # downloaded embedding weights. Exact roots, because coverage waives only
-    # explicitly classified paths, never a tag or glob.
-    "project/polylogue/repo/target"
-    "project/polylogue-sinex-common/repo/target"
-    "project/sinex/repo/target"
-    "project/sinnix/repo/.venv"
-    "project/sinity-lynchpin/repo/.venv"
-    "project/yt-polisher/repo/.venv"
-    # Polylogue's index.db is "everything parsed and derived", rebuilt from
-    # archive.db when deleted (polylogue docs/architecture.md). At 16 GB and
-    # rewritten continuously, it was reread by every realm drain.
-    "state/polylogue-live/data/polylogue/index.db"
-    "state/polylogue-live/data/polylogue/index.db-wal"
-    "state/polylogue-live/data/polylogue/index.db-shm"
-    "state/stashbox/analysis-cache"
-    "state/stashbox/generated"
-    "state/stashbox/gpu-venv"
-    "state/comfyui/venv"
-    "library/model/embedding"
-    # Steam's runtimes and client package, re-downloaded by the client.
-    # userdata beside them stays covered.
-    "library/game/steam/ubuntu12_32"
-    "library/game/steam/ubuntu12_64"
-    "library/game/steam/steamrt32"
-    "library/game/steam/steamrt64"
-    "library/game/steam/package"
-  ];
+  realmNoncanonical = lib.intersectLists realmExcludes (
+    [
+      "library/game/steam/steamapps"
+      "library/model/ollama"
+      "library/model/gguf"
+      "library/model/sherpa"
+      "library/model/photoprism"
+      "library/model/sd-checkpoints"
+      "library/model/tts"
+      # Historical snapshots retain these native addresses.
+      "library/games/steam/steamapps"
+      "library/models"
+      "state/cache"
+      "health/genome/cache"
+      "state/containers"
+      # Codex installs its app-server releases here; it re-fetches them.
+      "state/codex/home/packages"
+      "tmp"
+      "worktree"
+      "worktrees"
+      # Pytest writes these caches from subprocess runs rooted at /realm and
+      # /realm/project. Borg excludes them through **/.pytest_cache; these
+      # exact roots are disposable and may be absent from an archive.
+      ".pytest_cache"
+      "project/.pytest_cache"
+      # Freedesktop trash: deleted-by-the-operator content. Its absence from an
+      # archive is the intended state, not missing canonical data. Without this
+      # the coverage checker reports "canonical content missing from archive"
+      # and correctly retains every snapshot -- which stalled the realm drain
+      # from 2026-09-14 and starved three other borg repositories behind its
+      # lock. 23 GB / ~1.55M entries at the time of diagnosis.
+      ".Trash-1000"
+      # Regenerable build and environment trees, each checked to hold only
+      # rebuildable content: Cargo targets (CACHEDIR.TAG), Python virtualenvs,
+      # Stash's analysis cache and generated media (tagged by sinnix), and
+      # downloaded embedding weights. Exact roots, because coverage waives only
+      # explicitly classified paths, never a tag or glob.
+      "project/polylogue/repo/target"
+      "project/polylogue-sinex-common/repo/target"
+      "project/sinex/repo/target"
+      "project/sinnix/repo/.venv"
+      "project/sinity-lynchpin/repo/.venv"
+      "project/yt-polisher/repo/.venv"
+      # Polylogue's index.db is "everything parsed and derived", rebuilt from
+      # archive.db when deleted (polylogue docs/architecture.md). At 16 GB and
+      # rewritten continuously, it was reread by every realm drain.
+    ]
+    ++ polylogueIndexExcludes
+    ++ [
+      "state/stashbox/analysis-cache"
+      "state/stashbox/generated"
+      "state/stashbox/gpu-venv"
+      "state/comfyui/venv"
+      "library/model/embedding"
+      # Steam's runtimes and client package, re-downloaded by the client.
+      # userdata beside them stays covered.
+      "library/game/steam/ubuntu12_32"
+      "library/game/steam/ubuntu12_64"
+      "library/game/steam/steamrt32"
+      "library/game/steam/steamrt64"
+      "library/game/steam/package"
+    ]
+  );
 
   realmExcludeMatchesProtectedPath = import ./lib/backup/protected-paths.nix {
     inherit lib;
@@ -1081,11 +1097,11 @@ let
       } \
       --pattern '- re:.*' \
       "${borgRepoRealm}::''${archive}" ${
-      lib.escapeShellArgs (
-        [ "state/tasks" ]
-        ++ lib.filter (path: !lib.hasPrefix "state/tasks/" path) (map (store: store.path) beadsArchivePaths)
-      )
-    })
+        lib.escapeShellArgs (
+          [ "state/tasks" ]
+          ++ lib.filter (path: !lib.hasPrefix "state/tasks/" path) (map (store: store.path) beadsArchivePaths)
+        )
+      })
     # A set lookup, not `printf | grep -q`: grep stopping at the first match
     # breaks the pipe, which pipefail reports as a failure.
     declare -A archived=()
@@ -1639,6 +1655,7 @@ in
           lib
           realmRoot
           username
+          polylogueArchiveRoot
           sinexSpoolPaths
           borgRepoPersist
           borgRepoPersistPath

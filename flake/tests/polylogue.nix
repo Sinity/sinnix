@@ -65,7 +65,7 @@ in
                 inputs.polylogue-rewrite.packages.${system}.polylogue = probe;
                 config.sinnix.services.polylogue = {
                   sinex.mode = mode;
-                  liveRoot = "/fixture/live archive";
+                  dataHome = "/fixture/live archive/${if mode == "primary" then "sinex-data" else "data"}";
                 };
                 config.sinnix.user.name = "op";
                 config.users.users.op.home = "/fixture/home";

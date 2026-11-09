@@ -26,6 +26,7 @@
   lib,
   realmRoot,
   username,
+  polylogueArchiveRoot,
   sinexSpoolPaths,
   borgRepoPersist,
   borgRepoPersistPath,
@@ -44,7 +45,7 @@
 }:
 let
   persistHourlyCut = "/persist/.btrfs/borg-hourly-cut";
-  polylogueArchiveDb = "${realmRoot}/state/polylogue-live/data/polylogue/archive.db";
+  polylogueArchiveDb = "${polylogueArchiveRoot}/archive.db";
   tasksRoot = "${realmRoot}/state/tasks";
   tasksExcludes = [
     "migration-backups"
