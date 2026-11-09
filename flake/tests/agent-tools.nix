@@ -407,7 +407,6 @@ in
             "agent-ctl-measure"
             "agent-ctl-system-build"
             "agent-ctl-compile"
-            "agent-ctl-baseline"
             "agent-ctl-codex"
           ] (name: userSlices.${name});
           forbiddenAvoidTokens = [
@@ -442,18 +441,6 @@ in
         assert lib.assertMsg (
           declaredPools ? compile && poolSlices ? agent-ctl-compile
         ) "type and lint checks have a pool and slice of their own";
-        # Master baselines take hours of build time a day; a slot of their own
-        # keeps them out of every slot a lane waits for.
-        assert lib.assertMsg (
-          declaredPools.baseline.parallel == 1
-          && lib.all (slice: poolSlices.agent-ctl-baseline.IOWeight < slice.IOWeight) (
-            map (name: poolSlices.${name}) [
-              "agent-ctl-normal"
-              "agent-ctl-bulk"
-              "agent-ctl-compile"
-            ]
-          )
-        ) "master baselines run one at a time in their own pool, below lane builds' I/O weight";
         # The build pools' widths are the only bound on concurrent Cargo builds.
         assert lib.assertMsg (
           declaredPools.normal.parallel + declaredPools.bulk.parallel + declaredPools.compile.parallel <= 3

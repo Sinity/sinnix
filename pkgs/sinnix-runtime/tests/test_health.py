@@ -1108,7 +1108,7 @@ def test_reported_failure_outside_inventory_is_kept_until_it_recovers(tmp_path):
 
     state = tmp_path / "state.json"
     state.write_text(
-        '{"service:user:agentctl-baseline-polylogue.service": {"status": "failed"},'
+        '{"service:user:outside.service": {"status": "failed"},'
         ' "service:user:listed.service": {"status": "failed"},'
         ' "service:user:recovered.service": {"status": "healthy"}}'
     )
@@ -1118,7 +1118,7 @@ def test_reported_failure_outside_inventory_is_kept_until_it_recovers(tmp_path):
         ]
     }
     found = health.reported_failures_outside(inventory, state)
-    assert found == [{"unit": "agentctl-baseline-polylogue.service", "manager": "user"}]
+    assert found == [{"unit": "outside.service", "manager": "user"}]
 
 
 def test_io_stall_lane_degrades_and_names_top_readers():

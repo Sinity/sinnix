@@ -185,18 +185,6 @@
             pkgs.duckdb
           ];
         };
-        # Provably fails when: the baseline is queued twice for one head, or
-        # its checkout moves while a baseline job is still active there.
-        master-baseline-suite = mkScriptSuite {
-          name = "sinnix-master-baseline";
-          suiteDir = ../../pkgs/sinnix-master-baseline/tests;
-          scripts = [ "sinnix-master-baseline" ];
-          nativeBuildInputs = [
-            pkgs.bash
-            pkgs.git
-            pkgs.jq
-          ];
-        };
         borg-check-suite = mkScriptSuite {
           name = "sinnix-borg-check";
           suiteDir = ../../pkgs/sinnix-borg-check/tests;

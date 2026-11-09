@@ -142,21 +142,8 @@ mkServiceModule {
       # so a head is known to compile before it is pushed or sent to a cloud
       # check.
       compile.parallel = 1;
-      # The master baselines' warm builds, which take 23-60 minutes. Their own
-      # slot, so they never hold one that lanes wait for; one at a time, at
-      # the plane's lowest build weights.
-      baseline.parallel = 1;
     };
     description = "Each pueue group's width and cross-pool admission policy.";
-  };
-
-  extraOptions.masterBaselines = lib.mkOption {
-    type = lib.types.listOf lib.types.str;
-    default = [
-      "polylogue"
-      "sinex"
-    ];
-    description = "Projects whose `baseline` operation runs on each new default-branch head, in a reserved checkout whose target also supplies dependency units to other checkouts' Cargo targets.";
   };
 
   # No runtime surface: the job plane is pueued (declared by the CLI feature)
@@ -319,47 +306,6 @@ mkServiceModule {
           };
         }
       )
-      {
-        # The project list is configuration, so the units merge below the
-        # top-level `systemd` attribute rather than as list items.
-        systemd = lib.mkMerge (
-          map (
-            project:
-            (lib.sinnix.mkScheduledJob
-              {
-                inherit config;
-                unitName = "agentctl-baseline-${project}";
-                description = "Queue the ${project} baseline on a new default-branch head";
-              }
-              {
-                manager = "user";
-                resourceClass = "background";
-                execStart = "${scriptPkgs.sinnix-master-baseline}/bin/sinnix-master-baseline ${project}";
-                # The queued job inherits this PATH: Nix, the system tools and the
-                # user profile's sinnix-cargo-target, as in a login shell.
-                path = [
-                  "/run/wrappers"
-                  "/etc/profiles/per-user/${userName}"
-                  "/run/current-system/sw"
-                ];
-                serviceConfig = {
-                  # Fetch and enqueue only; the operation owns the build's timeout.
-                  TimeoutStartSec = "5min";
-                };
-                # Agent infrastructure, not a host fault the operator acts on: a
-                # failed enqueue is retried by the next tick and reported through
-                # agentctl, so it never notifies the desktop or phone.
-                unit.onFailure = [ ];
-                timer = {
-                  intervalSec = 600;
-                  onBootSec = 600;
-                  description = "Queue the ${project} baseline on a new default-branch head";
-                };
-              }
-            ).systemd
-          ) cfg.masterBaselines
-        );
-      }
       {
         environment.etc."sinnix/agentctl.json".source = configFile;
         # Queued commands and the timers run with the system PATH, not an

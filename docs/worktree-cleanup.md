@@ -30,11 +30,9 @@ inherited target through `nix develop --command`. Devkit resolves Cargo's actual
 target for test/report handling. Durable run history, Sinex service/test state
 and independently retained historical binaries keep their current owners.
 
-An empty target is seeded once, by reflink, from one idle target. The preferred
-source is the repository's master-baseline checkout (Git config
-`sinnix.baselineCheckout`, set by `sinnix-master-baseline`); otherwise the
-selector tries the three most recently built targets of other worktrees and
-uses the first idle one. Once the target contains build artifacts, Cargo owns
+An empty target is seeded once, by reflink, from one idle target: the selector
+tries the three most recently built targets of other worktrees and uses the
+first idle one. Once the target contains build artifacts, Cargo owns
 it: later selections neither add another source's units nor replace its files.
 
 Artifact filenames are not content hashes. Builds can produce the same filename
@@ -59,9 +57,7 @@ Cargo build locks is held or within `minIdleHours` of use. It removes:
 
 - a target whose marked checkout no longer has `.git`;
 - a target idle longer than `maxIdleDays` (unmarked targets fall under this
-  rule only), except a repository's master-baseline target, which supplies
-  other targets' dependency units and is rebuilt only when the default branch moves (filesystem
-  pressure still removes it);
+  rule only);
 - while the cache filesystem is fuller than `maxFilesystemUsePercent`, idle
   targets least recently used first, rereading usage after each committed
   removal. Targets share reflinked extents, so the filesystem's usage, not a

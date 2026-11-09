@@ -102,17 +102,12 @@ path_packages() {
 if [ -f "$checkout/Cargo.lock" ] \
   && [ -z "$(find "$target" -type f ! -name .cargo-lock ! -name CACHEDIR.TAG \
     ! -name .sinnix-seed.lock -print -quit)" ]; then
-  baseline="$(git config --get sinnix.baselineCheckout || true)"
   sources=()
-  if [ -n "$baseline" ] && [ -d "$baseline" ]; then
-    baseline="$(realpath "$baseline")"
-    sources+=("$baseline")
-  fi
   recent=()
   while IFS= read -r other; do
     [ -d "$other" ] || continue
     other="$(realpath "$other")"
-    [ "$other" != "$checkout" ] && [ "$other" != "$baseline" ] || continue
+    [ "$other" != "$checkout" ] || continue
     [ -d "$(target_of "$other")/debug" ] || continue
     recent+=("$(stat -c %Y "$(target_of "$other")/debug") $other")
   done < <(git worktree list --porcelain | sed -n 's/^worktree //p')

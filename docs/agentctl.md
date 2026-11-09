@@ -198,8 +198,7 @@ wrapper whose task is terminal is stopped; a live one ends the run as
 `slot_occupied`.
 
 **Concurrent builds.** The widths of the pools that run Cargo builds
-(`normal` 1, `bulk` 1, `compile` 1, and `baseline` 1 for the master
-baselines) bound how many run at once, so a job takes its queue slot only
+(`normal` 1, `bulk` 1, `compile` 1) bound how many run at once, so a job takes its queue slot only
 when it can run; no job waits inside its slot.
 
 The complete pressure tick, including adaptive widths and admission hold
@@ -465,27 +464,10 @@ declares these units:
 - `agentctl-clean` (daily: removes finished queue tasks, keeping results).
 - `agentctl-pools`, which reapplies pool widths whenever pueued starts or the
   configuration changes.
-- `agentctl-baseline-<project>` (every ten minutes, for each of
-  `masterBaselines`): `sinnix-master-baseline` fetches the default branch and,
-  when its head is new and no baseline job is running, moves the reserved
-  detached checkout `<workspace root>/<project>-master` there (forcibly,
-  discarding any leftover changes in it except `target/`) and queues the
-  checkout's own `baseline` operation using `--project CHECKOUT`, with that
-  same checkout as `--workspace`. Its descriptor supplies the environment and
-  operation limits; its ProjectID must match the registered project. A failed
-  launch leaves the head unmarked for the next scheduled attempt. A head whose
-  job was lost or not recorded is queued again; a cancelled, refused, passing,
-  failing or timed-out baseline stands until the branch moves. A baseline
-  still queued for an older head is cancelled and replaced, so each project
-  has at most one, for the newest head. The baseline is a warm build, not a
-  test run: Polylogue and Sinex declare it as `xtask warm` (every test binary
-  and Clippy, nothing run, 23-60 minutes) in the one-slot `baseline` pool,
-  whose slice has the lowest build weights, so it never holds a slot a lane
-  waits for.
-  Its target supplies dependency units to other checkouts' targets
-  (`docs/worktree-cleanup.md`).
-  Whether a failure is already on master comes from the master GitHub Actions
-  run (`gh run list -b master`), not from this job.
+
+Whether a failure is already on master comes from the master GitHub Actions
+run (`gh run list -b master`): every master commit runs the full check there,
+and PR runs restore master's build cache, so no local job builds master.
 
 pueued and the pool slices come from `modules/features/cli/core.nix` and
 `flake/data/runtime-defaults.nix`. The package's test suite drives a private

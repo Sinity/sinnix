@@ -203,12 +203,7 @@ class CargoCache(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             return Path(result.stdout.strip())
 
-        def baseline(path):
-            subprocess.run(
-                [*git, "config", "sinnix.baselineCheckout", str(path)], check=True
-            )
-
-        return worktree, select_in, baseline
+        return worktree, select_in
 
     @staticmethod
     def build_unit(target, unit, *, profile="debug", content=b"compiled"):
@@ -231,10 +226,9 @@ class CargoCache(unittest.TestCase):
         return [p.relative_to(target) for p in outputs]
 
     def test_a_new_checkout_gets_the_dependency_units_of_warm_targets(self):
-        worktree, select_in, baseline = self.lanes()
+        worktree, select_in = self.lanes()
         master = worktree("master")
         seed = select_in(master)
-        baseline(master)
         dep = "dep-0123456789abcdef"
         outputs = self.build_unit(seed, dep)
         cross = self.build_unit(
@@ -285,10 +279,9 @@ class CargoCache(unittest.TestCase):
         self.assertEqual((target / outputs[0]).read_bytes(), b"rebuilt")
 
     def test_a_populated_target_keeps_one_builds_dependency_set(self):
-        worktree, select_in, baseline = self.lanes()
+        worktree, select_in = self.lanes()
         master = worktree("master")
         seed = select_in(master)
-        baseline(master)
         same_name = "dep-0123456789abcdef"
         original = self.build_unit(seed, same_name, content=b"dependency A")
         lane = worktree("lane")
@@ -306,34 +299,29 @@ class CargoCache(unittest.TestCase):
         select_in(lane)
         self.assertFalse((target / original[0]).exists())
 
-    def test_a_target_uses_one_source_with_baseline_then_recent_preference(self):
-        worktree, select_in, baseline = self.lanes()
-        master = worktree("master")
-        seed = select_in(master)
-        self.build_unit(seed, "dep-0000000000000001")
-        baseline(master)
+    def test_a_target_seeds_from_the_most_recently_built_idle_target(self):
+        worktree, select_in = self.lanes()
+        # Empty targets first, so none is seeded from another.
         targets = {name: select_in(worktree(name)) for name in ["old", "a", "b", "c"]}
         for i, name in enumerate(targets):
             self.build_unit(targets[name], f"dep-{i + 2:016x}")
             os.utime(targets[name] / "debug", (1_000_000_000 + i,) * 2)
         target = select_in(worktree("lane"))
         have = {p.name for p in (target / "debug" / ".fingerprint").iterdir()}
-        self.assertEqual(have, {"dep-0000000000000001"})
-        subprocess.run(
-            ["git", "-C", str(self.checkout), "config", "--unset", "sinnix.baselineCheckout"],
-            check=True,
-        )
-        os.utime(seed / "debug", (999_999_998,) * 2)
+        self.assertEqual(have, {"dep-0000000000000005"})
+        # A busy source is skipped for the next most recent idle one. The
+        # target just seeded is made older, so it is not a candidate itself.
         os.utime(target / "debug", (999_999_999,) * 2)
-        fallback = select_in(worktree("fallback"))
+        with (targets["c"] / "debug" / ".cargo-lock").open("w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            fallback = select_in(worktree("fallback"))
         have = {p.name for p in (fallback / "debug" / ".fingerprint").iterdir()}
-        self.assertEqual(have, {"dep-0000000000000001", "dep-0000000000000005"})
+        self.assertEqual(have, {"dep-0000000000000004"})
 
     def test_a_busy_source_or_empty_destination_is_not_seeded_until_idle(self):
-        worktree, select_in, baseline = self.lanes()
+        worktree, select_in = self.lanes()
         master = worktree("master")
         seed = select_in(master)
-        baseline(master)
         outputs = self.build_unit(seed, "dep-0123456789abcdef")
         lane = worktree("lane")
         with (seed / "debug" / ".cargo-lock").open("w") as lock:
@@ -486,23 +474,6 @@ class CargoCache(unittest.TestCase):
             ],
             [],
         )
-
-    def test_eviction_keeps_the_idle_master_baseline_target(self):
-        self.provision()
-        baseline = self.root / "baseline"
-        subprocess.run(["git", "init", "-q", str(baseline)], check=True)
-        subprocess.run(
-            ["git", "-C", str(baseline), "config", "sinnix.baselineCheckout", str(baseline)],
-            check=True,
-        )
-        seed = self.make_target(baseline, idle_hours=100)
-        lane = self.make_target(self.checkout.resolve(), idle_hours=100)
-        self.evict()
-        self.assertTrue(seed.exists())
-        self.assertFalse(lane.exists())
-        # Filesystem pressure still removes it.
-        self.evict(use_percent_per_target=10, max_use_percent=5)
-        self.assertFalse(seed.exists())
 
     def test_pressure_evicts_least_recently_used_idle_targets_first(self):
         self.provision()
