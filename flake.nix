@@ -91,9 +91,11 @@
     };
 
     # Sinex: its package and NixOS module (modules/services/sinex/bridge.nix).
-    # Pinned to the deployed schema-2 revision (a081818b6) plus two commits:
-    # commit-log and window pages read without scanning every event, and
-    # confirmed-stream messages fitted to the NATS size limit; the full move
+    # Pinned to the deployed schema-2 revision (a081818b6) plus backports:
+    # commit-log and window pages read without scanning every event,
+    # confirmed-stream messages fitted to the NATS size limit, the read-only
+    # SQL boundary, and producer positions written only when they change with
+    # integration-socket lines synced in groups (root SSD writes); the full move
     # to Sinex master is a separate migration. A bump is a deploy,
     # and sinexd is restarted by hand afterwards.
     #
@@ -104,7 +106,7 @@
     # `switch` publishes the Sinex closure after a successful activation
     # (sinexCachePush in flake/command-registry.nix), and the
     # sinex-cache-prebuild timer builds a newly pinned revision ahead of it.
-    sinex.url = "git+https://github.com/Sinity/sinex?ref=fix/deployed-read-boundary-20261108&rev=ba6cf2c601db2849e34c8c3c22019ec1bba09eb4";
+    sinex.url = "git+https://github.com/Sinity/sinex?ref=fix/deployed-read-boundary-20261108&rev=e8a1782a4bad541bf84f75e229a57fa9017314e9";
 
     # BTRFS rollback impermanence (see modules/persistence.nix)
     impermanence = {
