@@ -67,7 +67,8 @@
 
     # The live application, CLI and MCP server. It keeps its
     # own nixpkgs: its shared crates need a newer rustc than Sinnix's.
-    polylogue-rewrite.url = "github:Sinity/polylogue/a8a886f7d5b904a8a69a1256e8c7215ccdd18d20";
+    # flake.lock alone holds the deployed revision; moving it is a deploy.
+    polylogue-rewrite.url = "github:Sinity/polylogue";
 
     # Private repo — fetch via HTTPS through the local gh/git credential helper.
     yt-polisher = {
@@ -91,13 +92,9 @@
     };
 
     # Sinex: its package and NixOS module (modules/services/sinex/bridge.nix).
-    # Pinned to the deployed schema-2 revision (a081818b6) plus backports:
-    # commit-log and window pages read without scanning every event,
-    # confirmed-stream messages fitted to the NATS size limit, the read-only
-    # SQL boundary, and producer positions written only when they change with
-    # integration-socket lines synced in groups (root SSD writes); the full move
-    # to Sinex master is a separate migration. A bump is a deploy,
-    # and sinexd is restarted by hand afterwards.
+    # The URL names the deployed branch; flake.lock alone holds the revision,
+    # and the commit that moves it says what changed. A bump is a deploy, and
+    # sinexd is restarted by hand afterwards.
     #
     # nixpkgs is deliberately NOT `follows`: Sinex builds against its own
     # locked nixpkgs and Rust toolchain, so a Sinnix nixpkgs bump does not
@@ -106,7 +103,7 @@
     # `switch` publishes the Sinex closure after a successful activation
     # (sinexCachePush in flake/command-registry.nix), and the
     # sinex-cache-prebuild timer builds a newly pinned revision ahead of it.
-    sinex.url = "git+https://github.com/Sinity/sinex?ref=fix/deployed-read-boundary-20261108&rev=e8a1782a4bad541bf84f75e229a57fa9017314e9";
+    sinex.url = "git+https://github.com/Sinity/sinex?ref=fix/deployed-read-boundary-20261108";
 
     # BTRFS rollback impermanence (see modules/persistence.nix)
     impermanence = {

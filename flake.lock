@@ -1259,7 +1259,6 @@
       "original": {
         "owner": "Sinity",
         "repo": "polylogue",
-        "rev": "a8a886f7d5b904a8a69a1256e8c7215ccdd18d20",
         "type": "github"
       }
     },
@@ -1446,7 +1445,6 @@
       },
       "original": {
         "ref": "fix/deployed-read-boundary-20261108",
-        "rev": "e8a1782a4bad541bf84f75e229a57fa9017314e9",
         "type": "git",
         "url": "https://github.com/Sinity/sinex"
       }

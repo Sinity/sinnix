@@ -43,13 +43,15 @@
             if [ "$#" -gt 0 ]; then
               exec ${nix} flake update "$@"
             fi
-            # Routine (no-arg) updates bump every input EXCEPT nixpkgs-ai: that
-            # input feeds CUDA-narrowed AI packages (flake/overlay/package/local-ai.nix)
-            # whose derivation hash breaks on any nixpkgs rev change, forcing an
-            # hours-long recompile. Bump it deliberately: `update nixpkgs-ai`.
+            # Routine (no-arg) updates bump every input EXCEPT nixpkgs-ai and the
+            # deployed products. nixpkgs-ai feeds CUDA-narrowed AI packages
+            # (flake/overlay/package/local-ai.nix) whose derivation hash breaks on
+            # any nixpkgs rev change, forcing an hours-long recompile. sinex and
+            # polylogue-rewrite name a branch, not a revision, so moving them is
+            # a deploy. Bump each deliberately: `update <input>`.
             _routine_input_lines=$(
               ${nix} flake metadata --json \
-                | ${pkgs.jq}/bin/jq -er '.locks.nodes.root.inputs | if type != "object" then error("invalid flake inputs") else keys | map(select(. != "nixpkgs-ai")) | if length == 0 then error("no routine inputs") else .[] end end'
+                | ${pkgs.jq}/bin/jq -er '.locks.nodes.root.inputs | if type != "object" then error("invalid flake inputs") else keys | map(select(. != "nixpkgs-ai" and . != "sinex" and . != "polylogue-rewrite")) | if length == 0 then error("no routine inputs") else .[] end end'
             )
             mapfile -t _routine_inputs <<< "$_routine_input_lines"
             exec ${nix} flake update "''${_routine_inputs[@]}"

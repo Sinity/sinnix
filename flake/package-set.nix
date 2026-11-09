@@ -253,10 +253,8 @@ let
       };
     };
 
-    sinex-mcp-cli = pkgs.callPackage ../pkgs/sinex-mcp/pkg.nix {
-      upstream = inputs.sinex.packages.${pkgs.stdenv.hostPlatform.system}.sinexctl;
-      sourceRevision = inputs.sinex.rev;
-    };
+    # The deployed Sinex package; its sinexctl serves the MCP provider.
+    sinexctl = inputs.sinex.packages.${pkgs.stdenv.hostPlatform.system}.sinexctl;
 
     mcp-github = mkNodeCliPackage {
       pname = "mcp-github";

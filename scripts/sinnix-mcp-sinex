@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Serve the Sinex MCP tools of the running sinexd (sinexctl mcp)
-# runtimeInputs: bash @sinex-mcp-cli
+# runtimeInputs: bash @sinexctl
 #
-# The provider carries the reviewed MCP-only patch at the installed daemon pin.
+# The provider is the deployed Sinex package's own sinexctl.
 # Non-login MCP clients use the daemon's loopback API and agent token by
 # default; explicit connection settings keep their usual meaning.
 set -euo pipefail
