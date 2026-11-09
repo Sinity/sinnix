@@ -304,6 +304,11 @@ assert lib.assertMsg (
             to = "$TMPDIR/state/borg-cache";
           }
           {
+            # The Borg cache moved to /realm (b47fb2094).
+            from = "/realm/state/cache/borg";
+            to = "$TMPDIR/state/borg-cache";
+          }
+          {
             from = "/run/lock/sinnix-borg.lock";
             to = "$TMPDIR/state/sinnix-borg.lock";
           }
@@ -382,6 +387,11 @@ assert lib.assertMsg (
             to = "$TMPDIR/state/borg-cache";
           }
           {
+            # The Borg cache moved to /realm (b47fb2094).
+            from = "/realm/state/cache/borg";
+            to = "$TMPDIR/state/borg-cache";
+          }
+          {
             from = "/run/lock/sinnix-borg.lock";
             to = "$TMPDIR/state/sinnix-borg.lock";
           }
@@ -435,6 +445,11 @@ assert lib.assertMsg (
               to = "$TMPDIR/state/borg-cache";
             }
             {
+              # The Borg cache moved to /realm (b47fb2094).
+              from = "/realm/state/cache/borg";
+              to = "$TMPDIR/state/borg-cache";
+            }
+            {
               from = "/run/lock/sinnix-borg.lock";
               to = "$TMPDIR/state/sinnix-borg.lock";
             }
@@ -477,6 +492,11 @@ assert lib.assertMsg (
             }
             {
               from = "/persist/root/.cache/borg";
+              to = "$TMPDIR/state/borg-cache";
+            }
+            {
+              # The Borg cache moved to /realm (b47fb2094).
+              from = "/realm/state/cache/borg";
               to = "$TMPDIR/state/borg-cache";
             }
             {
@@ -523,6 +543,11 @@ assert lib.assertMsg (
         }
         {
           from = "/persist/root/.cache/borg";
+          to = "$TMPDIR/state/borg-cache";
+        }
+        {
+          # The Borg cache moved to /realm (b47fb2094).
+          from = "/realm/state/cache/borg";
           to = "$TMPDIR/state/borg-cache";
         }
         {
@@ -599,6 +624,11 @@ assert lib.assertMsg (
               to = "$TMPDIR/live-holder/cache";
             }
             {
+              # The Borg cache moved to /realm (b47fb2094).
+              from = "/realm/state/cache/borg";
+              to = "$TMPDIR/live-holder/cache";
+            }
+            {
               from = "/run/lock/sinnix-borg.lock";
               to = "$TMPDIR/live-holder/global.lock";
             }
@@ -644,6 +674,11 @@ assert lib.assertMsg (
             }
             {
               from = "/persist/root/.cache/borg";
+              to = "$TMPDIR/dead-holder/cache";
+            }
+            {
+              # The Borg cache moved to /realm (b47fb2094).
+              from = "/realm/state/cache/borg";
               to = "$TMPDIR/dead-holder/cache";
             }
             {
