@@ -2202,6 +2202,7 @@ elif command=='btrfs':
         print('Gen at creation: '+str(generations[args[2]]))
         print('Subvolume ID: '+str(100+generations[args[2]]))
     elif args[:2]==['property','get']: print('ro=true')
+    elif args[:2]==['subvolume','sync']: pass
     elif args[:2]==['subvolume','delete']:
         assert args[2] in identities
         if (root/'fail-delete').exists(): sys.exit(1)
