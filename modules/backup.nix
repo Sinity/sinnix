@@ -1068,7 +1068,19 @@ let
         } "
       ) beadsArchivePaths
     })
-    mapfile -t members < <(borg list --short "${borgRepoRealm}::''${archive}" ${
+    # Only tracker metadata files are listed: listing every file under
+    # state/tasks held millions of names in memory (2.7 GB peak on the host).
+    mapfile -t members < <(borg list --short \
+      --pattern '+ re:^state/tasks/[^/]+/\.beads/metadata\.json$' ${
+        lib.escapeShellArgs (
+          lib.concatMap (store: [
+            "--pattern"
+            "+ pf:${store.path}/metadata.json"
+          ]) beadsArchivePaths
+        )
+      } \
+      --pattern '- re:.*' \
+      "${borgRepoRealm}::''${archive}" ${
       lib.escapeShellArgs (
         [ "state/tasks" ]
         ++ lib.filter (path: !lib.hasPrefix "state/tasks/" path) (map (store: store.path) beadsArchivePaths)
