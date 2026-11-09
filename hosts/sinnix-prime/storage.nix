@@ -11,6 +11,51 @@ let
     IOWeight = 10;
     CPUWeight = 5;
   };
+  # Each filesystem is on its own device (/ SATA SSD, /realm NVMe,
+  # /outer-realm HDD), so their night passes run side by side.
+  scrubTargets = {
+    root = {
+      mountpoint = "/";
+      cycleDays = 30;
+    };
+    realm = {
+      mountpoint = "/realm";
+      cycleDays = 30;
+    };
+    outer-realm = {
+      mountpoint = "/outer-realm";
+      cycleDays = 91;
+    };
+  };
+  mkScrubService = name: fs: {
+    description = "Night-window btrfs scrub of ${fs.mountpoint}";
+    path = [
+      pkgs.btrfs-progs
+      pkgs.coreutils
+      pkgs.gnugrep
+    ];
+    serviceConfig = scrubServiceConfig // {
+      StateDirectory = "sinnix-scrub";
+      # Stopping the unit cancels the scrub; btrfs keeps its position.
+      ExecStopPost = "-${pkgs.btrfs-progs}/bin/btrfs scrub cancel ${fs.mountpoint}";
+    };
+    script = ''
+      stamp=/var/lib/sinnix-scrub/${name}.completed
+      status=$(btrfs scrub status ${fs.mountpoint} || true)
+      if printf '%s\n' "$status" | grep -qE 'Status:[[:space:]]+(aborted|interrupted)'; then
+        btrfs scrub resume -B ${fs.mountpoint}
+      elif [ ! -f "$stamp" ] || [ $(( $(date +%s) - $(date -r "$stamp" +%s) )) -ge ${toString (fs.cycleDays * 86400)} ]; then
+        btrfs scrub start -B ${fs.mountpoint}
+      else
+        exit 0
+      fi
+      date -Iseconds > "$stamp"
+    '';
+  };
+  scrubTimer = {
+    wantedBy = [ "timers.target" ];
+    timerConfig.OnCalendar = "*-*-* 01:00:00";
+  };
   inherit (config.sinnix.paths)
     realmRoot
     outerRealm
@@ -100,22 +145,6 @@ in
     fstrim.enable = false;
     gvfs.enable = true; # dynamic mount
 
-    # Monthly btrfs scrub on always-mounted filesystems. Scrub re-reads every
-    # data + metadata block and verifies checksums against the DUP copy; for
-    # single-device btrfs this is the only defence against silent bit rot.
-    # /neo-outer-realm is deliberately excluded — it is a manual maintenance
-    # mount, and scrubbing would pin the disk awake for hours.
-    # Cadence is monthly (NixOS default) rather than weekly because each scrub
-    # walks the entire used capacity (1.0 TB on root, ~0.7 TB on /realm,
-    # multi-TB on /outer-realm) and the read load is meaningful.
-    btrfs.autoScrub = {
-      enable = true;
-      fileSystems = [
-        "/"
-        "/realm"
-        "/outer-realm"
-      ];
-    };
   };
 
   fileSystems = {
@@ -287,44 +316,36 @@ in
       '';
     };
 
-    # One scrub a week rather than all three on the 1st at midnight, where they
-    # met the snapshot and the realm Borg run.
-    services."btrfs-scrub--".serviceConfig = scrubServiceConfig;
-    services."btrfs-scrub-realm".serviceConfig = scrubServiceConfig // {
-      ExecStartPre = "${pkgs.btrfs-progs}/bin/btrfs scrub limit --all --limit 300m /realm";
-    };
-    services."btrfs-scrub-outer\\x2drealm".serviceConfig = scrubServiceConfig;
-    timers."btrfs-scrub--".timerConfig.OnCalendar = lib.mkForce "*-*-01 02:30:00";
-    timers."btrfs-scrub-realm".timerConfig.OnCalendar = lib.mkForce "*-*-08 01:00:00";
-
-    # /realm holds the build targets, PostgreSQL and the live archives, and its
-    # scrub walks ~2.9 TiB. Unthrottled it ran for days alongside every build.
-    # It keeps running, but its read rate follows the clock: 300 MiB/s from
-    # 01:00, 10 MiB/s from 07:30. The per-device limit lives in sysfs, so each
-    # change is set by a oneshot and the scrub itself starts at the night rate
-    # (its ExecStartPre above).
-    services.btrfs-scrub-realm-night = {
-      description = "Raise the /realm scrub read limit for the night";
+    # Scrub runs only in a night window. On a single-device btrfs filesystem a
+    # scrub detects corruption (metadata is DUP, data is not), so its value is
+    # early warning to restore from backup, not repair. A full pass of /realm
+    # (2.9 TiB on QLC NVMe) takes about 38 h at the rate the device sustains
+    # under load; run around the clock at a throttled rate it competed with
+    # builds and PostgreSQL for days. Each filesystem's pass therefore runs
+    # 01:00-07:00 only; at 07:00 the unit is stopped, which cancels the scrub
+    # with its progress kept, and the next night resumes it until it finishes.
+    #   /            monthly    315 GiB   about one night
+    #   /realm       monthly    2.9 TiB   about six nights
+    #   /outer-realm quarterly  4.9 TiB   HDD (separate device), several nights
+    # A new pass starts when the last completed one is older than the cycle;
+    # completion dates live in /var/lib/sinnix-scrub.
+    services.sinnix-scrub-root = mkScrubService "root" scrubTargets.root;
+    services.sinnix-scrub-realm = mkScrubService "realm" scrubTargets.realm;
+    services.sinnix-scrub-outer-realm = mkScrubService "outer-realm" scrubTargets.outer-realm;
+    services.sinnix-scrub-window-end = {
+      description = "End the night scrub window";
       serviceConfig.Type = "oneshot";
-      script = "${pkgs.btrfs-progs}/bin/btrfs scrub limit --all --limit 300m /realm";
+      script = "systemctl stop ${
+        lib.concatMapStringsSep " " (n: "sinnix-scrub-${n}.service") (lib.attrNames scrubTargets)
+      }";
     };
-    services.btrfs-scrub-realm-day = {
-      description = "Lower the /realm scrub read limit for the day";
-      serviceConfig.Type = "oneshot";
-      script = "${pkgs.btrfs-progs}/bin/btrfs scrub limit --all --limit 10m /realm";
-    };
-    timers.btrfs-scrub-realm-night = {
+    timers.sinnix-scrub-root = scrubTimer;
+    timers.sinnix-scrub-realm = scrubTimer;
+    timers.sinnix-scrub-outer-realm = scrubTimer;
+    timers.sinnix-scrub-window-end = {
       wantedBy = [ "timers.target" ];
-      timerConfig.OnCalendar = "*-*-* 01:00:00";
+      timerConfig.OnCalendar = "*-*-* 07:00:00";
     };
-    timers.btrfs-scrub-realm-day = {
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnCalendar = "*-*-* 07:30:00";
-        Persistent = true;
-      };
-    };
-    timers."btrfs-scrub-outer\\x2drealm".timerConfig.OnCalendar = lib.mkForce "*-*-15 02:30:00";
 
     timers.sinnix-fstrim = fstrimJob.systemd.timers.sinnix-fstrim;
 
@@ -496,6 +517,7 @@ in
 
   };
 
+  sinnix.persistence.system.directories = [ "/var/lib/sinnix-scrub" ];
   sinnix.persistence.initrdScaffold.directories = lib.mkAfter [
     "/home/${username}/.local/share"
     polylogueShareMount
