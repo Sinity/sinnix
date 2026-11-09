@@ -1,9 +1,18 @@
-# Noninteractive agent commands must not share the coordinator's memory.high.
-# Re-enter the same shell with its original argv in a sibling scope before
-# executing any command. Interactive shells and queued job lanes stay put.
+# Noninteractive agent tool commands must not share the coordinator's
+# memory.high. Re-enter the same shell with its original argv in a sibling
+# scope before executing the command. Interactive shells and queued job lanes
+# stay put.
+#
+# Only tool commands move: Claude Code's Bash commands, which begin by sourcing
+# its shell snapshot, and Codex's, which run as login shells. Hooks and status
+# lines also arrive as `zsh -c` from the agent's scope, but they run on every
+# tool call and hold no meaningful memory; a scope each would add a D-Bus
+# round trip and a second shell start to every call.
+#
 # The tool scope is bound to the agent's own scope, so stopping the agent
 # stops the commands it started instead of leaving them running unowned.
 if [[ ! -o interactive && -r /proc/$$/cgroup &&
+      ( -o login || $ZSH_EXECUTION_STRING == 'source '*/shell-snapshots/snapshot-* ) &&
       "$(</proc/$$/cgroup)" == */agent-cli.slice/* &&
       -S ${XDG_RUNTIME_DIR:-/run/user/$UID}/systemd/private ]]; then
   () {

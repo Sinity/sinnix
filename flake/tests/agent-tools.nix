@@ -1465,8 +1465,8 @@ in
             ];
           }
           ''
-            hook="$TMPDIR/pretooluse-bash.sh"
-            cp ${../../dots/claude/hooks/pretooluse-bash.sh} "$hook"
+            hook="$TMPDIR/pretooluse-bash.py"
+            cp ${../../dots/claude/hooks/pretooluse-bash.py} "$hook"
             chmod +x "$hook"
             patchShebangs "$hook"
             ${pkgs.bash}/bin/bash ${../../flake/tests/bd-safety.sh} "$hook"
@@ -1608,9 +1608,9 @@ in
             hooks="$TMPDIR/hooks"
             settings="$TMPDIR/settings.json"
             mkdir -p "$hooks"
-            cp ${../../dots/claude/hooks}/*.sh "$hooks/"
+            cp ${../../dots/claude/hooks}/*.sh ${../../dots/claude/hooks}/*.py "$hooks/"
             cp ${../../dots/claude/managed-settings.json} "$settings"
-            chmod +x "$hooks"/*.sh
+            chmod +x "$hooks"/*.sh "$hooks"/*.py
             patchShebangs "$hooks"
             ${pkgs.bash}/bin/bash ${../../flake/tests/hooks-harness.sh} "$hooks" "$settings"
             touch "$out"
