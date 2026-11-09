@@ -26,66 +26,66 @@ run_hook() {
   printf '%s' "$payload" | HOME="$test_root/home" XDG_STATE_HOME="$test_root/state" "$hook"
 }
 
-bash_deny=$(run_hook "$hooks_dir/pretooluse-bash.sh" '{"tool_input":{"command":"git push --force origin master"}}')
+bash_deny=$(run_hook "$hooks_dir/pretooluse-bash.py" '{"tool_input":{"command":"git push --force origin master"}}')
 printf '%s' "$bash_deny" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
-test -z "$(run_hook "$hooks_dir/pretooluse-bash.sh" '{"tool_input":{"command":"printf \"safe\""}}')"
-test -z "$(run_hook "$hooks_dir/pretooluse-bash.sh" 'not-json' 2>/dev/null)"
+test -z "$(run_hook "$hooks_dir/pretooluse-bash.py" '{"tool_input":{"command":"printf \"safe\""}}')"
+test -z "$(run_hook "$hooks_dir/pretooluse-bash.py" 'not-json' 2>/dev/null)"
 
 # Inspect every update in a compound command, including after a safe update.
 for denied in 'bd update x --append-notes safe; bd update y --notes replace' 'bd update x --append-notes safe && bd update y --description replace'; do
   payload=$(jq -cn --arg command "$denied" '{tool_input: {command: $command}}')
-  run_hook "$hooks_dir/pretooluse-bash.sh" "$payload" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+  run_hook "$hooks_dir/pretooluse-bash.py" "$payload" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
 done
 payload=$(jq -cn --arg command 'bd update x --append-notes safe; bd update y --append-notes safe' '{tool_input: {command: $command}}')
-test -z "$(run_hook "$hooks_dir/pretooluse-bash.sh" "$payload")"
+test -z "$(run_hook "$hooks_dir/pretooluse-bash.py" "$payload")"
 
 # Leading shell whitespace must not bypass the lock guard. These commands
 # are input to the hook only; the harness never invokes fastboot.
 for denied in '  fastboot flashing lock' $'\tfastboot oem lock' '  sudo fastboot flashing lock_critical' 'true;  fastboot flashing lock'; do
   payload=$(jq -cn --arg command "$denied" '{tool_input: {command: $command}}')
-  run_hook "$hooks_dir/pretooluse-bash.sh" "$payload" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+  run_hook "$hooks_dir/pretooluse-bash.py" "$payload" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
 done
 for allowed in '  fastboot flashing unlock' 'echo fastboot flashing lock'; do
   payload=$(jq -cn --arg command "$allowed" '{tool_input: {command: $command}}')
-  test -z "$(run_hook "$hooks_dir/pretooluse-bash.sh" "$payload")"
+  test -z "$(run_hook "$hooks_dir/pretooluse-bash.py" "$payload")"
 done
 
 # Hook bypass and checkout-wide stashes are denied; named-path stashes, stash
 # inspection, and a heredoc message naming the flag stay allowed.
 for denied in 'git commit --no-verify -m x' 'git commit -n -m x' 'git commit -anm x' 'git -c core.hooksPath=/dev/null commit -m x' 'git -C /tmp/r push --no-verify origin b' 'cd /tmp && git stash' 'git stash -u' 'git stash push -m wip' 'git stash save wip'; do
   payload=$(jq -cn --arg command "$denied" '{tool_input: {command: $command}}')
-  run_hook "$hooks_dir/pretooluse-bash.sh" "$payload" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+  run_hook "$hooks_dir/pretooluse-bash.py" "$payload" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
 done
 for allowed in 'git commit -mn' 'git commit -m -n' 'git merge -n topic' 'git stash push -m wip -- a.txt' 'git stash list' 'git stash pop' 'git push origin b' $'git commit -F - <<\'EOF\'\nnever pass --no-verify\nEOF'; do
   payload=$(jq -cn --arg command "$allowed" '{tool_input: {command: $command}}')
-  test -z "$(run_hook "$hooks_dir/pretooluse-bash.sh" "$payload")"
+  test -z "$(run_hook "$hooks_dir/pretooluse-bash.py" "$payload")"
 done
 
 # A shell glob over /nix/store makes the shell stat ~219k entries before the
 # command runs; it has exhausted host memory twice. Deny the unquoted glob,
 # keep concrete store paths and lazily-expanded quoted patterns working.
 store_glob_payload=$(jq -n --arg c 'rg -n pattern /nix/store/*/share/doc/home-manager/*.html' '{tool_input:{command:$c}}')
-store_glob_deny=$(run_hook "$hooks_dir/pretooluse-bash.sh" "$store_glob_payload")
+store_glob_deny=$(run_hook "$hooks_dir/pretooluse-bash.py" "$store_glob_payload")
 printf '%s' "$store_glob_deny" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
 store_path_payload=$(jq -n --arg c 'cat /nix/store/abc123-foo/bin/x' '{tool_input:{command:$c}}')
-test -z "$(run_hook "$hooks_dir/pretooluse-bash.sh" "$store_path_payload")"
+test -z "$(run_hook "$hooks_dir/pretooluse-bash.py" "$store_path_payload")"
 store_find_payload=$(jq -n --arg c "find /nix/store -maxdepth 1 -name '*home-manager*'" '{tool_input:{command:$c}}')
-test -z "$(run_hook "$hooks_dir/pretooluse-bash.sh" "$store_find_payload")"
+test -z "$(run_hook "$hooks_dir/pretooluse-bash.py" "$store_find_payload")"
 # A commit message or doc describing the hazard must be able to quote the
 # pattern, so heredoc bodies are exempt -- but only until the heredoc closes.
 store_heredoc_body=$(printf 'git commit -F - <<%sEOF%s\nfix: a pattern like /nix/store/*/share/doc/pkg/*.html stats the whole store\nEOF\n' "'" "'")
 store_heredoc_payload=$(jq -n --arg c "$store_heredoc_body" '{tool_input:{command:$c}}')
-test -z "$(run_hook "$hooks_dir/pretooluse-bash.sh" "$store_heredoc_payload")"
+test -z "$(run_hook "$hooks_dir/pretooluse-bash.py" "$store_heredoc_payload")"
 store_after_heredoc=$(printf 'cat <<%sEOF%s\ntext\nEOF\nls /nix/store/*\n' "'" "'")
 store_after_payload=$(jq -n --arg c "$store_after_heredoc" '{tool_input:{command:$c}}')
-store_after_deny=$(run_hook "$hooks_dir/pretooluse-bash.sh" "$store_after_payload")
+store_after_deny=$(run_hook "$hooks_dir/pretooluse-bash.py" "$store_after_payload")
 printf '%s' "$store_after_deny" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
 for command in \
   'until agentctl job result 559 | grep -q done; do sleep 30; done' \
   "timeout 590 bash -c 'until [ \"\$(gh pr view 2900 --json state -q .state)\" != OPEN ]; do sleep 30; done'" \
   'for i in $(seq 1 60); do gh pr checks 1 && break; sleep 10; done'; do
   payload=$(jq -n --arg command "$command" '{tool_input: {command: $command}}')
-  run_hook "$hooks_dir/pretooluse-bash.sh" "$payload" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+  run_hook "$hooks_dir/pretooluse-bash.py" "$payload" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
 done
 for payload in \
   "$(jq -n '{tool_input: {command: "until test -s out; do sleep 5; done", run_in_background: true}}')" \
@@ -93,7 +93,7 @@ for payload in \
   "$(jq -n '{tool_input: {command: "while read -r line; do echo \"$line\"; done < list"}}')" \
   "$(jq -n '{tool_input: {command: "for j in 1 2; do agentctl job cancel $j; done; sleep 5; free -g"}}')" \
   "$(jq -n '{tool_input: {command: "git commit -F - <<EOF\nuntil x; do sleep 30; done\nEOF"}}')"; do
-  test -z "$(run_hook "$hooks_dir/pretooluse-bash.sh" "$payload")"
+  test -z "$(run_hook "$hooks_dir/pretooluse-bash.py" "$payload")"
 done
 
 # Without Polylogue, Sinnix or Sinex on PATH the session-start block is empty.

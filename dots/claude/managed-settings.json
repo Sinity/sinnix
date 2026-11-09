@@ -51,7 +51,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/realm/project/sinnix/repo/dots/claude/hooks/pretooluse-bash.sh",
+            "command": "/realm/project/sinnix/repo/dots/claude/hooks/pretooluse-bash.py",
             "timeout": 3
           }
         ]

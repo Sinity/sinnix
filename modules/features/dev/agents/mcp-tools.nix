@@ -58,9 +58,10 @@ let
       LYNCHPIN_LOCAL_ROOT = "${config.environment.variables.LYNCHPIN_REPO_ROOT}/.lynchpin";
     };
   };
-  mcpPolylogueBin = pkgs.writeShellScriptBin "mcp-polylogue" ''
-    set -euo pipefail
-    exec ${config.system.build.polylogueCli}/bin/polylogue mcp "$@"
+  mcpPolylogueBin = pkgs.runCommand "mcp-polylogue" { nativeBuildInputs = [ pkgs.makeBinaryWrapper ]; } ''
+    mkdir -p $out/bin
+    makeBinaryWrapper ${config.system.build.polylogueCli}/bin/polylogue $out/bin/mcp-polylogue \
+      --add-flags mcp
   '';
   # The user-facing files stay tiny out-of-store launchers, while the gateway
   # consumes the identical store-backed commands directly.

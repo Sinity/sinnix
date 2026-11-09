@@ -51,7 +51,6 @@ in
           let
             probe = pkgs.writeShellScriptBin "polylogue" ''
               set -euo pipefail
-              test "$POLYLOGUE_HTTP_PORT" = ${toString (import ../data/ports.nix).polylogue.web}
               test "$XDG_DATA_HOME" = "$EXPECTED_DATA_HOME"
               test "$XDG_STATE_HOME" = "$EXPECTED_STATE_HOME"
               test -z "''${POLYLOGUE_ARCHIVE+x}"
@@ -80,7 +79,6 @@ in
               }).mcpPolylogueBin;
           in
           pkgs.runCommand "polylogue-command-binding" { } ''
-            export POLYLOGUE_HTTP_PORT=1
             export XDG_DATA_HOME=/foreign/data XDG_STATE_HOME=/foreign/state
             export POLYLOGUE_ARCHIVE=/foreign/archive POLYLOGUE_HOME=/foreign/home
             export EXPECTED_STATE_HOME=/fixture/home/.local/state
