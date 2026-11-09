@@ -27,13 +27,14 @@ Both execute the native systemd service, so inspect its journal for archive
 selection and statistics. A deferred run does not mean pruning completed.
 
 `borgbackup-capacity` runs every six hours at :45, recording allocated repository
-sizes and filesystem free bytes in `/persist/root/.cache/borg-drain/capacity.json`.
-It alerts when the destination is projected full within 30 days, the time to buy and seed another disk; free bytes alone are recorded, not judged. Its
-advisory projection uses net free-space consumption over up to eight days,
-requires at least 24 hours of observations, and resets comparisons when the
-filesystem UUID changes or an observation gains at least 100 GiB of headroom.
-That large-reclamation reset prevents cleanup from hiding later growth; normal
-weekly compaction remains part of the net trend. Workload changes affect this estimate.
+sizes, filesystem free bytes and the time of the last compaction in
+`/persist/root/.cache/borg-drain/capacity.json`. Free space falls every night
+and the weekly compaction returns what pruning freed, so nightly figures say
+nothing about growth. The forecast compares free space measured right after
+each compaction, over at least six days. It alerts when that trend projects
+the destination full within 30 days, the time to buy and seed another disk, or
+when less space is free than one compaction cycle has consumed. A new
+destination starts a new history.
 `agentctl job start sinnix backup_capacity` measures immediately. A low-headroom
 exit still records the measurement; the unit's failure notification carries it.
 
@@ -219,8 +220,8 @@ namespaces. Tmpfiles also migrates existing namespace directories before probes
 run; it does not recursively change receipt files. Borg repositories, key
 material and chunk caches remain root-private.
 
-Realm and Persist freshness alerts allow 36 hours from the accepted source
-cut: the approved 24-hour archival cadence plus 12 hours of grace. The former
+Realm and Persist freshness alerts allow 30 hours from the accepted source
+cut: the approved 24-hour archival cadence plus 6 hours of grace. The former
 eight-hour check described a six-hour archive schedule that no longer exists.
 The broader coordinator timeout does not extend this alert budget or establish
 an eight-hour recovery-point objective.

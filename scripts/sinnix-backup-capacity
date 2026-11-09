@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 # @sinnix-package
-# description: Record backup repository sizes and alert on headroom and recent net growth
+# description: Record backup repository sizes and forecast when the destination fills
 # runtimeInputs: coreutils util-linux
-"""Track the existing destination. Positive net consumption predicts days remaining."""
+"""Record the destination's free space and forecast when it fills.
+
+Free space falls every night and weekly compaction returns what pruning freed,
+so the forecast compares free space measured right after each compaction:
+that series moves only with real growth. Each measurement records the epoch
+of the last compaction, read from the maintenance job's marker.
+"""
 
 import argparse
 import datetime as dt
@@ -12,58 +18,62 @@ import os
 import subprocess
 from pathlib import Path
 
-GIB = 1024**3
+
+def after_compaction(rows):
+    # The first measurement after each compaction.
+    points = []
+    for row in rows:
+        compacted = row.get("compacted_epoch")
+        if compacted is None or compacted > row["epoch"]:
+            continue
+        if points and points[-1]["compacted_epoch"] == compacted:
+            continue
+        points.append(row)
+    return points
 
 
 def trend(history, current):
-    # A large one-off cleanup must not hide subsequent growth for eight days.
-    # Routine daily compaction remains part of the net trend.
-    series = []
-    recovered = False
-    for row in sorted([*history, current], key=lambda item: item["epoch"]):
-        if row["filesystem_uuid"] != current["filesystem_uuid"]:
-            continue
-        if not 0 <= current["epoch"] - row["epoch"] <= 8 * 86400:
-            continue
-        if (
-            series
-            and row["available_bytes"] - series[-1]["available_bytes"] >= 100 * GIB
-        ):
-            series = []
-            recovered = True
-        series.append(row)
-    comparable = [
-        row
-        for row in series
-        if row["filesystem_uuid"] == current["filesystem_uuid"]
-        and 86400 <= current["epoch"] - row["epoch"] <= 8 * 86400
-    ]
-    if not comparable:
-        return {
+    rows = sorted(
+        (
+            row
+            for row in [*history, current]
+            if row["filesystem_uuid"] == current["filesystem_uuid"]
+        ),
+        key=lambda row: row["epoch"],
+    )
+    points = after_compaction(rows)
+    # The largest fall in free space within one compaction cycle: the room
+    # the destination needs before the next compaction returns it.
+    cycle_drop = 0
+    for start, following in zip(points, [*points[1:], None], strict=True):
+        cycle = [
+            row
+            for row in rows
+            if row["epoch"] >= start["epoch"]
+            and (following is None or row["epoch"] < following["epoch"])
+        ]
+        cycle_drop = max(
+            cycle_drop,
+            start["available_bytes"] - min(row["available_bytes"] for row in cycle),
+        )
+    record = {"compaction_points": len(points), "cycle_drop_bytes": cycle_drop}
+    if len(points) < 2 or points[-1]["epoch"] - points[0]["epoch"] < 6 * 86400:
+        return record | {
             "status": "insufficient_history",
-            "after_large_reclamation": recovered,
             "net_bytes_per_day": None,
             "days_remaining": None,
         }
-    oldest = min(comparable, key=lambda row: row["epoch"])
+    first, last = points[0], points[-1]
     rate = (
-        (oldest["available_bytes"] - current["available_bytes"])
+        (first["available_bytes"] - last["available_bytes"])
         * 86400
-        / (current["epoch"] - oldest["epoch"])
+        / (last["epoch"] - first["epoch"])
     )
-    repository_rates = {
-        name: (size - oldest.get("repository_allocated_bytes", {}).get(name, size))
-        * 86400
-        / (current["epoch"] - oldest["epoch"])
-        for name, size in current.get("repository_allocated_bytes", {}).items()
-        if name in oldest.get("repository_allocated_bytes", {})
-    }
-    return {
+    return record | {
         "status": "observed",
-        "repository_net_bytes_per_day": repository_rates,
-        "span_days": (current["epoch"] - oldest["epoch"]) / 86400,
+        "span_days": (last["epoch"] - first["epoch"]) / 86400,
         "net_bytes_per_day": rate,
-        "days_remaining": current["available_bytes"] / rate if rate > 0 else None,
+        "days_remaining": last["available_bytes"] / rate if rate > 0 else None,
     }
 
 
@@ -72,8 +82,11 @@ def trend(history, current):
 ALERT_DAYS = 30
 
 
-def alert(trend_record):
+def alert(trend_record, available_bytes):
     days = trend_record["days_remaining"]
+    # The destination would fill inside one cycle, before compaction runs.
+    if available_bytes < trend_record["cycle_drop_bytes"]:
+        return True
     return days is not None and days < ALERT_DAYS
 
 
@@ -81,6 +94,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--state", required=True, type=Path)
+    parser.add_argument("--compact-marker", required=True, type=Path)
     args = parser.parse_args()
     if not os.path.ismount(args.root):
         raise SystemExit(f"backup destination is not mounted: {args.root}")
@@ -94,7 +108,6 @@ def main():
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     now = dt.datetime.now(dt.timezone.utc)
     history = json.loads(args.state.read_text()) if args.state.exists() else []
-    history = [row for row in history if row["epoch"] >= now.timestamp() - 8 * 86400]
     sizes = {}
     for repo in sorted((args.root / "backup").iterdir()):
         if repo.is_dir():
@@ -120,9 +133,14 @@ def main():
         "filesystem_uuid": uuid,
         "available_bytes": fs.f_bavail * fs.f_frsize,
         "repository_allocated_bytes": sizes,
+        "compacted_epoch": (
+            int(args.compact_marker.read_text())
+            if args.compact_marker.exists()
+            else None
+        ),
     }
     current["trend"] = trend(history, current)
-    current["alert"] = alert(current["trend"])
+    current["alert"] = alert(current["trend"], current["available_bytes"])
     args.state.parent.mkdir(parents=True, exist_ok=True)
     temporary = args.state.with_suffix(".tmp")
     temporary.write_text(json.dumps([*history, current], indent=2) + "\n")

@@ -775,7 +775,7 @@ assert lib.assertMsg (
             in
             backupRuntimeEval.config.systemd.services.borgbackup-job-sinex-blobs.serviceConfig.TimeoutStartSec
             == "6h"
-            && lib.all (lib.hasInfix " 129600") probes
+            && lib.all (lib.hasInfix " 108000") probes
             && lib.hasInfix "acquisition-freshness" genomeProbe
             && lib.hasInfix "--source /neo-outer-realm/content/genome" genomeProbe
             && lib.hasInfix "--max-observation-age 64800" genomeProbe

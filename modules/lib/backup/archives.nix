@@ -354,7 +354,7 @@ in
     }
   ))
   (mkBackupJob "borgbackup-capacity" {
-    description = "Record backup capacity and alert on shrinking headroom";
+    description = "Record backup capacity and forecast when the destination fills";
     unit = {
       after = [ outerRealmMountUnit ];
       requires = [ outerRealmMountUnit ];
@@ -364,6 +364,6 @@ in
       onCalendar = "*-*-* 0/6:45:00";
       persistent = true;
     };
-    execStart = "${scriptPkgs.sinnix-backup-capacity}/bin/sinnix-backup-capacity --root ${lib.escapeShellArg (builtins.dirOf (builtins.dirOf borgRepoRealmPath))} --state ${lib.escapeShellArg "${borgDrainStateRoot}/capacity.json"}";
+    execStart = "${scriptPkgs.sinnix-backup-capacity}/bin/sinnix-backup-capacity --root ${lib.escapeShellArg (builtins.dirOf (builtins.dirOf borgRepoRealmPath))} --state ${lib.escapeShellArg "${borgDrainStateRoot}/capacity.json"} --compact-marker ${lib.escapeShellArg "${borgDrainStateRoot}/compact.last-success"}";
   })
 ]
