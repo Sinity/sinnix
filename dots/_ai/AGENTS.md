@@ -172,8 +172,9 @@ running agents in parallel.
   review; add a reviewer agent only for a named risk it cannot cover. Answer
   findings with a fix or a concrete refutation. Follow the repository's actual
   required statuses and review-resolution rules. Where the forge enforces these,
-  merge with
-  `gh pr merge --auto --squash --match-head-commit <sha>` and let it gate.
+  wait for the required check and merge the tested head:
+  `gh pr checks <n> --required --watch && gh pr merge <n> --squash
+  --match-head-commit <sha>`; branch protection still gates the merge.
   File substantial out-of-scope or post-merge findings as follow-up work.
 - A partial delivery leaves its unmet acceptance criteria open.
 

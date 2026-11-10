@@ -25,8 +25,8 @@ self-contained: read what it points to rather than assuming shared history.
   that passes on the default branch.
 - Commit in logical units and publish through the repository's normal route.
   For a PR, answer review findings with fixes or concrete refutations and
-  follow the repository's required checks and review rules. Arm auto-merge on
-  that head when the prompt says to.
+  follow the repository's required checks and review rules. When the prompt
+  says to merge, wait for the required check and merge that exact head.
 - Leave one current-state note per task: merged (commit), already on the
   default branch (commit), pull request open (head), or blocked by a named
   decision. Close a task when its change is on the default branch with its

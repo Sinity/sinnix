@@ -78,13 +78,11 @@ next, not on supervising progress.
   The wait and the merge are one chained command, never a hand-written
   script: `agentctl job wait <task> --job-id <id> && gh pr merge <n>
   --squash --match-head-commit <sha>`; where the forge runs the check, `gh pr
-  merge --auto --squash --match-head-commit <sha>` lets the required check
-  gate the merge.
-- A review hold is enforced on the PR, not remembered: whoever places it runs
-  `gh pr merge <n> --disable-auto` in the same step and records the hold and
-  its open findings in the PR description. Auto-merge is re-armed only on the
-  head that addresses them. An armed auto-merge otherwise lands the change the
-  moment its check turns green.
+  checks <n> --required --watch && gh pr merge <n> --squash
+  --match-head-commit <sha>`. GitHub auto-merge is not used: armed on clean,
+  green heads it sometimes never fires.
+- A review hold is recorded in the PR description with its open findings; the
+  owner merges only the head that addresses them.
 - Before merging, rebase the branch onto the current default branch and let
   the forge squash it. Never build a squash commit locally on a different base
   than the branch was written on: it silently reverts whatever landed between
