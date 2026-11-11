@@ -182,8 +182,35 @@
   services.sinex =
     let
       realm = config.sinnix.paths.realmRoot;
+      # Clipboard capture includes both clipboard and primary selections.
+      sessionSources = [
+        "desktop.hyprland"
+        "machine.file-watch"
+        "desktop.clipboard"
+        "desktop.notifications"
+        "media.mpris"
+      ];
+      sourceCatalog = lib.listToAttrs (
+        map (source: {
+          name = source.name;
+          value = source;
+        }) (lib.importJSON "${inputs.sinex}/nix/catalog.json").sources
+      );
+      sessionDeclarations = map (name: sourceCatalog.${name}) sessionSources;
     in
     {
+      nats.producers.${config.services.sinex.session.producer} = {
+        writeFamily = "sinex";
+        attestedHost = config.services.sinex.host;
+        writeSourcePrefixes = sessionSources;
+        writeKindPrefixes = lib.unique (lib.concatMap (source: source.eventTypes) sessionDeclarations);
+        writeClasses = lib.unique (map (source: source.class) sessionDeclarations);
+      };
+      exclude = {
+        "session.integrations".reason =
+          "External integration capture is outside the selected session sources.";
+        "session.media".reason = "Screen and microphone capture are outside the selected session sources.";
+      };
       session = {
         watch = [
           "${realm}/personal"
