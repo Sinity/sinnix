@@ -65,6 +65,10 @@ dots/         managed user configuration; dots/_ai/ holds the global agent
   `# @sinnix-package: skip`. Python imports go in `pythonPackages`, not
   `runtimeInputs`.
 - Keep flake inputs pinned and overrides explicit.
+- Product pins (`sinex`, `polylogue-rewrite`) move with `update <input>`. It
+  fetches the revision's package, which the product's CI publishes to
+  sinity.cachix.org, with `--max-jobs 0` before writing `flake.lock`, and
+  refuses a revision CI has not built, so a switch never compiles a product.
 
 ## Resources and scheduling
 

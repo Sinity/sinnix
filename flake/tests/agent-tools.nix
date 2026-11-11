@@ -1172,31 +1172,6 @@ in
 
             touch "$out"
           '';
-      agentctlOperationFixture =
-        pkgs.runCommand "agentctl-operation-contract-fixture"
-          {
-            nativeBuildInputs = [ pkgs.python3 ];
-          }
-          ''
-            ${pkgs.python3}/bin/python - <<'PY'
-            import tomllib
-            from pathlib import Path
-
-            descriptor = Path("${inputs.self}/.agentctl/project.toml")
-            operation = tomllib.loads(descriptor.read_text())["operations"]["sinex_cache_prebuild"]
-            assert operation["exec"] == [
-                "sinnix-sinex-cache-prebuild",
-                "--flake-dir",
-                "/realm/project/sinnix/repo",
-                "--system",
-                "x86_64-linux",
-            ]
-            assert operation["pool"] == "bulk"
-            assert operation["result"] == "exit"
-            assert operation["timeout_seconds"] == 7200
-            PY
-            touch "$out"
-          '';
       # The launch route on this repository's own descriptor: the queued
       # command is the descriptor's exec inside its environment, in its pool,
       # under its label, with its timeout.
@@ -1221,8 +1196,8 @@ in
 
             root = Path("${inputs.self}")
             project = ProjectCatalog([root]).get("sinnix")
-            operation = project.operation("sinex_cache_prebuild")
-            assert operation.timeout_seconds == 7200
+            operation = project.operation("backup_snapshot")
+            assert operation.timeout_seconds == 1800
 
             added = []
 
@@ -1243,11 +1218,11 @@ in
                 written = json.loads(Path(added[0]["command"][1]).read_text())
             assert started["task_id"] == 7
             assert added[0]["group"] == "bulk"
-            assert added[0]["label"] == "sinnix:sinex_cache_prebuild"
+            assert added[0]["label"] == "sinnix:backup_snapshot"
             assert added[0]["priority"] == 0
             assert added[0]["command"][0] == "agentctl-run"
             assert tuple(written["argv"]) == project.environment.command_for(operation.command)
-            assert written["timeout_seconds"] == 7200
+            assert written["timeout_seconds"] == 1800
             assert written["result_kind"] == "exit"
             PY
             touch "$out"
@@ -1300,83 +1275,6 @@ in
         PY
         touch "$out"
       '';
-      cachePushForegroundFixture =
-        pkgs.runCommand "sinex-cache-push-foreground-fixture"
-          {
-            nativeBuildInputs = [
-              pkgs.bash
-              pkgs.coreutils
-              pkgs.gnugrep
-            ];
-          }
-          ''
-            fixture_bin="$TMPDIR/bin"
-            mkdir -p "$fixture_bin"
-            printf '#!%s\nprintf "%%s\\n" /nix/store/fixture-sinex-1\n' \
-              ${pkgs.bash}/bin/bash > "$fixture_bin/nix"
-            printf '#!%s\nprintf "%%s\\n" "$@" > "$CACHE_PUSH_ARGS"\nexit "''${CACHIX_EXIT:-0}"\n' \
-              ${pkgs.bash}/bin/bash > "$fixture_bin/cachix"
-            printf '#!%s\nexit 99\n' ${pkgs.bash}/bin/bash > "$fixture_bin/systemd-run"
-            chmod +x "$fixture_bin/nix" "$fixture_bin/cachix" "$fixture_bin/systemd-run"
-            export PATH="$fixture_bin:$PATH"
-            export CACHE_PUSH_ARGS="$TMPDIR/cachix-args"
-            ${pkgs.bash}/bin/bash ${../../scripts/sinnix-sinex-cache-push} --foreground /nix/store/fixture
-            test "$(tr '\n' ' ' < "$CACHE_PUSH_ARGS")" = "push sinity /nix/store/fixture-sinex-1 "
-            if CACHIX_EXIT=17 ${pkgs.bash}/bin/bash ${../../scripts/sinnix-sinex-cache-push} --foreground /nix/store/fixture; then
-              echo "foreground cache-push failure was swallowed" >&2
-              exit 1
-            else
-              test "$?" -eq 17
-            fi
-            touch "$out"
-          '';
-      cachePrebuildLifecycleFixture =
-        pkgs.runCommand "sinex-cache-prebuild-lifecycle-fixture"
-          {
-            nativeBuildInputs = [
-              pkgs.bash
-              pkgs.coreutils
-              pkgs.gnugrep
-              pkgs.jq
-            ];
-          }
-          ''
-            fixture_bin="$TMPDIR/bin"
-            flake_dir="$TMPDIR/flake"
-            state_dir="$TMPDIR/state"
-            mkdir -p "$fixture_bin" "$flake_dir"
-            printf '%s\n' '{"nodes":{"sinex":{"locked":{"rev":"fixture-rev","url":"https://example.test/sinex"}}}}' \
-              > "$flake_dir/flake.lock"
-            printf '#!%s\nprintf "%%s\\n" /nix/store/fixture-sinex-1\nexit "''${BUILD_EXIT:-0}"\n' \
-              ${pkgs.bash}/bin/bash > "$fixture_bin/nix"
-            printf '#!%s\nprintf "%%s\\n" "$@" > "$PREBUILD_PUSH_ARGS"\nexit "''${PUSH_EXIT:-0}"\n' \
-              ${pkgs.bash}/bin/bash > "$fixture_bin/sinnix-sinex-cache-push"
-            chmod +x "$fixture_bin/nix" "$fixture_bin/sinnix-sinex-cache-push"
-            export PATH="$fixture_bin:$PATH"
-            export PREBUILD_PUSH_ARGS="$TMPDIR/prebuild-push-args"
-            ${pkgs.bash}/bin/bash ${../../scripts/sinnix-sinex-cache-prebuild} --flake-dir "$flake_dir" --state-dir "$state_dir"
-            test "$(tr '\n' ' ' < "$PREBUILD_PUSH_ARGS")" = "--foreground /nix/store/fixture-sinex-1 "
-            test "$(cat "$state_dir/last-built-rev")" = "fixture-rev"
-            rm "$state_dir/last-built-rev"
-            if PUSH_EXIT=19 ${pkgs.bash}/bin/bash ${../../scripts/sinnix-sinex-cache-prebuild} --flake-dir "$flake_dir" --state-dir "$state_dir"; then
-              echo "prebuild reported success after a failed cache upload" >&2
-              exit 1
-            else
-              test "$?" -eq 19
-            fi
-            test ! -e "$state_dir/last-built-rev"
-            printf '%s' previous-rev > "$state_dir/last-built-rev"
-            rm "$PREBUILD_PUSH_ARGS"
-            if BUILD_EXIT=42 ${pkgs.bash}/bin/bash ${../../scripts/sinnix-sinex-cache-prebuild} --flake-dir "$flake_dir" --state-dir "$state_dir"; then
-              echo "prebuild published partial output from a failed build" >&2
-              exit 1
-            else
-              test "$?" -eq 42
-            fi
-            test ! -e "$PREBUILD_PUSH_ARGS"
-            test "$(cat "$state_dir/last-built-rev")" = previous-rev
-            touch "$out"
-          '';
       preflightFixture =
         pkgs.runCommand "preflight-fixture"
           {
@@ -1624,11 +1522,8 @@ in
         agent-npm-bootstrap-recovery = agentNpmBootstrapRecovery;
         agent-scope-guard = agentScopeGuardFixture;
         direnv-direct-commands = direnvDirectCommandsFixture;
-        agentctl-operation-contract = agentctlOperationFixture;
         agentctl-operation-launch = agentctlOperationLaunchFixture;
         agentctl-runtime-tools = agentctlRuntimeFixture;
-        sinex-cache-push-foreground = cachePushForegroundFixture;
-        sinex-cache-prebuild-lifecycle = cachePrebuildLifecycleFixture;
         preflight = preflightFixture;
         kitty-agent-here = kittyAgentHereFixture;
         kitty-launch-keep-focus = kittyLaunchKeepFocusFixture;

@@ -216,17 +216,6 @@ let
       trap - EXIT INT TERM
     fi
   '';
-  # Nothing else populates sinity.cachix.org: the desktop compiles the sinex
-  # workspace locally on every input bump, so publish the freshly activated
-  # closure after a successful switch and let ethereal/reinstalls/post-GC
-  # rebuilds substitute instead of repeating the build. The push command
-  # (scripts/sinnix-sinex-cache-push) is shared with the async
-  # sinex-cache-prebuild timer.
-  sinexCachePush = ''
-    if [ "$_rebuild_status" -eq 0 ]; then
-      ${scriptPkgs.sinnix-sinex-cache-push}/bin/sinnix-sinex-cache-push /run/current-system || true
-    fi
-  '';
   activationGuard = name: ''
     if [ "''${AGENTCTL_PRINCIPAL:-}" = agent-control ]; then
       echo "sinnix ${name}: refused in a managed lane; declare a pueue operation and run it with agentctl" >&2
@@ -401,7 +390,6 @@ let
             "''${rebuild_args[@]}" \
             "''${nh_extra_args[@]}" &
         ${rebuildWait}
-        ${sinexCachePush}
         exit "$_rebuild_status"
       '';
     };
@@ -628,7 +616,6 @@ in
     rebuildServicePath
     localInputOverrideArgs
     avoidRepoCwdForActivation
-    sinexCachePush
     activationCommands
     activationPackages
     ;

@@ -67,7 +67,9 @@
 
     # The live application, CLI and MCP server. It keeps its
     # own nixpkgs: its shared crates need a newer rustc than Sinnix's.
-    # flake.lock alone holds the deployed revision; moving it is a deploy.
+    # flake.lock alone holds the deployed revision; moving it is a deploy,
+    # done with `update polylogue-rewrite`, which first fetches the package
+    # Polylogue's CI published to sinity.cachix.org.
     polylogue-rewrite.url = "github:Sinity/polylogue";
 
     # Private repo — fetch via HTTPS through the local gh/git credential helper.
@@ -98,11 +100,9 @@
     #
     # nixpkgs is deliberately NOT `follows`: Sinex builds against its own
     # locked nixpkgs and Rust toolchain, so a Sinnix nixpkgs bump does not
-    # rebuild it, and a Sinex revision is compiled at most once and substituted
-    # from sinity.cachix.org thereafter. The desktop populates that cache:
-    # `switch` publishes the Sinex closure after a successful activation
-    # (sinexCachePush in flake/command-registry.nix), and the
-    # sinex-cache-prebuild timer builds a newly pinned revision ahead of it.
+    # rebuild it. Sinex's CI builds and publishes its package to
+    # sinity.cachix.org, and `update sinex` moves the pin only after fetching
+    # that package, so a switch downloads Sinex instead of compiling it.
     sinex.url = "git+https://github.com/Sinity/sinex?ref=fix/deployed-read-boundary-20261108";
 
     # BTRFS rollback impermanence (see modules/persistence.nix)

@@ -41,7 +41,36 @@
           update = pkgs.writeShellScriptBin "update" ''
             set -euo pipefail
             if [ "$#" -gt 0 ]; then
-              exec ${nix} flake update "$@"
+              # A product input (sinex, polylogue-rewrite) moves only to a
+              # revision whose package its CI already published to
+              # sinity.cachix.org: the new lock is written aside, each moved
+              # product's package is fetched with --max-jobs 0, and only then
+              # does the lock replace flake.lock. A switch therefore never
+              # compiles a product. The flake reference names the same source
+              # Sinnix evaluates; products keep their own nixpkgs, so it is the
+              # same derivation.
+              _lock_dir=$(mktemp -d)
+              trap 'rm -rf "$_lock_dir"' EXIT
+              ${nix} flake update "$@" --output-lock-file "$_lock_dir/flake.lock"
+              for _product in sinex polylogue-rewrite; do
+                _old=$(${pkgs.jq}/bin/jq -r --arg n "$_product" '.nodes[$n].locked.rev // empty' flake.lock)
+                _new=$(${pkgs.jq}/bin/jq -r --arg n "$_product" '.nodes[$n].locked.rev // empty' "$_lock_dir/flake.lock")
+                if [ -z "$_new" ] || [ "$_old" = "$_new" ]; then
+                  continue
+                fi
+                _repo=$(${pkgs.jq}/bin/jq -er --arg n "$_product" '.nodes[$n].locked
+                  | if .type == "github" then "\(.owner)/\(.repo)"
+                    else .url | capture("^https://github.com/(?<r>[^/]+/[^/.]+)").r end' "$_lock_dir/flake.lock")
+                echo "update: fetching $_product $_new from sinity.cachix.org" >&2
+                if ! ${nix} build --max-jobs 0 --no-link "github:$_repo/$_new#default"; then
+                  echo "update: $_repo $_new is not in sinity.cachix.org; flake.lock is unchanged." >&2
+                  echo "update: its package workflow publishes master commits; for another branch run" >&2
+                  echo "update:   gh workflow run package -R $_repo --ref <branch>" >&2
+                  exit 1
+                fi
+              done
+              cp "$_lock_dir/flake.lock" flake.lock
+              exit 0
             fi
             # Routine (no-arg) updates bump every input EXCEPT nixpkgs-ai and the
             # deployed products. nixpkgs-ai feeds CUDA-narrowed AI packages
@@ -188,7 +217,6 @@
           scriptPkgs.lsp-root
           # Declared AgentCTL operation body. It is intentionally available
           # by name in the project environment, never as a command shim.
-          scriptPkgs.sinnix-sinex-cache-prebuild
           scriptPkgs.sinnix-sinex-backfill
           scriptPkgs.sinnix-rank
           scriptPkgs.sinnix-fs

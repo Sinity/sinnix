@@ -161,10 +161,10 @@ def test_work_page_renders_queue_jobs_and_interrupts_live_jobs() -> None:
                     },
                     {
                         "task_id": 8,
-                        "label": "sinex:cache_prebuild",
+                        "label": "sinex:backfill",
                         "kind": "declared-operation",
                         "project": "sinex",
-                        "operation": "cache_prebuild",
+                        "operation": "backfill",
                         "group": "bulk",
                         "phase": "failed",
                         "terminal": True,
@@ -191,7 +191,7 @@ def test_work_page_renders_queue_jobs_and_interrupts_live_jobs() -> None:
     assert "1 running of 4" in html
     # Jobs are pueue tasks by label; only a live one can be interrupted.
     assert "sinnix:lane:sinnix-1" in html
-    assert "sinex:cache_prebuild" in html and "exit 2" in unescape(html)
+    assert "sinex:backfill" in html and "exit 2" in unescape(html)
     assert "act('interrupt','task_id',\"7\"" in unescape(html)
     assert "act('interrupt','task_id',\"8\"" not in unescape(html)
     assert "1" in html and "jobs queued or running" in html

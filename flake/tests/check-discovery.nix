@@ -75,9 +75,6 @@
         };
         sinnixScriptRegistry.packageSet = {
           sinnix-preflight = pkgs.writeShellScriptBin "sinnix-preflight" "exit 0";
-          sinnix-sinex-cache-push = pkgs.writeShellScriptBin "sinnix-sinex-cache-push" ''
-            echo cache-push >> "$ACTIVATION_LOG"
-          '';
         };
       };
       fakeSudo = pkgs.writeShellScriptBin "sudo" ''
@@ -232,7 +229,7 @@
                 grep -Eq -- '--owner-pid [0-9]+ --owner-start-ticks [0-9]+' "$ACTIVATION_LOG"
                 grep -Fq -- '-p IOSchedulingClass=best-effort' "$ACTIVATION_LOG"
                 grep -Fq -- '-p IOSchedulingPriority=6' "$ACTIVATION_LOG"
-                if grep -q 'unexpected-nix\|cache-push' "$ACTIVATION_LOG"; then
+                if grep -q 'unexpected-nix' "$ACTIVATION_LOG"; then
                   echo "$name failure attempted another execution route" >&2
                   exit 1
                 fi
@@ -328,8 +325,8 @@
 
             : > "$ACTIVATION_LOG"
             ACTIVATION_STATUS=0 "${activationExecutables.switch}"
-            test "$(wc -l < "$ACTIVATION_LOG")" = 2
-            grep -Fq 'cache-push' "$ACTIVATION_LOG"
+            test "$(wc -l < "$ACTIVATION_LOG")" = 1
+            grep -Fq 'nh os switch' "$ACTIVATION_LOG"
 
             : > "$ACTIVATION_LOG"
             ACTIVATION_STATUS=0 "${activationExecutables.test-vm}"
