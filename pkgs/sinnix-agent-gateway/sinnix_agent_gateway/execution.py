@@ -1,7 +1,7 @@
-"""The gateway's job owner: agentctl's native launch and history routes, called in process.
+"""The gateway's job owner: agentctl's native launch and job routes, called in process.
 
-A job is a pueue task and a batch is a run manifest. Direct adapter calls
-return owner mappings and raise typed owner errors.
+A job is a pueue task. Direct adapter calls return owner mappings and raise
+typed owner errors.
 """
 
 from __future__ import annotations
@@ -11,12 +11,11 @@ import json
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from agentctl import batch_history, job_queries, launch, operator_view
+from agentctl import job_queries, launch
 from agentctl.config import Config, ConfigError, load_config, resolve_project
 from agentctl.limits import MAX_AGENT_TIMEOUT_SECONDS
 from agentctl.projects import ProjectConfigError
 from agentctl.pueue import PueueError
-from agentctl.task_reads import TaskReadError
 from agentctl.worktrunk import WorktrunkError
 
 from . import shell_pools
@@ -172,87 +171,8 @@ def job_payload(job: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-# A refusal the caller fixes by sending different arguments; every other
-# refusal is a state agentctl observed, not a malformed request. The code
-# itself travels in the error details, where the batch actions map it to a
-# typed failure and the action that follows.
-ARGUMENT_REFUSALS = frozenset(
-    {"ambiguous_run", "harness", "project", "unknown_run", "worker_missing"}
-)
-
-
-def worker_payload(worker: Mapping[str, Any]) -> dict[str, Any]:
-    """One worker of a run: its beads, its worktree and its current task."""
-    task = worker.get("task") if isinstance(worker.get("task"), Mapping) else {}
-    task_id = worker.get("task_id")
-    return {
-        "worker_id": worker.get("id"),
-        "beads": [str(bead) for bead in worker.get("beads") or []],
-        "branch": worker.get("branch"),
-        "worktree": worker.get("worktree"),
-        "stage": worker.get("stage"),
-        "task_id": str(task_id) if isinstance(task_id, int) else None,
-        "job_id": worker.get("job_id"),
-        "task_ids": [str(item) for item in worker.get("task_ids") or []],
-        "backend": worker.get("backend"),
-        "model": worker.get("model"),
-        "effort": worker.get("effort"),
-        "provenance": worker.get("provenance"),
-        "attempts": worker.get("attempts"),
-        "result_filed": bool(worker.get("result")),
-        "state": {
-            "phase": task.get("phase"),
-            "terminal": task.get("terminal"),
-            "exit_code": task.get("exit_code"),
-            "dependencies": task.get("dependencies"),
-        }
-        if task
-        else None,
-    }
-
-
-def run_payload(document: Mapping[str, Any]) -> dict[str, Any]:
-    """The run manifest as the gateway reads it, with pueue's view of each task."""
-    raw = document.get("landing")
-    landing = raw if isinstance(raw, Mapping) else {}
-    task = landing.get("task") if isinstance(landing.get("task"), Mapping) else {}
-    task_id = landing.get("task_id")
-    return {
-        "run_id": document.get("run_id"),
-        "project_id": document.get("project"),
-        "base_commit": document.get("base_commit"),
-        "created_at": document.get("created_at"),
-        "harness": document.get("harness"),
-        "stage": document.get("stage"),
-        "prepared": bool(document.get("prepared")),
-        "accepted": document.get("acceptance") is not None,
-        "acceptance": document.get("acceptance"),
-        "abandoned": document.get("abandoned"),
-        "workers": [
-            worker_payload(worker)
-            for worker in document.get("workers") or []
-            if isinstance(worker, Mapping)
-        ],
-        "landing": {
-            "task_id": str(task_id) if isinstance(task_id, int) else None,
-            "job_id": landing.get("job_id"),
-            "integration_branch": landing.get("integration_branch"),
-            "candidate_sha": landing.get("candidate_sha"),
-            "pr_number": landing.get("pr_number"),
-            "failure": landing.get("failure"),
-            "state": {
-                "phase": task.get("phase"),
-                "terminal": task.get("terminal"),
-                "exit_code": task.get("exit_code"),
-            }
-            if task
-            else None,
-        },
-    }
-
-
 class LocalJobs:
-    """Calls agentctl's native job and retained history routes directly in this process.
+    """Calls agentctl's native job routes directly in this process.
 
     The adapter exposes one method per owner operation.  Runtime translates
     the gateway operation name to one of these methods, so no protocol
@@ -277,22 +197,12 @@ class LocalJobs:
             payload = handler(arguments)
         except _Refusal as refusal:
             raise JobOwnerError(refusal.code, str(refusal)) from refusal
-        except batch_history.HistoryRefusal as refusal:
-            raise JobOwnerError(
-                "invalid_request"
-                if refusal.code in ARGUMENT_REFUSALS
-                else "owner_failed",
-                str(refusal),
-                {"refusal": refusal.code},
-            ) from refusal
         except PueueError as error:
             raise JobOwnerError("unavailable", str(error)) from error
         except (
             job_queries.JobError,
-            batch_history.HistoryError,
             WorktrunkError,
             ConfigError,
-            TaskReadError,
             ProjectConfigError,
             KeyError,
             OSError,
@@ -356,16 +266,10 @@ class LocalJobs:
         arguments.pop("result", None)
         return self._call(self._shell_start, arguments)
 
-    def batch_list(self, **arguments: Any) -> dict[str, Any]:
-        return self._call(self._batch_list, arguments)
-
-    def batch_status(self, **arguments: Any) -> dict[str, Any]:
-        return self._call(self._batch_status, arguments)
-
     def _project(self, project_id: str) -> Any:
         try:
             return resolve_project(self.config, project_id)
-        except (KeyError, ConfigError, TaskReadError) as error:
+        except (KeyError, ConfigError) as error:
             raise _Refusal(
                 "invalid_request", f"unknown project: {project_id}"
             ) from error
@@ -587,46 +491,6 @@ class LocalJobs:
             "cleaned": bool(cleaned.get("cleaned")),
             "removed": [str(path) for path in cleaned.get("removed") or []],
         }
-
-    # ----------------------------------------------------------- batches
-
-    def _run_id(self, arguments: Mapping[str, Any]) -> str:
-        """A run id or the suffix every agentctl verb also accepts."""
-        return batch_history.resolve_run_id(
-            self.config, _require_str(arguments, "run_id")
-        )
-
-    def _run_project(self, run_id: str, arguments: Mapping[str, Any]) -> Any:
-        """The run's own project; an explicit project_id must agree with it."""
-        declared = _optional_str(arguments, "project_id")
-        owner = batch_history.load(self.config, run_id).project
-        if declared is not None and declared != owner:
-            raise batch_history.HistoryRefusal(
-                "project", f"run {run_id} belongs to {owner}, not {declared}"
-            )
-        return self._project(owner)
-
-    def _status(self, run_id: str, project: Any) -> dict[str, Any]:
-        return run_payload(operator_view.status(self.config, run_id, project=project))
-
-    def _batch_list(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        project_id = _optional_str(arguments, "project_id")
-        if project_id is not None:
-            self._project(project_id)
-        runs = batch_history.list_runs(self.config, project_id)
-        limit = int(arguments.get("limit") or 50)
-        page = sorted(runs, key=lambda run: run.created_at, reverse=True)[:limit]
-        # No project: `batch status` reads the landing PR from GitHub when it
-        # has one, and a list must not make one network call per run.
-        return {
-            "runs": [self._status(run.run_id, None) for run in page],
-            "total": len(runs),
-            "truncated": len(runs) > len(page),
-        }
-
-    def _batch_status(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        run_id = self._run_id(arguments)
-        return self._status(run_id, self._run_project(run_id, arguments))
 
     def _shell_start(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         """One argv queued in a shell pool, inside the project's environment."""

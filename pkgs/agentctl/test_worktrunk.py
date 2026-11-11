@@ -30,7 +30,7 @@ def test_cleanup_keeps_an_open_file_holder_outside_the_checkout(
     write_project(root, worktrees=tmp_path / "worktrees")
     project = load_project_adapter(root)
     target = tmp_path / "worktrees" / "lane"
-    branch = "batch/run/worker"
+    branch = "feature/worker"
     worktrunk_create(root, branch, path=target, base="master")
     held = target / "held\nfile.txt"
     held.write_text("neutral fixture\n")
@@ -82,7 +82,6 @@ def test_cleanup_keeps_an_open_file_holder_outside_the_checkout(
             config,
             project,
             branch,
-            base="master",
             recorded_path=target,
         )
         assert result is not None
@@ -99,7 +98,6 @@ def test_cleanup_keeps_an_open_file_holder_outside_the_checkout(
             config,
             project,
             branch,
-            base="master",
             recorded_path=target,
         )
         is None
@@ -251,7 +249,7 @@ def test_terminal_release_keeps_the_exact_branch_head(tmp_path: Path) -> None:
     """Anti-vacuity: branch deletion would make this worker commit unreachable."""
     root = _repository(tmp_path / "repo")
     target = tmp_path / "worktrees" / "lane"
-    worktrunk_create(root, "batch/run/worker", path=target, base="master")
+    worktrunk_create(root, "feature/worker", path=target, base="master")
     (target / "worker.txt").write_text("candidate\n")
     subprocess.run(["git", "-C", str(target), "add", "worker.txt"], check=True)
     _commit(target, "worker candidate")
@@ -265,10 +263,10 @@ def test_terminal_release_keeps_the_exact_branch_head(tmp_path: Path) -> None:
     subprocess.run(["git", "-C", str(root), "add", "worker.txt"], check=True)
     _commit(root, "squash landing")
 
-    worktrunk_remove(root, "batch/run/worker", keep_branch=True, reap=False)
+    worktrunk_remove(root, "feature/worker", keep_branch=True, reap=False)
 
     retained = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "refs/heads/batch/run/worker^{commit}"],
+        ["git", "-C", str(root), "rev-parse", "refs/heads/feature/worker^{commit}"],
         check=True,
         capture_output=True,
         text=True,
@@ -288,7 +286,7 @@ def test_retiring_a_squashed_branch_retains_its_original_commit(
     write_project(root, worktrees=tmp_path / "worktrees")
     project = load_project_adapter(root)
     target = tmp_path / "worktrees" / "lane"
-    branch = "batch/run/worker"
+    branch = "feature/worker"
     worktrunk_create(root, branch, path=target, base="master")
     (target / "worker.txt").write_text("candidate\n")
     subprocess.run(["git", "-C", str(target), "add", "worker.txt"], check=True)
@@ -315,7 +313,6 @@ def test_retiring_a_squashed_branch_retains_its_original_commit(
                 config,
                 project,
                 branch,
-                base="master",
                 recorded_path=target,
                 delete_branch=True,
             )
@@ -370,7 +367,7 @@ def test_branch_retirement_refuses_a_concurrent_move(
     root = _repository(tmp_path / "repo")
     write_project(root, worktrees=tmp_path / "worktrees")
     project = load_project_adapter(root)
-    branch = "batch/run/worker"
+    branch = "feature/worker"
     subprocess.run(["git", "-C", str(root), "branch", branch], check=True)
     first = subprocess.check_output(
         ["git", "-C", str(root), "rev-parse", branch], text=True
@@ -390,9 +387,7 @@ def test_branch_retirement_refuses_a_concurrent_move(
         return ref
 
     monkeypatch.setattr(cleanup, "_recovery_ref", move_after_preservation)
-    reason = cleanup._drop_branch(
-        config, project, branch, base="master", delete_branch=True
-    )
+    reason = cleanup._drop_branch(config, project, branch, delete_branch=True)
     assert reason and reason.startswith("branch kept;")
     assert (
         subprocess.check_output(
@@ -432,7 +427,7 @@ def test_terminal_release_archives_ignored_descriptor_artifacts_across_a_retry(
     _commit(root, "fixture descriptor")
     project = load_project_adapter(root)
     target = tmp_path / "worktrees" / "lane"
-    branch = "batch/run/worker"
+    branch = "feature/worker"
     worktrunk_create(root, branch, path=target, base="master")
     receipt = target / ".cache" / "verify" / "receipt.json"
     receipt.parent.mkdir(parents=True)
@@ -450,14 +445,13 @@ def test_terminal_release_archives_ignored_descriptor_artifacts_across_a_retry(
         config,
         project,
         branch,
-        base="master",
         recorded_path=target,
         artifacts=artifacts,
     )
 
     assert first == "simulated release failure"
     first_destination = cleanup._artifact_destination(
-        config, "orphan", target, receipt.relative_to(target), initial
+        config, target, receipt.relative_to(target), initial
     )
     assert first_destination.read_text() == '{"attempt": 1}\n'
     assert receipt.exists(), "a failed removal must leave the checkout intact"
@@ -469,13 +463,12 @@ def test_terminal_release_archives_ignored_descriptor_artifacts_across_a_retry(
         config,
         project,
         branch,
-        base="master",
         recorded_path=target,
         artifacts=artifacts,
     )
 
     second_destination = cleanup._artifact_destination(
-        config, "orphan", target, receipt.relative_to(target), updated
+        config, target, receipt.relative_to(target), updated
     )
     assert second is None and not target.exists()
     assert first_destination.read_text() == '{"attempt": 1}\n'
@@ -504,8 +497,8 @@ def test_detached_recovery_retains_each_head_after_a_failed_release(
     ).stdout.strip()
     checkout = tmp_path / "worktrees" / "detached"
 
-    first_ref = cleanup._recovery_ref(root, "run", checkout, first)
-    second_ref = cleanup._recovery_ref(root, "run", checkout, second)
+    first_ref = cleanup._recovery_ref(root, checkout, first)
+    second_ref = cleanup._recovery_ref(root, checkout, second)
 
     assert first_ref != second_ref
     for ref, expected in ((first_ref, first), (second_ref, second)):

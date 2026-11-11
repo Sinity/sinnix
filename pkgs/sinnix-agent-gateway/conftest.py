@@ -91,11 +91,6 @@ class DirectJobs:
         "clean": "job.clean",
         "shell_start": "job.shell.start",
         "queues": "job.queues",
-        "batch_list": "batch.list",
-        "batch_start": "batch.start",
-        "batch_status": "batch.status",
-        "batch_land": "batch.land",
-        "batch_resume": "batch.resume",
     }
 
     def __getattr__(self, name: str) -> Any:

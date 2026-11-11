@@ -55,7 +55,6 @@ from . import artifacts, gitcmd, pueue
 from .config import ConfigError, load_config
 from .launch_input import QueueInputError, read_input, secret_environment
 from .limits import SYSTEMCTL_TIMEOUT_SECONDS
-from .pressure import read_pressure
 from .pueue import PueueError
 
 # Default transport bounds. Captured artifacts are retained in full.
@@ -99,12 +98,11 @@ class Outcome(str, Enum):
 # own prefix.
 POOL_SLICE_PREFIX = "agent-ctl"
 UNIT_PREFIX = "agentctl"
-# The pools with a declared slice policy. Any other pueue group (a project's
-# landing group, a fixture) runs under the normal slice.
+# The pools with a declared slice policy. Any other pueue group (a fixture,
+# the default group) runs under the normal slice.
 POLICY_POOLS = frozenset(
     {
         "agent",
-        "land-agent",
         "pytest",
         "pytest-heavy",
         "pytest-quick",
@@ -853,21 +851,6 @@ def _mask_logs(paths: Sequence[Path], values: tuple[bytes, ...]) -> None:
             atomic_publish(path, masked, fsync=True, mode=0o600)
 
 
-def io_pressure_refusal(
-    limit: float, root: Path = Path("/proc/pressure")
-) -> str | None:
-    """Why a measurement must not start now, or None when the host is quiet."""
-    value = read_pressure(root).get("io_full_avg60")
-    if value is None:
-        return "host I/O pressure is unreadable"
-    if value > limit:
-        return (
-            f"host I/O pressure (full avg60) is {value:.1f}%, above this "
-            f"operation's limit of {limit:g}%"
-        )
-    return None
-
-
 def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     """Run one queued command, retaining complete output for this invocation."""
     scratch_owner = _Scratch()
@@ -1068,92 +1051,79 @@ def _run(
                 if unit is None or pool is None:
                     outcome, status = _run_bare(argv, launch, environment, stdout, log)
                 else:
-                    pressure_limit = launch.get("max_io_pressure")
-                    reason = (
-                        None
-                        if pressure_limit is None
-                        else io_pressure_refusal(float(pressure_limit))
-                    )
-                    if reason is not None:
-                        log.write(
-                            f"refused: {reason}; measurements under load are not "
-                            "valid, so start it again when the host is quiet\n".encode()
+                    refusal, own = _occupancy(pool, unit, daemon, log)
+                    if own is not None:
+                        event["task_id"] = own.task_id
+                    if refusal:
+                        outcome, status = (
+                            Outcome.SLOT_OCCUPIED,
+                            SLOT_OCCUPIED_EXIT_CODE,
                         )
-                        return refused(scratch_error=scratch_owner.cleanup())
                     else:
-                        refusal, own = _occupancy(pool, unit, daemon, log)
-                        if own is not None:
-                            event["task_id"] = own.task_id
-                        if refusal:
-                            outcome, status = (
-                                Outcome.SLOT_OCCUPIED,
-                                SLOT_OCCUPIED_EXIT_CODE,
-                            )
+                        command = _service_command(
+                            launch,
+                            unit=unit,
+                            pool=pool,
+                            description=unit_description(
+                                daemon,
+                                pool,
+                                str(own.task_id)
+                                if own is not None
+                                else launch_input,
+                            ),
+                            argv=argv,
+                            environment=environment,
+                            stdout=stdout_path,
+                            log_path=log_path,
+                        )
+                        # Acceptance can precede a lost startup acknowledgement.
+                        scratch_owner.unit = unit
+                        client = _start_service(
+                            command,
+                            marker,
+                            launch["attempt"],
+                            log,
+                            before_start=lambda: scratch_owner.claim_unit(
+                                unit, pool, launch_input, launch["attempt"]
+                            ),
+                        )
+                        if client is None:
+                            outcome, status = Outcome.CANCELLED, CANCELLED_EXIT_CODE
                         else:
-                            command = _service_command(
-                                launch,
-                                unit=unit,
-                                pool=pool,
-                                description=unit_description(
-                                    daemon,
-                                    pool,
-                                    str(own.task_id)
-                                    if own is not None
-                                    else launch_input,
-                                ),
-                                argv=argv,
-                                environment=environment,
-                                stdout=stdout_path,
-                                log_path=log_path,
-                            )
-                            # Acceptance can precede a lost startup acknowledgement.
-                            scratch_owner.unit = unit
-                            client = _start_service(
-                                command,
-                                marker,
-                                launch["attempt"],
-                                log,
-                                before_start=lambda: scratch_owner.claim_unit(
-                                    unit, pool, launch_input, launch["attempt"]
-                                ),
-                            )
-                            if client is None:
-                                outcome, status = Outcome.CANCELLED, CANCELLED_EXIT_CODE
+                            return_code = client.returncode
+                            if return_code == 0:
+                                properties = _wait_for_unit(
+                                    unit, launch["timeout_seconds"]
+                                )
                             else:
-                                return_code = client.returncode
-                                if return_code == 0:
+                                properties = _unit_snapshot(unit)
+                                if (
+                                    properties
+                                    and properties.get("LoadState") == "loaded"
+                                    and not _unit_is_terminal(properties)
+                                ):
+                                    # An acknowledgement can be lost after acceptance.
+                                    # Observe that unit; never resubmit its payload.
                                     properties = _wait_for_unit(
                                         unit, launch["timeout_seconds"]
                                     )
-                                else:
-                                    properties = _unit_snapshot(unit)
-                                    if (
-                                        properties
-                                        and properties.get("LoadState") == "loaded"
-                                        and not _unit_is_terminal(properties)
-                                    ):
-                                        # An acknowledgement can be lost after acceptance.
-                                        # Observe that unit; never resubmit its payload.
-                                        properties = _wait_for_unit(
-                                            unit, launch["timeout_seconds"]
-                                        )
-                                outcome, status = _classify(
-                                    _marker_targets(marker, launch["attempt"]),
-                                    properties,
+                            outcome, status = _classify(
+                                _marker_targets(marker, launch["attempt"]),
+                                properties,
+                            )
+                            # Capture terminal status before releasing this unit.
+                            # Stop also settles retained verifier descendants.
+                            release_error = scratch_owner.release_unit()
+                            if release_error is not None:
+                                log.write((release_error + "\n").encode())
+                                outcome, status = (
+                                    Outcome.VANISHED,
+                                    VANISHED_EXIT_CODE,
                                 )
-                                # Capture terminal status before releasing this unit.
-                                # Stop also settles retained verifier descendants.
-                                release_error = scratch_owner.release_unit()
-                                if release_error is not None:
-                                    log.write((release_error + "\n").encode())
-                                    outcome, status = (
-                                        Outcome.VANISHED,
-                                        VANISHED_EXIT_CODE,
-                                    )
-                                if outcome is Outcome.VANISHED:
-                                    log.write(
-                                        f"unit {unit} vanished (rc {return_code})\n".encode()
-                                    )
+                            if outcome is Outcome.VANISHED:
+                                log.write(
+                                    f"unit {unit} vanished (rc {return_code})\n".encode()
+                                )
             except OSError as error:
                 action = "control" if scratch_owner.unit is not None else "start"
                 log.write(f"could not {action} the command: {error}\n".encode())

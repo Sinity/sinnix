@@ -7,17 +7,15 @@ import os
 import subprocess
 import sys
 import time
-from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Callable
 
 import pytest
-from agentctl import batch_history as manifest
-from agentctl import cli, github, operator_view, pueue
+from agentctl import cli, operator_view, pueue
 from agentctl.config import Config
-from conftest import SELF_REVIEW, FakePueue, read_launch, write_project
+from conftest import FakePueue, read_launch, write_project
 
 
 @pytest.fixture
@@ -241,30 +239,6 @@ def test_job_start_if_idle_with_wait_reports_failure(
     assert "failed exit 3" in captured.err
 
 
-def test_retained_run_diagnostics_reach_json_and_human_errors(
-    cli_config: Config,
-    capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    error = cli.JobError("worker provisioning stopped")
-    error.run_id = "fixture-run"
-    error.unprovisioned = [
-        {"worker": "review", "beads": ["fx-1"], "reason": "queue uncertain"}
-    ]
-    monkeypatch.setattr(cli, "_dispatch", lambda *_args: (_ for _ in ()).throw(error))
-
-    assert cli.main(["--json", "job", "list"]) == cli.EXIT_REFUSED
-    assert json.loads(capsys.readouterr().out) == {
-        "error": "worker provisioning stopped",
-        "retained_run": "fixture-run",
-        "unprovisioned": [
-            {"worker": "review", "beads": ["fx-1"], "reason": "queue uncertain"}
-        ],
-    }
-    assert cli.main(["job", "list"]) == cli.EXIT_REFUSED
-    assert "retained run fixture-run" in capsys.readouterr().err
-
-
 def test_job_get_renders_the_scratch_footprint(
     fake_pueue: FakePueue, cli_config: Config, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -337,8 +311,6 @@ def test_errors_are_one_line_on_stderr_and_a_nonzero_status(
     assert "no task 99" in capsys.readouterr().err
     assert cli.main(["project", "get", "nowhere"]) == cli.EXIT_REFUSED
     assert "nowhere" in capsys.readouterr().err
-    assert cli.main(["batch", "status", "no-such-run"]) == cli.EXIT_REFUSED
-    assert "no run no-such-run" in capsys.readouterr().err
     fake_pueue.fail_tasks = True
     assert cli.main(["job", "list"]) == cli.EXIT_SUBSTRATE
     assert "fixture pueue status failed" in capsys.readouterr().err
@@ -566,11 +538,7 @@ def test_view_json_is_the_snapshot(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        cli.operator_view,
-        "SubprocessBdReader",
-        lambda root: type("R", (), {"ready": lambda self: []})(),
-    )
+    monkeypatch.setattr(cli.operator_view, "ready_beads", lambda root: [])
     assert cli.main(["--json", "view", "fixture"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["project"] == "fixture"
@@ -609,163 +577,6 @@ def test_pressure_tick_reports_the_decision(
     assert len(calls) == 1
     assert calls[0].event_spool == cli_config.event_spool
     assert "pressure clear" in output.err
-
-
-def _manifest(config: Config, run_id: str) -> None:
-    manifest.runs_dir(config).mkdir(parents=True, exist_ok=True)
-    manifest.manifest_path(config, run_id).write_text(
-        json.dumps(
-            {
-                "run_id": run_id,
-                "project": "fixture",
-                "base_commit": "a" * 40,
-                "created_at": "2026-09-03T08:00:00+00:00",
-                "harness": "external",
-                "workers": [
-                    {
-                        "id": "w1",
-                        "beads": ["fixture-1"],
-                        "branch": f"batch/{run_id}/w1",
-                        "worktree": "/nowhere",
-                        "task_id": None,
-                    }
-                ],
-                "landing": {"task_id": None, "candidate_sha": "b" * 40},
-                "acceptance": None,
-                "prepared": True,
-            }
-        )
-    )
-
-
-def test_batch_reads_accept_the_run_suffix_and_shorten_ids_unless_full(
-    fake_pueue: FakePueue, cli_config: Config, capsys: pytest.CaptureFixture[str]
-) -> None:
-    _manifest(cli_config, "fixture-20260903-080000-0123abcd")
-    assert cli.main(["batch", "status", "0123abcd"]) == 0
-    text = capsys.readouterr().out
-    assert text.startswith("run 0123abcd fixture external base aaaaaaaa stage")
-    assert "started 2026" not in text and "candidate bbbbbbbb" in text
-    assert "  w1: prompt /nowhere/.agentctl/prompt.md\n" in text
-    assert "    next:" not in text
-    assert cli.main(["batch", "status", "0123abcd", "--full"]) == 0
-    text = capsys.readouterr().out
-    assert "run fixture-20260903-080000-0123abcd" in text and "b" * 40 in text
-    assert cli.main(["batch", "list", "fixture"]) == 0
-    listed = capsys.readouterr().out
-    assert listed.splitlines()[0].split() == [
-        "run",
-        "harness",
-        "stage",
-        "started",
-        "age",
-        "workers",
-        "candidate",
-        "abandonment",
-    ]
-    assert "0123abcd" in listed and "fixture-20260903" not in listed
-    assert cli.main(["batch", "list", "fixture", "--json"]) == 0
-    assert (
-        json.loads(capsys.readouterr().out)[0]["run_id"]
-        == "fixture-20260903-080000-0123abcd"
-    )
-    _manifest(cli_config, "fixture-20260903-090000-0123abcd")
-    assert cli.main(["batch", "status", "0123abcd"]) == cli.EXIT_REFUSED
-    assert "names 2 runs" in capsys.readouterr().err
-
-
-def test_batch_status_renders_requested_dispatch_and_abandonment(
-    fake_pueue: FakePueue, cli_config: Config, capsys: pytest.CaptureFixture[str]
-) -> None:
-    run_id = "fixture-20260903-080000-0123abcd"
-    _manifest(cli_config, run_id)
-    path = manifest.manifest_path(cli_config, run_id)
-    document = json.loads(path.read_text())
-    document["workers"][0].update(
-        {
-            "job_id": "worker-launch",
-            "attempts": [
-                {
-                    "number": 2,
-                    "task_id": 41,
-                    "job_id": "worker-launch",
-                    "backend": "fixture-backend",
-                    "model": "fixture-model",
-                    "effort": "high",
-                }
-            ],
-        }
-    )
-    document["landing"].update(
-        {
-            "job_id": "landing-launch",
-            "verify_run": {"task_id": 42, "job_id": "verify-launch"},
-            "review_verdict": {"policy": "none"},
-            "agent_attempts": [
-                {
-                    "kind": "review",
-                    "task_id": 43,
-                    "job_id": "review-launch",
-                    "requested": {
-                        "backend": "fixture-backend",
-                        "model": "fixture-model",
-                        "effort": "high",
-                    },
-                }
-            ],
-        }
-    )
-    document["abandoned"] = {
-        "at": "2026-09-03T09:00:00+00:00",
-        "reason": "canary failed",
-        "residual": ["batch/run/w1: worktree kept"],
-    }
-    path.write_text(json.dumps(document))
-
-    assert cli.main(["batch", "status", "0123abcd"]) == 0
-    text = capsys.readouterr().out
-    assert (
-        "dispatch: attempt 2; requested backend=fixture-backend "
-        "model=fixture-model effort=high; task 41; job worker-launch" in text
-    )
-    assert "landing: task None job landing-launch" in text
-    assert "evidence: verify task 42 job verify-launch; review policy none" in text
-    assert (
-        "landing agent: review; requested backend=fixture-backend "
-        "model=fixture-model effort=high; task 43; job review-launch" in text
-    )
-    assert "abandoned: " in text and "canary failed" in text
-    assert "residual: batch/run/w1: worktree kept" in text
-
-    assert cli.main(["batch", "list", "fixture"]) == 0
-    assert "canary failed; 1 residual" in capsys.readouterr().out
-
-
-def test_batch_list_reads_each_run_pr_through_the_project(
-    fake_pueue: FakePueue,
-    cli_config: Config,
-    capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    run_id = "fixture-20260903-080000-0123abcd"
-    _manifest(cli_config, run_id)
-    path = manifest.manifest_path(cli_config, run_id)
-    document = json.loads(path.read_text())
-    document["landing"]["pr_number"] = 41
-    path.write_text(json.dumps(document))
-    asked: list[tuple[str, int]] = []
-    monkeypatch.setattr(
-        github,
-        "pull_request",
-        lambda root, number: (
-            asked.append((str(root), number)) or {"number": number, "state": "MERGED"}
-        ),
-    )
-
-    assert cli.main(["batch", "list", "fixture", "--json"]) == 0
-
-    assert asked == [(str(cli_config.project_roots[0]), 41)]
-    assert json.loads(capsys.readouterr().out)[0]["landing"]["pr"]["state"] == "MERGED"
 
 
 def test_retired_destructive_cleanup_is_refused_before_touching_evidence(
@@ -836,36 +647,6 @@ def test_an_unknown_operation_is_a_refusal_and_a_key_error_is_not(
     monkeypatch.setattr(cli.job_queries, "list_jobs", broken)
     with pytest.raises(KeyError):
         cli.main(["job", "list"])
-
-
-def _lost_landing(config: Config, run_id: str, *, filed: bool) -> Path:
-    """A run whose recorded landing task the queue no longer has."""
-    _manifest(config, run_id)
-    path = manifest.manifest_path(config, run_id)
-    document = json.loads(path.read_text())
-    document["landing"]["task_id"] = 4547
-    document["landing"]["job_id"] = "land-4547"
-    if filed:
-        document["workers"][0]["result"] = {
-            "candidate_sha": "c" * 40,
-            "beads": [],
-            "unresolved": [],
-            "verification": [],
-            "self_review": deepcopy(SELF_REVIEW),
-        }
-    path.write_text(json.dumps(document))
-    return path
-
-
-def test_unfinished_history_is_inspection_only(fake_pueue, cli_config, capsys):
-    run_id = "fixture-20260903-080000-0123abcd"
-    _lost_landing(cli_config, run_id, filed=False)
-    assert cli.main(["batch", "status", "0123abcd"]) == 0
-    text = capsys.readouterr().out
-    assert "stage landing vanished" in text
-    assert "landing: task 4547 (pueue no longer has it)" in text
-    assert "retired workflow; inspect retained evidence" in text
-    assert not fake_pueue.added
 
 
 def test_wait_reports_elapsed_age_after_blocking(
@@ -979,35 +760,14 @@ def test_wait_archived_cancellation_retains_job_failure_exit(
 def test_worktree_cleanup_uses_the_selected_project(cli_config, monkeypatch, capsys):
     selected = []
 
-    def clean(config, project):
-        selected.append(project.project_id)
+    def clean(config, project, *, paths):
+        selected.append((project.project_id, paths))
         return {"project": project.project_id, "removed": [], "kept": []}
 
     monkeypatch.setattr(cli.worktree_cleanup, "clean", clean)
     assert cli.main(["worktree", "clean", "fixture", "--json"]) == cli.EXIT_OK
-    assert selected == ["fixture"]
+    assert selected == [("fixture", None)]
     assert json.loads(capsys.readouterr().out)["project"] == "fixture"
-
-
-@pytest.mark.parametrize(
-    "args",
-    [
-        ["batch", "start", "fixture", "fx-1"],
-        ["batch", "land", "run"],
-        ["batch", "queue", "run"],
-        ["batch", "resume", "run"],
-        ["batch", "result", "run"],
-        ["batch", "task"],
-        ["batch", "abandon", "run"],
-        ["batch", "scope-correct", "run"],
-        ["result", "validate-worker", "result.json"],
-        ["evidence", "file", "result.json"],
-    ],
-)
-def test_retired_mutation_commands_are_not_admitted(args):
-    with pytest.raises(SystemExit) as failure:
-        cli.parser().parse_args(args)
-    assert failure.value.code == cli.EXIT_USAGE
 
 
 def test_worktree_cleanup_can_target_one_completed_checkout(
@@ -1172,7 +932,7 @@ def test_unknown_timeout_is_not_reported_as_an_unlimited_deadline() -> None:
     assert "timeout_seconds" not in job_queries.launch_selection(
         {**recorded, "timeout_seconds": False}
     )
-    output = operator_view.Output(as_json=False, full=False)
+    output = operator_view.Output(as_json=False)
     base = {"task_id": 1, "label": "fixture:check", "phase": "queued"}
     assert "timeout unknown" in output.job_line({**base, **missing})
     assert "timeout no runtime deadline" in output.job_line({**base, **zero})

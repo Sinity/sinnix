@@ -31,7 +31,7 @@ dots/         managed user configuration; dots/_ai/ holds the global agent
   activation. Systemd owns live processes, timeouts, and results; shell
   supervisors must not duplicate that state.
 - `agentctl` owns project descriptors, the launch and result contract of a
-  queued command, retained history reads, and the operator view
+  queued command, checkout cleanup, and the operator view
   (`docs/agentctl.md`). It does not own product-domain concurrency; Sinex's
   byte, rate, and destructive-operation budgets stay in Sinex.
 - The gateway owns who may call which tool, and the high-level machine and
@@ -100,8 +100,8 @@ the skill list.
 Sinnix publishes to `master` directly: verify, commit on `master` (or
 fast-forward a short-lived branch), and push. No PRs; hosted CI does not gate
 this repository. Worktrees remain the isolation for in-flight work.
-Use native changes and declared operations. Historical batch records remain
-read-only; preservation-aware cleanup uses `agentctl worktree clean`.
+Use native changes and declared operations; preservation-aware checkout
+cleanup uses `agentctl worktree clean`.
 
 - Short checks run from the devshell. Heavy checks run as declared operations:
   `agentctl job start sinnix lint`, `agentctl job start sinnix check`

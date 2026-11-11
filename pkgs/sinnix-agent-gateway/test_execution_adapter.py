@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from agentctl import artifacts, batch_history, job_queries, launch, operator_view, pueue
+from agentctl import artifacts, job_queries, launch, pueue
 from agentctl.config import Config
 from agentctl.limits import MAX_AGENT_TIMEOUT_SECONDS
 from sinnix_agent_gateway.execution import JobOwnerError, LocalJobs
@@ -54,8 +54,6 @@ def _call(
         "job.clean": adapter.clean,
         "job.shell.start": adapter.shell_start,
         "job.queues": adapter.queues,
-        "batch.list": adapter.batch_list,
-        "batch.status": adapter.batch_status,
     }
     return methods[operation](**arguments)
 
@@ -258,64 +256,6 @@ def test_job_list_cursor_is_bound_to_the_project_filter(
     with pytest.raises(JobOwnerError) as stale:
         adapter.list(limit=1, project_id="b", cursor=first["next_cursor"])
     assert stale.value.code == "stale_cursor"
-
-
-RUN_DOCUMENT = {
-    "run_id": "fixture-20260906-012123-a2c81926",
-    "project": "fixture",
-    "base_commit": "b" * 40,
-    "created_at": "2026-09-06T01:21:23+00:00",
-    "harness": "queued",
-    "stage": "working",
-    "prepared": True,
-    "acceptance": None,
-    "abandoned": None,
-    "workers": [
-        {
-            "id": "fixture-1",
-            "beads": ["fixture-1", "fixture-2"],
-            "branch": "batch/fixture-run/fixture-1",
-            "worktree": "/realm/worktree/fixture-batch-fixture-run-fixture-1",
-            "backend": "claude",
-            "model": "policy",
-            "effort": "medium",
-            "task_id": 41,
-            "job_id": "fixture-worker-abcd1234",
-            "task_ids": [41],
-            "result": None,
-            "stage": "running",
-            "task": {"phase": "running", "terminal": False, "exit_code": None},
-        }
-    ],
-    "landing": {
-        "task_id": 42,
-        "job_id": "fixture-integrate-9f10",
-        "integration_branch": "batch/fixture-run/integration",
-        "candidate_sha": None,
-        "pr_number": None,
-        "failure": None,
-        "task": {"phase": "queued", "terminal": False, "exit_code": None},
-    },
-}
-
-
-def test_batch_verbs_refuse_a_run_that_belongs_to_another_project(
-    adapter: LocalJobs, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(
-        batch_history, "resolve_run_id", lambda _c, token: RUN_DOCUMENT["run_id"]
-    )
-    monkeypatch.setattr(
-        batch_history, "load", lambda *_a: type("R", (), {"project": "other"})()
-    )
-    with pytest.raises(JobOwnerError) as refused:
-        _call(
-            adapter,
-            "batch.status",
-            {"run_id": "a2c81926", "project_id": "fixture"},
-        )
-    assert refused.value.code == "invalid_request"
-    assert "belongs to other" in str(refused.value)
 
 
 def test_job_operations_pass_the_job_id_through_to_agentctl(
@@ -525,35 +465,6 @@ def test_an_unfinished_job_answers_with_its_place_in_the_queue(
     assert "queue" not in degraded
     assert degraded["queue_unavailable"] == "daemon unreachable"
     assert degraded["task_id"] == "41"
-
-
-def test_original_status_preserves_worker_and_job_identities(adapter, monkeypatch):
-    monkeypatch.setattr(
-        batch_history, "resolve_run_id", lambda config, token: RUN_DOCUMENT["run_id"]
-    )
-    monkeypatch.setattr(
-        batch_history, "load", lambda *args: type("R", (), {"project": "fixture"})()
-    )
-    monkeypatch.setattr(operator_view, "status", lambda *args, **kwargs: RUN_DOCUMENT)
-    payload = adapter.batch_status(run_id="a2c81926")
-    assert payload["run_id"] == RUN_DOCUMENT["run_id"]
-    worker = payload["workers"][0]
-    assert worker["beads"] == ["fixture-1", "fixture-2"]
-    assert worker["task_id"] == "41" and worker["task_ids"] == ["41"]
-    assert worker["job_id"] == "fixture-worker-abcd1234"
-    assert payload["landing"]["job_id"] == "fixture-integrate-9f10"
-
-
-@pytest.mark.parametrize("code", ["unknown_run", "ambiguous_run"])
-def test_history_identity_refusals_keep_their_typed_code(adapter, monkeypatch, code):
-    def refuse(*args):
-        raise batch_history.HistoryRefusal(code, "fixture history refusal")
-
-    monkeypatch.setattr(batch_history, "resolve_run_id", refuse)
-    with pytest.raises(JobOwnerError) as failure:
-        adapter.batch_status(run_id="not-an-executor")
-    assert failure.value.details == {"refusal": code}
-    assert failure.value.code == "invalid_request"
 
 
 @pytest.mark.parametrize("shell", [False, True])

@@ -60,9 +60,7 @@ def checkout(config, project_root, tmp_path, monkeypatch):
 
 def drop(checkout):
     config, project, path = checkout
-    return cleanup._drop_branch(
-        config, project, "candidate", base=git(project.root, "rev-parse", "HEAD")
-    )
+    return cleanup._drop_branch(config, project, "candidate")
 
 
 @pytest.mark.parametrize("kind", ["ignored", "--assume-unchanged", "--skip-worktree"])
@@ -166,7 +164,6 @@ def test_cleanup_keeps_inaccessible_detached_checkout(checkout, monkeypatch):
         config,
         project,
         "candidate",
-        base=git(project.root, "rev-parse", "HEAD"),
         recorded_path=path,
     )
     assert reason and "synthetic checkout denial" in reason
@@ -199,7 +196,6 @@ def test_absent_checkout_retirement_really_removes_branch_and_retains_head(
             config,
             project,
             "candidate",
-            base=head,
             recorded_path=path,
             delete_branch=True,
         )
@@ -253,7 +249,6 @@ def test_unregistered_checkout_uncertainty_keeps_branch(
             config,
             project,
             "candidate",
-            base=head,
             recorded_path=path,
             delete_branch=True,
         )
@@ -286,7 +281,7 @@ def test_post_removal_broken_link_is_retained_as_residue(checkout, monkeypatch):
 
     monkeypatch.setattr(worktrunk, "worktrunk_remove", remove)
     reason = cleanup._drop_branch(
-        config, project, "candidate", base=head, recorded_path=path, delete_branch=True
+        config, project, "candidate", recorded_path=path, delete_branch=True
     )
     assert reason and "remains after removal" in reason
     assert path.is_symlink()

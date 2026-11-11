@@ -19,7 +19,7 @@ from agentctl import run as run_module
 from agentctl.config import Config, load_config
 from agentctl.job_queries import JobError
 from agentctl.launch_input import write_input
-from agentctl.projects import ProjectConfigError, load_project_adapter
+from agentctl.projects import load_project_adapter
 from agentctl.pueue import PueueError, PueueGroupError, Task
 from agentctl.run import (
     CANCELLED_EXIT_CODE,
@@ -341,21 +341,6 @@ def test_cached_operation_retries_success_that_executed_on_another_tree(
         "tree": "b" * 40,
         "dirty": False,
     }
-
-
-def test_a_default_checkout_operation_refuses_a_worktree(
-    fake_pueue: FakePueue, config: Config, project_root: Path, tmp_path: Path
-) -> None:
-    """The corpus run belongs to the master boundary; a lane cannot start it."""
-    project = load_project_adapter(project_root)
-    worktree = tmp_path / "worktrees" / "fixture-lane"
-    worktree.mkdir(parents=True)
-
-    with pytest.raises(JobError, match="main checkout"):
-        launch.start_operation(
-            config, project, project.operation("nightly"), workspace=worktree
-        )
-    assert fake_pueue.added == []
 
 
 def test_an_unknown_pool_is_a_typed_refusal_and_leaves_no_input_behind(
@@ -1056,11 +1041,11 @@ def test_a_binding_is_stored_in_the_launch_input_and_read_back_on_get(
         timeout_seconds=10,
         result_kind="exit",
         environment={"PATH": os.environ["PATH"]},
-        binding={"beads": ["fx-1", "fx-2"], "run_id": "run-7"},
+        binding={"remote_run_id": "wfr_fixture"},
     )
 
     written = read_launch(config, fake_pueue.task(started["task_id"]))
-    assert written["binding"] == {"beads": ["fx-1", "fx-2"], "run_id": "run-7"}
+    assert written["binding"] == {"remote_run_id": "wfr_fixture"}
     assert (
         job_queries.get_job(started["task_id"], config)["binding"] == written["binding"]
     )
@@ -1957,34 +1942,6 @@ def test_wait_retained_unverified_launch_is_not_terminal(
     assert fake_pueue.waited == []
 
 
-@pytest.mark.parametrize("marker", ["kind", "binding", "operation", "label"])
-def test_retry_preserves_retired_executor_history_without_restarting(
-    fake_pueue, config, project_root, marker
-):
-    project = load_project_adapter(project_root)
-    started = launch.start_operation(config, project, project.operation("check"))
-    task_id, job_id = started["task_id"], started["job_id"]
-    fake_pueue.fail(task_id, exit_code=1)
-    task = fake_pueue.task(task_id)
-    path = job_queries.launch_input_path(task)
-    value = read_launch(config, task)
-    if marker == "kind":
-        value[marker] = "attested-agent"
-    elif marker == "binding":
-        value[marker] = {"run_id": "fixture-run", "attempt": 1}
-    elif marker == "operation":
-        value[marker] = "land:fixture-run"
-    else:
-        fake_pueue._tasks[task_id] = replace(task, label="fixture:land:fixture-run")
-    path.write_text(json.dumps(value))
-    original = path.read_bytes()
-    with pytest.raises(JobError, match="history-only"):
-        launch.retry(config, task_id, job_id)
-    assert fake_pueue.restarted == []
-    assert path.read_bytes() == original
-    assert job_queries.get_job(task_id, config, job_id)["phase"] == "failed"
-
-
 @pytest.mark.parametrize(
     "stop_error",
     [None, PermissionError("fixture"), subprocess.TimeoutExpired("systemctl", 1)],
@@ -2039,7 +1996,6 @@ def test_cancel_retains_privileged_members_until_cgroup_drains(
         config,
         project,
         "fixture-branch",
-        base="unused",
         recorded_path=project_root,
         registry=[],
     )
@@ -2115,7 +2071,7 @@ def test_native_cleanup_retains_incomplete_job_after_queue_removal(
     started = launch.start_operation(
         config,
         project,
-        replace(project.operation("check"), checkout="any"),
+        project.operation("check"),
         workspace=workspace,
     )
     group = tmp_path / "fixture.service"
@@ -2243,23 +2199,6 @@ def test_planned_cgroup_covers_inactive_slices(tmp_path, monkeypatch, parent):
     )
 
 
-def test_operation_priority_orders_the_queue_and_is_validated(
-    fake_pueue: FakePueue, config: Config, project_root: Path
-) -> None:
-    descriptor = project_root / ".agentctl" / "project.toml"
-    original = descriptor.read_text()
-    marker = '[operations.verify]\ndescription = "Fixture typed verification"'
-    descriptor.write_text(original.replace(marker, marker + "\npriority = 10"))
-    project = load_project_adapter(project_root)
-    launch.start_operation(config, project, project.operation("verify"))
-    assert fake_pueue.added[-1]["priority"] == 10
-    assert project.operation("verify").catalog_row()["priority"] == 10
-    for invalid in ("true", "101", '"high"'):
-        descriptor.write_text(original.replace(marker, marker + f"\npriority = {invalid}"))
-        with pytest.raises(ProjectConfigError):
-            load_project_adapter(project_root)
-
-
 def test_cached_operation_answers_from_a_cleaned_queue_entry(
     fake_pueue: FakePueue,
     config: Config,
@@ -2302,7 +2241,7 @@ def test_cached_operation_answers_from_a_cleaned_queue_entry(
     assert other.get("reused") is not True and len(fake_pueue.added) == 2
 
 
-def test_a_job_priority_overrides_the_declared_one(
+def test_a_job_priority_reaches_the_queue(
     fake_pueue: FakePueue, config: Config, project_root: Path
 ) -> None:
     project = load_project_adapter(project_root)

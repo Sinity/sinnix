@@ -1,32 +1,25 @@
-"""The operator screen: pueue and manifest facts, in local time, nothing decided."""
+"""The operator screen: queue groups, recent failures, active jobs, ready beads."""
 
 from __future__ import annotations
 
 import json
-from copy import deepcopy
-from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
-from agentctl import batch_history as manifest
 from agentctl import operator_view
-from agentctl.batch_history import Run
 from agentctl.config import Config
 from agentctl.projects import load_project_adapter
 from agentctl.pueue import Task
-from conftest import SELF_REVIEW, FakeBd, FakePueue, bead
+from conftest import FakePueue
 
 
-def write_original(config, run):
-    path = manifest.manifest_path(config, run.run_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(run.to_dict()))
+def bead(bead_id: str, title: str, *, issue_type: str = "task") -> dict[str, Any]:
+    return {"id": bead_id, "title": title, "issue_type": issue_type, "status": "open"}
 
 
 NOW = datetime(2026, 9, 3, 9, 0, tzinfo=UTC)
-SHA = "c" * 40
 
 
 def task(
@@ -57,327 +50,41 @@ def task(
     )
 
 
-def worker(
-    worker_id: str, *, task_id: int | None, result: bool = False
-) -> dict[str, Any]:
-    return {
-        "id": worker_id,
-        "beads": [worker_id],
-        "branch": f"batch/run-1/{worker_id}",
-        "worktree": f"/w/{worker_id}",
-        "task_id": task_id,
-        "task_ids": [task_id] if task_id is not None else [],
-        "claimed": True,
-        "result_path": None,
-        "result": {
-            "candidate_sha": SHA,
-            "beads": [],
-            "unresolved": [],
-            "verification": [],
-            "self_review": deepcopy(SELF_REVIEW),
-        }
-        if result
-        else None,
-    }
-
-
-def run(
-    run_id: str,
-    workers: list[dict[str, Any]],
-    *,
-    landing_task: int | None = None,
-    accepted: bool = False,
-    failure: dict[str, Any] | None = None,
-    harness: str = "queued",
-) -> Run:
-    return Run.from_dict(
-        {
-            "run_id": run_id,
-            "project": "fixture",
-            "base_commit": "b" * 40,
-            "created_at": "2026-09-03T08:00:00+00:00",
-            "harness": harness,
-            "runtime_revision": "/nix/store/x",
-            "verify_profile": "check",
-            "review_profile": "review",
-            "workers": workers,
-            "landing": {
-                "task_id": landing_task,
-                "integration_branch": f"batch/{run_id}/integration",
-                "integration_worktree": None,
-                "pr_number": None,
-                "candidate_sha": SHA if accepted else None,
-                "verify_run": None,
-                "review_verdict": None,
-                "refreshes": 0,
-                "failure": failure,
-            },
-            "acceptance": {"candidate_sha": SHA, "beads": {}} if accepted else None,
-            "prepared": True,
-        }
-    )
-
-
 def snapshot(**overrides: Any) -> operator_view.Snapshot:
     values: dict[str, Any] = {
         "project_id": "fixture",
         "now": NOW,
         "tasks": (
             task(1, "fixture:verify_all", group="pytest"),
-            task(2, "fixture:worker:run-1:fx-1", group="agent"),
+            task(2, "fixture:shell", group="agent"),
             task(3, "fixture:check", status="Done", result="Failed", exit_code=2),
-            task(
-                4,
-                "fixture:worker:run-1:fx-2",
-                status="Done",
-                result="Success",
-                exit_code=0,
-                group="agent",
-            ),
-            task(
-                5,
-                "fixture:worker:run-2:fx-4",
-                status="Done",
-                result="Failed",
-                exit_code=1,
-                group="agent",
-            ),
-            task(6, "fixture:land:run-1", status="Queued", group="fixture-land"),
-            task(
-                7,
-                "fixture:land:run-2",
-                status="Done",
-                result="DependencyFailed",
-                group="fixture-land",
-            ),
-            task(8, "fixture:land:run-3", status="Running", group="fixture-land"),
-            task(9, "fixture:land:run-5", status="Stashed", group="fixture-land"),
+            task(4, "fixture:fmt", status="Done", result="Success", exit_code=0),
+            task(6, "fixture:verify", status="Queued"),
+            task(9, "fixture:later", status="Stashed"),
         ),
         "groups": {"agent": "Running", "normal": "Paused", "pytest": "Running"},
-        "runs": (
-            run(
-                "run-1",
-                [worker("fx-1", task_id=2), worker("fx-2", task_id=4, result=True)],
-                landing_task=6,
-            ),
-            run("run-2", [worker("fx-4", task_id=5)], landing_task=7),
-            run("run-3", [worker("fx-5", task_id=None, result=True)], landing_task=8),
-            run("run-4", [worker("fx-6", task_id=None, result=True)], accepted=True),
-            run(
-                "run-5",
-                [worker("fx-7", task_id=None)],
-                landing_task=9,
-                harness="external",
-            ),
-        ),
         "ready": (bead("fx-9", "Ready work"),),
     }
     values.update(overrides)
     return operator_view.Snapshot(**values)
 
 
-def stages_of(snap: operator_view.Snapshot) -> dict[str, dict[str, Any]]:
-    return {
-        row["run"]: row
-        for row in (operator_view.run_dict(r, snap.tasks, NOW) for r in snap.runs)
-    }
-
-
-def test_stage_and_next_follow_from_the_queue_then_the_manifest() -> None:
-    """Breaks if a failed worker, a stashed landing or a landed run stops naming its next step."""
-    stages = stages_of(snapshot())
-    assert (stages["run-1"]["stage"], stages["run-1"]["next"]) == (
-        "working",
-        "retired workflow; inspect retained evidence",
-    )
-    assert [w["stage"] for w in stages["run-1"]["workers"]] == ["running", "done"]
-    assert (stages["run-2"]["stage"], stages["run-2"]["next"]) == (
-        "landing dependency-failed",
-        "retired workflow; inspect retained evidence",
-    )
-    assert stages["run-2"]["workers"][0]["stage"] == "failed"
-    assert (stages["run-3"]["stage"], stages["run-3"]["next"]) == (
-        "landing",
-        "retired workflow; inspect retained evidence",
-    )
-    assert (stages["run-4"]["stage"], stages["run-4"]["next"]) == ("landed", "-")
-    assert stages["run-5"]["stage"] == "stashed"
-    assert stages["run-5"]["next"] == "retired workflow; inspect retained evidence"
-    assert stages["run-5"]["workers"][0]["stage"] == "awaiting result"
-
-
-def test_run_view_indexes_job_ids_once_for_many_workers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Breaks if each worker lookup reparses every queued command."""
-    task_count = 1_200
-    worker_count = 48
-    tasks = [
-        replace(
-            task(index, "other:long-command"),
-            command="/bin/echo " + ("x" * 2_048),
-        )
-        for index in range(task_count - worker_count)
-    ]
-    workers = []
-    for offset in range(worker_count):
-        task_id = task_count - worker_count + offset
-        job_id = f"worker-{offset}"
-        tasks.append(
-            replace(
-                task(task_id, f"fixture:worker:run-many:fx-{offset}"),
-                command=f"agentctl-run /s/inputs/{job_id}.json",
-            )
-        )
-        entry = worker(f"fx-{offset}", task_id=task_id)
-        entry["job_id"] = job_id
-        workers.append(entry)
-
-    parsed = 0
-    original = operator_view.job_queries.job_id_of
-
-    def count_parses(value: Task) -> str | None:
-        nonlocal parsed
-        parsed += 1
-        return original(value)
-
-    monkeypatch.setattr(operator_view.job_queries, "job_id_of", count_parses)
-    row = operator_view.run_dict(run("run-many", workers), tasks, NOW)
-
-    assert [entry["job"] for entry in row["workers"]] == [
-        task_count - worker_count + offset for offset in range(worker_count)
-    ]
-    assert parsed == task_count
-
-
-@pytest.mark.timeout(15)
-def test_many_run_snapshot_indexes_tasks_once_and_preserves_job_id_resolution(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Anti-vacuity: each of 160 runs names a moved task among 1,200 tasks."""
-
-    class CountedTasks(list[Task]):
-        iterations = 0
-
-        def __iter__(self):  # type: ignore[override]
-            self.iterations += 1
-            return super().__iter__()
-
-    tasks = CountedTasks(
-        replace(task(index, "other:long-command"), command="/bin/echo " + "x" * 128)
-        for index in range(1_200)
-    )
-    runs = []
-    for offset in range(160):
-        task_id = 1_000 + offset
-        job_id = f"run-ref-{offset}"
-        tasks[task_id] = replace(
-            tasks[task_id], command=f"agentctl-run /s/inputs/{job_id}.json"
-        )
-        entry = worker(f"fx-{offset}", task_id=offset)
-        entry["job_id"] = job_id
-        runs.append(run(f"many-{offset}", [entry]))
-
-    tasks[10] = replace(tasks[10], command="agentctl-run /s/inputs/duplicate.json")
-    tasks[20] = replace(tasks[20], command="agentctl-run /s/inputs/duplicate.json")
-    duplicate = run("duplicate", [worker("duplicate", task_id=20)], landing_task=20)
-    document = duplicate.to_dict()
-    document["workers"][0]["job_id"] = "duplicate"
-    document["landing"]["job_id"] = "duplicate"
-    duplicate = Run.from_dict(document)
-    runs.append(duplicate)
-    missing = run("missing", [worker("missing", task_id=1_150)])
-    document = missing.to_dict()
-    document["workers"][0]["job_id"] = "unknown"
-    missing = Run.from_dict(document)
-    runs.append(missing)
-    runs.append(run("id-fallback", [worker("fallback", task_id=1_150)]))
-
-    parsed = 0
-    original = operator_view.job_queries.job_id_of
-
-    def count_parses(value: Task) -> str | None:
-        nonlocal parsed
-        parsed += 1
-        return original(value)
-
-    monkeypatch.setattr(operator_view.job_queries, "job_id_of", count_parses)
-    rows = snapshot(tasks=tasks, runs=tuple(runs), groups={}).to_dict()["runs"]
-
-    assert [row["workers"][0]["job"] for row in rows[:160]] == list(range(1_000, 1_160))
-    assert rows[160]["workers"][0]["job"] == 10
-    assert rows[160]["landing"]["job"] == 10
-    assert rows[161]["workers"][0]["job"] is None
-    assert rows[162]["workers"][0]["job"] == 1_150
-    assert parsed == len(tasks)
-    assert tasks.iterations <= 3, "run lookup traversed the task collection again"
-
-
-def test_an_active_worker_or_landing_task_is_never_landed() -> None:
-    """jcub: a run whose worker or landing task is queued or running is that task."""
-    accepted = run(
-        "run-x", [worker("fx", task_id=2, result=True)], landing_task=6, accepted=True
-    )
-    row = operator_view.run_dict(accepted, snapshot().tasks, NOW)
-    assert row["stage"] == "working"
-    accepted_landing = run(
-        "run-y", [worker("fx", task_id=4, result=True)], landing_task=8, accepted=True
-    )
-    row = operator_view.run_dict(accepted_landing, snapshot().tasks, NOW)
-    assert row["stage"] == "landing"
-    queued_landing = run(
-        "run-z", [worker("fx", task_id=4, result=True)], landing_task=6, accepted=True
-    )
-    assert (
-        operator_view.run_dict(queued_landing, snapshot().tasks, NOW)["stage"]
-        == "landing"
-    )
-    # Only once nothing is live does the acceptance record decide.
-    quiet = run("run-q", [worker("fx", task_id=4, result=True)], accepted=True)
-    assert operator_view.run_dict(quiet, snapshot().tasks, NOW)["stage"] == "landed"
-
-
-def test_a_recorded_failure_names_itself_and_a_failed_worker_asks_for_resume() -> None:
-    failed = run(
-        "run-f",
-        [worker("fx", task_id=4, result=True)],
-        failure={"code": "review_rejected", "detail": "x"},
-    )
-    row = operator_view.run_dict(failed, snapshot().tasks, NOW)
-    assert row["stage"] == "failed: review_rejected"
-    assert row["next"] == "retired workflow; inspect retained evidence"
-    awaiting = run("run-w", [worker("fx", task_id=5)])
-    row = operator_view.run_dict(awaiting, snapshot().tasks, NOW)
-    assert (row["stage"], row["next"]) == (
-        "awaiting workers",
-        "retired workflow; inspect retained evidence",
-    )
-
-
-def test_render_shows_groups_attention_jobs_runs_with_timing_and_ready() -> None:
+def test_render_shows_groups_attention_jobs_with_timing_and_ready() -> None:
     text = operator_view.render(snapshot())
 
     assert "== fixture at" in text
-    assert "normal global unknown; fixture idle PAUSED" in text
+    assert "normal global unknown; fixture 1 queued 1 stashed PAUSED" in text
     assert "agent global unknown; fixture 1 running" in text
     assert "! job 3 fixture:check failed exit 2 at" in text and "(20m ago)" in text
-    assert (
-        "! run run-2 landing dependency-failed: retired workflow; inspect retained evidence"
-        in text
-    )
-    assert "== jobs: 5 active" in text
-    assert "== runs: 4 open, 1 landed, 0 abandoned" in text
-    rows = [
-        line.split() for line in text.splitlines() if line.strip().startswith("run-")
-    ]
-    by_key = {(row[0], row[1]): row for row in rows}
-    assert by_key[("run-1", "fx-1")][2] == "running"
-    assert "#2" in by_key[("run-1", "fx-1")] and "30m" in by_key[("run-1", "fx-1")]
-    assert "retired workflow; inspect retained evidence" in " ".join(
-        by_key[("run-1", "landing")]
-    )
-    assert by_key[("run-2", "fx-4")][2] == "failed"
-    assert ("run-4", "landing") not in by_key
+    assert "job 4" not in text
+    assert "== jobs: 4 active" in text
+    rows = {
+        line.split()[0]: line.split()
+        for line in text.splitlines()
+        if line.strip()[:1].isdigit()
+    }
+    assert rows["2"][1:3] == ["fixture:shell", "running"] and "30m" in rows["2"]
+    assert rows["9"][2] == "stashed"
     assert "== ready: 1 beads" in text and "fx-9" in text
 
 
@@ -394,37 +101,17 @@ def test_attention_is_limited_to_the_last_six_hours() -> None:
                 exit_code=2,
                 ended_at=old,
             ),
-            task(
-                5,
-                "fixture:worker:run-2:fx-4",
-                status="Done",
-                result="Failed",
-                exit_code=1,
-                group="agent",
-                ended_at=old,
-            ),
-            task(
-                7,
-                "fixture:land:run-2",
-                status="Done",
-                result="DependencyFailed",
-                group="fixture-land",
-                ended_at=old,
-            ),
         ),
-        runs=(run("run-2", [worker("fx-4", task_id=5)], landing_task=7),),
     )
-    text = operator_view.render(snap)
-    assert "== nothing needs attention" in text
-    assert "run-2" in text
-    fresh = operator_view.render(snapshot())
-    assert "! job 3 fixture:check failed" in fresh and "! run run-2" in fresh
+    assert "== nothing needs attention" in operator_view.render(snap)
+    assert "! job 3 fixture:check failed" in operator_view.render(snapshot())
 
 
 def test_render_says_nothing_needs_attention_when_nothing_does() -> None:
-    text = operator_view.render(snapshot(tasks=(), runs=(), ready=()))
+    text = operator_view.render(snapshot(tasks=(), ready=()))
     assert "== nothing needs attention" in text
-    assert "== runs: 0 open, 0 landed, 0 abandoned" in text
+    assert "== jobs: 0 active" in text
+    assert "== ready: 0 beads" in text
 
 
 def test_age_and_local_clock_read_iso_stamps() -> None:
@@ -458,32 +145,18 @@ def test_collect_reads_each_source_and_keeps_going_when_one_is_down(
         command=("true",),
         working_directory=project_root,
     )
-    run_manifest = run("run-1", [worker("fx-1", task_id=1)])
-    write_original(config, run_manifest)
-    write_original(
-        config,
-        Run.from_dict(
-            {
-                **run("run-2", [worker("fx-2", task_id=None)]).to_dict(),
-                "project": "other",
-            }
-        ),
-    )
     monkeypatch.setattr(
         operator_view,
-        "SubprocessBdReader",
-        lambda root: FakeBd(
-            beads={
-                "fx-1": bead("fx-1", "One"),
-                "fx-epic": bead("fx-epic", "Epic", issue_type="epic"),
-                "fx-decision": bead("fx-decision", "Decide", issue_type="decision"),
-            }
-        ),
+        "ready_beads",
+        lambda root: [
+            bead("fx-1", "One"),
+            bead("fx-epic", "Epic", issue_type="epic"),
+            bead("fx-decision", "Decide", issue_type="decision"),
+        ],
     )
 
     collected = operator_view.collect(config, project, now=NOW)
     assert [item.label for item in collected.tasks] == ["fixture:check"]
-    assert [item.run_id for item in collected.runs] == ["run-1"]
     assert [item["id"] for item in collected.ready] == ["fx-1"]
     assert collected.errors == ()
 
@@ -554,7 +227,7 @@ def test_collect_distinguishes_global_occupancy_from_project_work(
     monkeypatch.setattr(operator_view.pueue, "status", status)
     monkeypatch.setattr(operator_view.pueue, "tasks", unexpected_read)
     monkeypatch.setattr(operator_view.pueue, "groups_status", unexpected_read)
-    monkeypatch.setattr(operator_view, "SubprocessBdReader", lambda root: FakeBd())
+    monkeypatch.setattr(operator_view, "ready_beads", lambda root: [])
     collected = operator_view.collect(config, project, now=NOW)
     payload = collected.to_dict()
     text = operator_view.render(collected)
@@ -586,117 +259,40 @@ def test_collect_distinguishes_global_occupancy_from_project_work(
     assert "global idle" not in operator_view.render(unavailable)
 
 
-def test_to_dict_carries_stage_next_timing_and_group_counts() -> None:
+def test_to_dict_carries_jobs_ready_and_group_counts() -> None:
     payload = snapshot().to_dict()
-    assert payload["schema"] == "sinnix.agentctl.view.v3"
+    assert payload["schema"] == "sinnix.agentctl.view.v4"
     assert payload["groups"]["normal"] == {
         "status": "Paused",
         "scope": "project",
         "running": 0,
-        "queued": 0,
+        "queued": 1,
         "paused": 0,
-        "stashed": 0,
+        "stashed": 1,
         "global": None,
     }
     assert payload["groups"]["agent"]["running"] == 1
-    runs = {row["run"]: row for row in payload["runs"]}
-    assert (
-        runs["run-1"]["stage"] == "working"
-        and runs["run-1"]["next"] == "retired workflow; inspect retained evidence"
-    )
-    assert runs["run-4"]["stage"] == "landed" and runs["run-4"]["accepted"]
-    first = runs["run-1"]["workers"][0]
-    assert first["elapsed"] == "30m" and first["since"] == "2026-09-03T08:30:00+00:00"
-    assert first["job"] == 2
-    assert (
-        runs["run-1"]["landing"]["job"] == 6
-        and runs["run-1"]["landing"]["phase"] == "queued"
-    )
+    assert [job["task_id"] for job in payload["jobs"]] == [1, 2, 3, 4, 6, 9]
+    assert payload["ready"] == [{"id": "fx-9", "title": "Ready work", "type": "task"}]
     json.dumps(payload)
 
 
-def test_a_landing_the_queue_no_longer_has_is_named_not_ready_to_land() -> None:
-    """mzw2: a task id pueue lost with its state is not a stage anyone waits for."""
-    lost = run("run-6", [worker("fx-8", task_id=4, result=True)], landing_task=99)
-
-    row = operator_view.run_dict(lost, snapshot().tasks, NOW)
-
-    assert (row["stage"], row["next"]) == (
-        "landing vanished",
-        "retired workflow; inspect retained evidence",
+def test_ready_beads_reads_bd_ready_in_the_project(tmp_path: Path) -> None:
+    executable = tmp_path / "bd"
+    executable.write_text(
+        "#!/bin/sh\n"
+        'test "$*" = "ready --limit 0 --json" || exit 9\n'
+        "pwd > cwd\n"
+        """echo '[{"id": "fx-1", "title": "One"}]'\n"""
     )
-    assert row["landing"]["vanished"] == 99 and row["landing"]["job"] is None
-    text = operator_view.render(snapshot(runs=(lost,)))
-    assert (
-        "! run run-6 landing vanished (landing task 99 gone from pueue): retired workflow; inspect retained evidence"
-        in text
-    )
-    assert "#99 gone" in text
-
-
-def test_a_worker_task_lost_with_the_queue_state_asks_for_a_resume() -> None:
-    lost = run("run-7", [worker("fx-8", task_id=42)], landing_task=None)
-
-    row = operator_view.run_dict(lost, snapshot().tasks, NOW)
-
-    assert row["workers"][0]["stage"] == "vanished"
-    assert (row["stage"], row["next"]) == (
-        "awaiting workers",
-        "retired workflow; inspect retained evidence",
-    )
-    assert "! run run-7 awaiting workers (worker fx-8 gone from pueue)" in (
-        operator_view.render(snapshot(runs=(lost,)))
-    )
-
-
-def test_a_finished_run_and_an_unreadable_queue_lose_nothing() -> None:
-    """Anti-vacuity: cleanup after acceptance and a pueue outage are not losses."""
-    cleaned = run(
-        "run-8",
-        [worker("fx-8", task_id=99, result=True)],
-        landing_task=99,
-        accepted=True,
-    )
-    row = operator_view.run_dict(cleaned, snapshot().tasks, NOW)
-    assert row["landing"]["vanished"] is None and row["stage"] == "landed"
-
-    live = run("run-9", [worker("fx-8", task_id=4, result=True)], landing_task=99)
-    blind = operator_view.run_dict(live, (), NOW, queue_read=False)
-    assert blind["landing"]["vanished"] is None and blind["stage"] == "ready to land"
-    assert blind["workers"][0]["stage"] == "done"
-
-
-def test_a_lost_landing_with_a_result_outstanding_asks_for_the_result() -> None:
-    """mzw2 review: `batch queue` here buys a task that refuses `worker_not_done`.
-
-    The landing is the last step, not the missing one: filing the outstanding
-    result queues the replacement landing on its own.
-    """
-    external = run(
-        "run-10", [worker("fx-8", task_id=None)], landing_task=99, harness="external"
-    )
-
-    row = operator_view.run_dict(external, snapshot().tasks, NOW)
-
-    assert (row["stage"], row["next"]) == (
-        "landing vanished",
-        "retired workflow; inspect retained evidence",
-    )
-    assert row["landing"]["vanished"] == 99
-
-    # A reset that took the landing took the worker task with it; only a
-    # fresh agent can file what that worker still owes.
-    queued = run("run-11", [worker("fx-8", task_id=77)], landing_task=99)
-
-    row = operator_view.run_dict(queued, snapshot().tasks, NOW)
-
-    assert (row["stage"], row["next"]) == (
-        "landing vanished",
-        "retired workflow; inspect retained evidence",
-    )
-    assert row["workers"][0]["stage"] == "vanished"
-    assert (
-        "! run run-11 landing vanished (landing task 99; worker fx-8 gone from pueue)"
-        ": retired workflow; inspect retained evidence"
-        in operator_view.render(snapshot(runs=(queued,)))
-    )
+    executable.chmod(0o755)
+    assert operator_view.ready_beads(tmp_path, str(executable)) == [
+        {"id": "fx-1", "title": "One"}
+    ]
+    assert (tmp_path / "cwd").read_text().strip() == str(tmp_path)
+    executable.write_text("#!/bin/sh\necho '{\"error\": \"no db\"}'\n")
+    with pytest.raises(operator_view.TaskReadError):
+        operator_view.ready_beads(tmp_path, str(executable))
+    executable.write_text("#!/bin/sh\nexit 1\n")
+    with pytest.raises(operator_view.TaskReadError):
+        operator_view.ready_beads(tmp_path, str(executable))

@@ -463,8 +463,7 @@ let
   # because an ambient key happens to exist. Log in with `/login` ->
   # "ChatGPT Plus/Pro (Codex Subscription)"; Pi keeps its credential and
   # sessions under ~/.pi (persisted, never read by Sinnix). `pi --list-models`
-  # lists usable models; `agentctl batch start ... --backend pi --model <id>`
-  # runs a batch through it.
+  # lists usable models.
   #
   # What this wrapper actually enforces: the ambient OPENAI_API_KEY is removed,
   # and the separated `--provider` / `--api-key` forms are refused. Pi's own

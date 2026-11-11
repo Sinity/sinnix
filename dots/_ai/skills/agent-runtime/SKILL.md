@@ -49,17 +49,13 @@ and [the command contract](../../../../docs/agentctl.md) for syntax.
   when it ends. At about twice an evidence-based expected duration, inspect
   live state and decide to repair, cancel, or extend.
 
-## Retained history and cleanup
+## Cleanup
 
-`batch list` and `batch status` read original manifests and native job
-observations. `evidence list` and `evidence get` read original native evidence
-and verify artifact identities. Missing or inaccessible history stays explicit.
-Historical executors cannot be resumed or retried through the supported route.
-Record new verification and publication references directly with Beads and Git.
+Record verification and publication references with Beads and Git.
 
-`agentctl worktree clean <project>` releases terminal owned checkouts only
-when process/queue holders, working bytes, ignored files and retained job output
-permit it. It retains recovery refs and reports every checkout it keeps.
+`agentctl worktree clean <project> [--path <checkout>]` retires a completed
+checkout only once its work is published and process and queue holders,
+working bytes, ignored files and retained job output permit it. It retains recovery refs and reports every checkout it keeps.
 `job clean` releases terminal queue entries while retaining their inputs,
 attempts and original output. Use these owners rather than deleting state files.
 

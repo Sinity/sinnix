@@ -242,7 +242,7 @@ def test_large_receipt_completion_reaches_tail_and_follow(
     arguments = argparse.Namespace(
         events_verb="tail", project="fixture", follow=follow, lines=0 if follow else 40
     )
-    assert cli._events(arguments, config, cli.Output(as_json=True, full=False)) == 0
+    assert cli._events(arguments, config, cli.Output(as_json=True)) == 0
     observed = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert [event["phase"] for event in observed] == ["started", "finished"]
     terminal = observed[-1]

@@ -1,24 +1,21 @@
 """Pressure pauses: stop admitting jobs to a group under memory pressure.
 
-Pueue owns dependencies and ordinary stashes. This module pauses a group's
-admission under memory pressure, records that pause in the event log, and
-reopens only groups whose last recorded pause is its own. The current pauses
-are an incremental, regenerable projection of that log.
+Pueue owns dependencies, stashes and every group's paused or running state,
+and each tick reads that state from pueue. Under memory pressure a tick pauses
+one running group of ``CLOSE_ORDER``; once pressure has receded it reopens one
+paused group of that order. Groups outside the order are never touched. Each
+change is reported to the event log, which nothing reads back.
 """
 
 from __future__ import annotations
 
-import json
 import math
-import os
 import signal
 import subprocess
 import time
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from sinnix_lib.atomic_json import read_json, write_json_atomic
 from sinnix_lib.ledger import append_jsonl
 
 from . import pueue
@@ -35,139 +32,7 @@ RESUME_BELOW = 10.0
 CLOSE_ORDER = {
     "memory": ("pytest-heavy", "pytest", "normal", "bulk", "pytest-quick"),
 }
-MANAGED_GROUPS = ("agent", "pytest-heavy", "pytest", "pytest-quick", "normal", "bulk")
-OWNER = "agentctl"
-CHECKPOINT_SCHEMA = 1
 EVENT_KIND = "pressure"
-
-
-@dataclass
-class SpoolState:
-    pauses: dict[str, dict[str, Any]] = field(default_factory=dict)
-    cursor: dict[str, int] | None = None
-
-    def apply(self, event: Mapping[str, Any]) -> None:
-        if event.get("kind") == EVENT_KIND:
-            group, action = event.get("group"), event.get("action")
-            if not isinstance(group, str):
-                return
-            if action == "closed":
-                signal = event.get("signal")
-                self.pauses[group] = {
-                    "owner": event.get("owner"),
-                    "signals": signal.split("+") if isinstance(signal, str) else [],
-                }
-            elif action in {"opened", "released", "ownership-lost"}:
-                self.pauses.pop(group, None)
-
-    def ours(self) -> set[str]:
-        return {
-            group
-            for group, record in self.pauses.items()
-            if record.get("owner") == OWNER
-        }
-
-
-def _checkpoint_path(spool: Path | None, checkpoint: Path | None) -> Path | None:
-    if checkpoint is not None:
-        return checkpoint
-    return spool.with_name(f"{spool.name}.pressure-state.json") if spool else None
-
-
-def _load_checkpoint(path: Path | None) -> SpoolState:
-    if path is None:
-        return SpoolState()
-    raw = read_json(path)
-    if raw is None:
-        return SpoolState()
-    if not isinstance(raw, dict) or raw.get("schema_version") != CHECKPOINT_SCHEMA:
-        return SpoolState()
-    state = SpoolState()
-    if isinstance(raw.get("pauses"), dict):
-        state.pauses = {
-            group: dict(record)
-            for group, record in raw["pauses"].items()
-            if isinstance(group, str) and isinstance(record, dict)
-        }
-    cursor = raw.get("cursor")
-    if isinstance(cursor, dict) and all(
-        isinstance(cursor.get(key), int) for key in ("device", "inode", "offset")
-    ):
-        state.cursor = dict(cursor)
-    return state
-
-
-def _save_checkpoint(path: Path | None, state: SpoolState) -> None:
-    if path is None:
-        return
-    payload = {
-        "schema_version": CHECKPOINT_SCHEMA,
-        "cursor": state.cursor,
-        "pauses": state.pauses,
-    }
-    try:
-        write_json_atomic(path, payload, fsync=False)
-    except OSError:
-        return
-
-
-def event_state(spool: Path | None, *, checkpoint: Path | None = None) -> SpoolState:
-    """Advance by new bytes only, retaining ownership across rotation/truncation."""
-    checkpoint_path = _checkpoint_path(spool, checkpoint)
-    state = _load_checkpoint(checkpoint_path)
-    if spool is None:
-        return state
-    previous = state
-    state = SpoolState(pauses=dict(previous.pauses), cursor=previous.cursor)
-    try:
-        with spool.open("rb") as handle:
-            # Attribute bytes to the inode actually opened, not a path that
-            # may have rotated between stat and open.
-            metadata = os.fstat(handle.fileno())
-            identity = {"device": metadata.st_dev, "inode": metadata.st_ino}
-            offset = 0
-            if (
-                state.cursor is not None
-                and all(
-                    state.cursor.get(key) == value for key, value in identity.items()
-                )
-                and 0 <= state.cursor["offset"] <= metadata.st_size
-            ):
-                offset = state.cursor["offset"]
-            handle.seek(offset)
-            state.cursor = {**identity, "offset": offset}
-            # Replay one complete record at a time, through the observed
-            # size. A growing writer cannot keep this pass open forever.
-            # Leave a partial final record for the next pass.
-            while offset < metadata.st_size:
-                line = handle.readline(metadata.st_size - offset)
-                if not line.endswith(b"\n"):
-                    break
-                try:
-                    event = json.loads(line.decode("utf-8"))
-                except (UnicodeDecodeError, json.JSONDecodeError):
-                    event = None
-                # Commit projection and byte cursor together. A deadline during
-                # decode/apply must not checkpoint past an unprocessed record.
-                next_state = SpoolState(
-                    pauses=dict(state.pauses),
-                    cursor={**identity, "offset": offset + len(line)},
-                )
-                if isinstance(event, dict):
-                    next_state.apply(event)
-                state = next_state
-                offset += len(line)
-    except TickDeadline:
-        # A large cold replay may outlast one tick. Keep verified progress so
-        # the next pass catches up instead of rereading the same prefix.
-        _save_checkpoint(checkpoint_path, state)
-        raise
-    except OSError:
-        # A failed replay cannot replace previously verified ownership or
-        # publish a cursor past unread events.
-        return previous
-    _save_checkpoint(checkpoint_path, state)
-    return state
 
 
 def read_pressure(root: Path = Path("/proc/pressure")) -> dict[str, float | None]:
@@ -246,7 +111,6 @@ def _append(
         "schema_version": 1,
         "emitted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "kind": EVENT_KIND,
-        "owner": OWNER,
         **dict(event),
     }
     if spool is not None:
@@ -258,10 +122,6 @@ def _append(
     elif required:
         raise ValueError("adaptive width changes require an event spool")
     return record
-
-
-def paused_by_us(spool: Path | None, *, checkpoint: Path | None = None) -> set[str]:
-    return event_state(spool, checkpoint=checkpoint).ours()
 
 
 def slice_headroom(unit: str, root: Path = Path("/sys/fs/cgroup")) -> int:
@@ -378,7 +238,6 @@ def tick(
     *,
     spool: Path | None,
     pressure_root: Path = Path("/proc/pressure"),
-    checkpoint: Path | None = None,
     pools: Mapping[str, PoolPolicy] | None = None,
     release_holds: Callable[[], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
@@ -395,7 +254,6 @@ def tick(
             decision = _tick(
                 spool=spool,
                 pressure_root=pressure_root,
-                checkpoint=checkpoint,
                 pools=pools,
             )
             if release_holds is not None:
@@ -425,29 +283,22 @@ def _tick(
     *,
     spool: Path | None,
     pressure_root: Path,
-    checkpoint: Path | None,
     pools: Mapping[str, PoolPolicy] | None,
 ) -> dict[str, Any]:
     pressure = read_pressure(pressure_root)
-    state = event_state(spool, checkpoint=checkpoint)
-    checkpoint_path = _checkpoint_path(spool, checkpoint)
     try:
         groups = pueue.groups_status()
     except PueueError as error:
         return {"action": "unavailable", "error": str(error), "pressure": pressure}
-    for name in sorted(state.ours()):
-        if groups.get(name) == "Running":
-            state.apply(_append(spool, {"action": "released", "group": name}))
-    _save_checkpoint(checkpoint_path, state)
     adaptive = adaptive_widths(pools or {}, groups, pressure, spool)
     signals = over_threshold(pressure)
     signal = "+".join(signals) or None
-    paused = [name for name in MANAGED_GROUPS if groups.get(name) == "Paused"]
-    obsolete = [
-        name for name in paused if name in state.ours() and _can_reopen(pressure)
-    ]
-    if obsolete:
-        target = obsolete[0]
+    order = tuple(
+        dict.fromkeys(group for groups_of in CLOSE_ORDER.values() for group in groups_of)
+    )
+    paused = [name for name in order if groups.get(name) == "Paused"]
+    if paused and _can_reopen(pressure):
+        target = paused[0]
         try:
             pueue.resume(target)
         except PueueError as error:
@@ -457,12 +308,9 @@ def _tick(
                 "error": str(error),
                 "pressure": pressure,
             }
-        event = _append(
+        return _append(
             spool, {"action": "opened", "group": target, "signal": signal, **pressure}
         )
-        state.apply(event)
-        _save_checkpoint(checkpoint_path, state)
-        return event
     if signals:
         close_order = tuple(
             dict.fromkeys(group for active in signals for group in CLOSE_ORDER[active])
@@ -479,13 +327,10 @@ def _tick(
                     "error": str(error),
                     "pressure": pressure,
                 }
-            event = _append(
+            return _append(
                 spool,
                 {"action": "closed", "group": target, "signal": signal, **pressure},
             )
-            state.apply(event)
-            _save_checkpoint(checkpoint_path, state)
-            return event
     action = "unknown-pressure"
     if _pressure_complete(pressure):
         action = "hold" if paused or signals else "clear"
@@ -493,9 +338,6 @@ def _tick(
         "action": action,
         "adaptive": adaptive,
         "frozen": paused,
-        "unverified_pauses": [
-            name for name in paused if name in state.pauses and name not in state.ours()
-        ],
         "signal": signal,
         **pressure,
     }

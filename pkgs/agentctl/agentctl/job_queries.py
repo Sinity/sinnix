@@ -43,8 +43,6 @@ QUEUE_RUN_EXECUTABLE = "agentctl-run"
 MAX_LAUNCH_INPUT_BYTES = 1_048_576
 # Bound on an outcome file read back; the largest historical one is 1.4 MB.
 MAX_OUTCOME_BYTES = 2 * MAX_LAUNCH_INPUT_BYTES
-# The label kinds under which a batch queues agents rather than declared operations.
-AGENT_OPERATIONS = frozenset({"worker", "resume", "integrate", "review"})
 # How long a wait blocks on one task id before re-reading which id the job
 # it waits for is at.
 WAIT_SLICE_SECONDS = 5.0
@@ -318,12 +316,10 @@ def unit_of(task: Task) -> str | None:
 
 def job_view(task: Task) -> dict[str, Any]:
     project, _, operation = task.label.partition(":")
-    # Agent labels are <project>:<kind>:<run>[:<worker>] for a batch's agents.
-    agent = operation.split(":", 1)[0] in AGENT_OPERATIONS and ":" in operation
     return {
         "task_id": task.task_id,
         "label": task.label,
-        "kind": "attested-agent" if agent else "declared-operation",
+        "kind": "declared-operation",
         "project": project,
         "operation": operation,
         "group": task.group,
@@ -999,25 +995,6 @@ def index_tasks_by_job_id(tasks: Sequence[Task]) -> dict[str, Task]:
         if job_id is not None:
             job_ids.setdefault(job_id, task)
     return job_ids
-
-
-def vanished(
-    tasks: Mapping[int, Task],
-    task_id: object,
-    job_id: object = None,
-    *,
-    job_ids: Mapping[str, Task] | None = None,
-) -> bool:
-    """Whether a recorded job identity names nothing the queue holds any more.
-
-    pueue's state is a file it can lose: after a reset its task ids start at
-    zero again, so every id recorded before it names either nothing or a
-    stranger's task. A record that named no task in the first place — an
-    external worker, a landing not yet queued — has not vanished.
-    """
-    if not isinstance(task_id, int) and not isinstance(job_id, str):
-        return False
-    return find_task(tasks, task_id, job_id, job_ids=job_ids) is None
 
 
 def addressed(task_id: int, job_id: str | None = None) -> Task:

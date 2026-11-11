@@ -184,17 +184,14 @@ and diagnostic artifact references. The gateway does not maintain a second
 server-row model or converter. Tool schema discovery refreshes live contracts;
 last-good persisted contracts are explicitly stale when an owner is offline.
 
-## Jobs and batches
+## Jobs
 
 `operations.run` queues a declared project operation; `shell.run` queues one
 argv confined to a checkout. `jobs.list`, `jobs.get`, `jobs.logs`, `jobs.wait`,
 `jobs.queues`, `jobs.cancel`, `jobs.retry` and `jobs.clean` read and control any
 job. A job has a numeric `task_id` (pueue's queue position) and a stable string `job_id`
 that survives queue reordering; each
-retry is a separate attempt with its own logs and result. `batches.list` and
-`batches.status` read retained original manifests. Batch mutation tools are
-retired; new work uses native agents and declared operations. Historical agent
-and landing executors remain readable and cannot be retried through jobs.retry.
+retry is a separate attempt with its own logs and result.
 
 `shell.run` picks a pool: `shell-quick` (width 8) for reads and short commands,
 or `shell-long` (width 4) for agent CLIs (`claude`, `codex`, `gemini`,

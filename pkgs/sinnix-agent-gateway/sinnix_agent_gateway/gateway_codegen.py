@@ -203,7 +203,7 @@ Run ordinary commands through `shell.run` and declared jobs through `operations.
 
 ## Contract and troubleshooting
 
-The live catalog owns action names, schemas, examples and follow-up actions. `sinnix-agent-gateway-generate --reference` prints the complete reference from the same declarations. Read `/realm/project/sinnix/repo/docs/agent-gateway.md` for authority, deployment, connector refresh and upstream ownership; load `agent-runtime` for job and batch recovery.
+The live catalog owns action names, schemas, examples and follow-up actions. `sinnix-agent-gateway-generate --reference` prints the complete reference from the same declarations. Read `/realm/project/sinnix/repo/docs/agent-gateway.md` for authority, deployment, connector refresh and upstream ownership; load `agent-runtime` for job recovery.
 
 `gateway.status` compares live, packaged and last-recorded connector hashes. The saved connector snapshot does not prove which tools the current client loaded. After a refresh, inspect the client's actual schema before recording its observed hash. A numeric `job_id` schema is stale: the current contract uses a string and a separate numeric `task_id`.
 

@@ -47,9 +47,7 @@ def test_the_fixture_descriptor_loads_every_declared_field(project_root: Path) -
     assert project.workspace is not None
     assert project.workspace.default_base == "origin/master"
     assert project.workspace.retain_artifacts == ()
-    nightly = project.operation("nightly")
-    assert nightly.checkout == "default"
-    assert nightly.pool == "bulk"
+    assert project.operation("nightly").pool == "bulk"
     verify = project.operation("verify")
     assert (verify.result, verify.timeout_seconds) == ("json", 120)
     # A descriptor that declares no scratch tier gets none.
@@ -157,10 +155,6 @@ def test_unknown_operation_fields_warn_and_load(
             "timeout_seconds",
         ),
         ('[operations.bad]\ndescription = "x"\nexec = []\n', "non-empty list"),
-        (
-            '[operations.bad]\ndescription = "x"\nexec = ["x"]\ncheckout = "lane"\n',
-            "checkout is invalid",
-        ),
         (
             '[operations.bad]\ndescription = "x"\nexec = ["x"]\ncache = "bad"\n',
             "cache is invalid",
@@ -339,20 +333,7 @@ def test_config_rejects_duplicate_private_project_roots(
         load_config()
 
 
-# ----------------------------------------------- checkout and admission keys
-
-
-def test_an_operation_checkout_is_any_or_default(tmp_path: Path) -> None:
-    root = write_project(tmp_path / "p")
-    descriptor = root / ".agentctl" / "project.toml"
-    base = descriptor.read_text()
-    descriptor.write_text(
-        base
-        + '\n[operations.corpus]\ndescription = "Corpus"\nexec = ["c"]\n'
-        + 'checkout = "candidate"\n'
-    )
-    with pytest.raises(ProjectConfigError, match="checkout is invalid"):
-        load_project_adapter(root)
+# ----------------------------------------------- admission keys
 
 
 def test_an_operation_may_declare_its_admission_envelope(tmp_path: Path) -> None:
@@ -398,13 +379,11 @@ def test_an_unusable_admission_envelope_is_refused(tmp_path: Path, value: str) -
 def test_every_existing_declaration_keeps_working_without_the_new_keys(
     project_root: Path,
 ) -> None:
-    """The fixture descriptor declares neither key. Breaks if either becomes
-    required, or if the default stops being today's behaviour."""
+    """The fixture descriptor declares no admission envelope. Breaks if it
+    becomes required."""
     project = load_project_adapter(project_root)
 
-    assert project.operation("check").checkout == "any"
     assert project.operation("check").admission is None
-    assert project.operation("nightly").checkout == "default"
     assert project.operation("check").catalog_row()["admission"] is None
 
 

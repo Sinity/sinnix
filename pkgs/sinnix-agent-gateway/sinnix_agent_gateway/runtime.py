@@ -62,7 +62,6 @@ RESOURCE_READERS: dict[
         },
     ),
     "bead": ("beads.get", _by_ref("target")),
-    "run": ("batches.status", _by_ref("target")),
     "job": ("jobs.get", _by_ref("target")),
     "artifact": ("artifacts.get", _by_ref("target")),
     "machine_unit": ("machine.units.get", _by_ref("target")),
@@ -362,8 +361,6 @@ class Runtime:
                 "job.clean": "clean",
                 "job.shell.start": "shell_start",
                 "job.queues": "queues",
-                "batch.list": "batch_list",
-                "batch.status": "batch_status",
             }.items()
         }
         handler = handlers.get(operation)

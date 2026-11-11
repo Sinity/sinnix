@@ -16,28 +16,13 @@ import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Sequence
 
 import pytest
 from agentctl import launch as launch_module
 from agentctl import pueue as pueue_module
 from agentctl.config import Config
 from agentctl.pueue import PueueError, PueueGroupError, PueueTimeout, Status, Task
-from agentctl.task_reads import TaskReadError
-
-# Historical self-review fields retained in synthetic original-run fixtures.
-SELF_REVIEW: dict[str, Any] = {
-    "checklists": ["worker-contract"],
-    "passes": 1,
-    "items": [
-        {
-            "item": "every consumer updated",
-            "applies": True,
-            "narration": "grep found one caller; it is updated",
-        }
-    ],
-}
-
 
 @dataclass
 class FakePueue:
@@ -488,51 +473,6 @@ def recording_systemctl(
     return calls
 
 
-@dataclass
-class FakeBd:
-    """A Beads reader over fixture beads; records every close."""
-
-    beads: dict[str, dict[str, Any]] = field(default_factory=dict)
-    closed: list[tuple[str, str]] = field(default_factory=list)
-
-    def show(self, bead_id: str) -> Mapping[str, Any]:
-        try:
-            return dict(self.beads[bead_id])
-        except KeyError as error:
-            raise TaskReadError(
-                f"bd show {bead_id} returned an invalid bead"
-            ) from error
-
-    def list(self) -> Sequence[Mapping[str, Any]]:
-        return [dict(bead) for bead in self.beads.values()]
-
-    def ready(self) -> Sequence[Mapping[str, Any]]:
-        return [
-            dict(bead)
-            for bead in self.beads.values()
-            if bead.get("status") == "open" and not bead.get("blocked")
-        ]
-
-
-def bead(
-    bead_id: str,
-    title: str,
-    *,
-    issue_type: str = "task",
-    status: str = "open",
-    description: str = "",
-    metadata: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
-    return {
-        "id": bead_id,
-        "title": title,
-        "issue_type": issue_type,
-        "status": status,
-        "description": description,
-        "metadata": dict(metadata or {}),
-    }
-
-
 DESCRIPTOR = """schema = 1
 
 [project]
@@ -572,7 +512,6 @@ timeout_seconds = 120
 description = "Fixture nightly corpus"
 exec = ["fixture-nightly"]
 pool = "bulk"
-checkout = "default"
 """
 
 

@@ -57,7 +57,7 @@ python3Packages.buildPythonApplication {
   pythonImportsCheck = [ "agentctl" ];
 
   meta = {
-    description = "agentctl: native project jobs and retained history";
+    description = "agentctl: declared project jobs, their retained results, and checkout cleanup";
     mainProgram = "agentctl";
   };
 }

@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Sequence, TextIO
 
-from . import artifacts, batch_history, cgroups, gitcmd, job_queries, pools, pueue
+from . import artifacts, cgroups, gitcmd, job_queries, pools, pueue
 from .config import Config
 from .launch_input import scratch_path, write_input
 from sinnix_lib.atomic import atomic_publish
@@ -306,7 +306,6 @@ def enqueue(
     after: Sequence[int] = (),
     stashed: bool = False,
     unit_properties: Sequence[str] = (),
-    max_io_pressure: float | None = None,
     tree_receipt: Mapping[str, Any] | None = None,
     environment_receipt: Mapping[str, str] | None = None,
     binding: Mapping[str, Any] | None = None,
@@ -318,8 +317,8 @@ def enqueue(
 ) -> dict[str, Any]:
     """Write the launch input, add the pueue task, return the job view.
 
-    ``binding`` is what the caller ties the task to (``beads``, ``run_id``);
-    it is stored as written and read back on ``job get``. ``scratch`` names
+    ``binding`` is what the caller ties the task to (the gateway's call
+    identity); it is stored as written and read back on ``job get``. ``scratch`` names
     the tier of the job-owned directory the wrapper creates and removes.
     """
     job_id = job_id or _new_job_id(label)
@@ -328,9 +327,8 @@ def enqueue(
     log_path = config.jobs_dir / f"{job_id}.log"
     environment = dict(environment)
     if config.config_path is not None:
-        # A queued task calls agentctl again (`batch result`, `batch land`);
-        # without the config it read the default one and answers about another
-        # state directory.
+        # A queued task may call agentctl again; without the config it would
+        # read the default one and answer about another state directory.
         environment["AGENTCTL_CONFIG"] = str(config.config_path)
     launch: dict[str, Any] = {
         "job_id": job_id,
@@ -354,8 +352,6 @@ def enqueue(
         launch["request_digest"] = request_digest
     if unit_properties:
         launch["unit_properties"] = list(unit_properties)
-    if max_io_pressure is not None:
-        launch["max_io_pressure"] = max_io_pressure
     if admission is not None:
         # The declared envelope, recorded on the job and exported to the
         # command so a workload's own sizing receipt has a declared number to
@@ -633,16 +629,14 @@ def start_operation(
     binding: Mapping[str, Any] | None = None,
     idempotency_key: str | None = None,
     fresh: bool = False,
-    priority: int | None = None,
+    priority: int = 0,
 ) -> dict[str, Any]:
     """Launch an operation; an idempotency key makes a repeated launch return the same job.
 
     `fresh` runs a cached operation even when a matching job exists; its
-    receipts still serve later requests. `priority` replaces the operation's
-    declared queue priority for this job, e.g. to run the landing path first.
+    receipts still serve later requests. `priority` is this job's pueue
+    priority: within its pool a higher one starts first.
     """
-    if priority is not None:
-        operation = replace(operation, priority=priority)
     if (pool := default_branch_pool(project, operation.name)) is not None:
         operation = replace(operation, pool=pool)
     if idempotency_key is None:
@@ -654,6 +648,7 @@ def start_operation(
             extra_argv=extra_argv,
             binding=binding,
             fresh=fresh,
+            priority=priority,
         )
     job_id = _idempotent_job_id(idempotency_key)
     config.inputs_dir.mkdir(parents=True, exist_ok=True)
@@ -699,6 +694,7 @@ def start_operation(
             binding=binding,
             idempotency_key=idempotency_key,
             request_digest=fingerprint,
+            priority=priority,
         )
 
 
@@ -725,23 +721,6 @@ def default_branch_pool(project: ProjectAdapter, operation: str) -> str | None:
     return declared if isinstance(declared, str) else None
 
 
-def _working_directory(
-    project: ProjectAdapter, operation: ProjectOperation, workspace: Path | None
-) -> Path:
-    """The tree this operation runs in.
-
-    `any` takes the caller's tree. `default` refuses every tree but the
-    project root; it selects nothing, so a caller that passes no workspace
-    still lands in whatever state that checkout is in.
-    """
-    working_directory = (workspace or project.root).resolve()
-    if operation.checkout == "default" and working_directory != project.root:
-        raise job_queries.JobError(
-            f"{project.project_id}.{operation.name} runs only on the project's main checkout"
-        )
-    return working_directory
-
-
 def _start_operation(
     config: Config,
     project: ProjectAdapter,
@@ -753,8 +732,9 @@ def _start_operation(
     idempotency_key: str | None = None,
     request_digest: str | None = None,
     fresh: bool = False,
+    priority: int = 0,
 ) -> dict[str, Any]:
-    working_directory = _working_directory(project, operation, workspace)
+    working_directory = (workspace or project.root).resolve()
     if operation.arguments == "required" and not any(
         argument.strip() for argument in extra_argv
     ):
@@ -818,8 +798,7 @@ def _start_operation(
         scratch=operation.scratch,
         admission=operation.admission,
         unit_properties=operation.unit_properties,
-        max_io_pressure=operation.max_io_pressure,
-        priority=operation.priority,
+        priority=priority,
         job_id=job_id,
         binding=binding,
         idempotency_key=idempotency_key,
@@ -1405,57 +1384,13 @@ def clean(config: Config, task_id: int, job_id: str | None = None) -> dict[str, 
     return {**view, "cleaned": True, "removed": removed, "retained": True}
 
 
-def _live_run_jobs(config: Config, tasks: Mapping[int, Task]) -> set[int]:
-    """Jobs a live batch still needs, including attempts predating stable job ids."""
-    runs = [run for run in batch_history.list_runs(config, strict=True) if run.live]
-    run_ids = {run.run_id for run in runs}
-    worktrees: set[str] = set()
-    retained: set[int] = set()
-    for run in runs:
-        records = [*run.workers, run.landing]
-        records.extend(
-            record
-            for key in ("verify_run", "review_verdict")
-            if isinstance(record := run.landing.get(key), dict)
-        )
-        for record in records:
-            job_id = record.get("pending_launch") or record.get("job_id")
-            task_id = record.get("task_id")
-            task = job_queries.find_task(tasks, task_id, job_id)
-            if task is not None:
-                retained.add(task.task_id)
-            retained.update(
-                value
-                for value in (record.get("task_ids") or [])
-                if isinstance(value, int)
-            )
-            for key in ("worktree", "integration_worktree"):
-                if isinstance(path := record.get(key), str):
-                    worktrees.add(path)
-    for task in tasks.values():
-        written = job_queries.read_launch_input(config, task) or {}
-        binding = written.get("binding") or {}
-        label = task.label.split(":")
-        batch_label = (
-            len(label) >= 3
-            and label[1] in job_queries.AGENT_OPERATIONS | {"land"}
-            and label[2] in run_ids
-        )
-        if task.path in worktrees or binding.get("run_id") in run_ids or batch_label:
-            retained.add(task.task_id)
-    return retained
-
-
 def clean_terminal(config: Config) -> list[dict[str, Any]]:
-    """Clean terminal wrapper jobs except those still needed by a live batch."""
+    """Clean every terminal job agentctl launched; other queue entries stay."""
     tasks = pueue.tasks()
-    retained = _live_run_jobs(config, tasks)
     return [
         clean(config, task.task_id, job_queries.job_id_of(task))
         for task in sorted(tasks.values(), key=lambda item: item.task_id)
-        if task.terminal
-        and task.task_id not in retained
-        and job_queries.launch_input_path(task) is not None
+        if task.terminal and job_queries.launch_input_path(task) is not None
     ]
 
 
@@ -1474,21 +1409,6 @@ def retry(config: Config, task_id: int, job_id: str | None = None) -> dict[str, 
                 f"task {task.task_id} is still {task.status.lower()}"
             )
         _require_cancellation_drained(config, task)
-        value = job_queries.read_launch_input(config, task) or {}
-        binding = value.get("binding") or {}
-        label_parts = task.label.split(":")
-        if (
-            value.get("kind") == "attested-agent"
-            or (isinstance(binding, Mapping) and binding.get("run_id"))
-            or str(value.get("operation") or "").startswith("land:")
-            or (
-                len(label_parts) >= 3
-                and label_parts[1] in job_queries.AGENT_OPERATIONS | {"land"}
-            )
-        ):
-            raise job_queries.JobError(
-                "retired batch executor is history-only; start a declared operation for new work"
-            )
         # The old attempt's cancellation request stays in its artifact directory.
         # A drained guard must not attach to the next attempt's reused unit name.
         if job_queries.read_disposition(config, task):

@@ -7,9 +7,9 @@ from types import SimpleNamespace
 import anyio
 import pytest
 from sinnix_agent_gateway import server as server_module
-from sinnix_agent_gateway.actions import batches, contexts, jobs, products
+from sinnix_agent_gateway.actions import contexts, jobs, products
 from sinnix_agent_gateway.app import create_server
-from sinnix_agent_gateway.execution import job_payload, worker_payload
+from sinnix_agent_gateway.execution import job_payload
 from sinnix_agent_gateway.mcp_broker import McpBrokerError
 from test_actions_jobs import DONE, RUNNING, call, make_server
 
@@ -65,26 +65,7 @@ def test_owner_string_return_is_decoded_from_sdk_structured_wrapper(
         assert product.reason == "archive unavailable"
 
 
-def test_runtime_projection_keeps_requested_and_observed_evidence_separate():
-    projection = {
-        "dispatch": {"requested": {"model": "fixture-model"}, "attempt": 2},
-        "actual_executor_model": None,
-        "measured_usage": None,
-    }
-    worker = batches._worker_view(
-        "fixture",
-        worker_payload(
-            {
-                "id": "worker-1",
-                "provenance": projection,
-                "attempts": [{"number": 1}],
-                "task": {"dependencies": [7]},
-            }
-        ),
-    )
-    assert worker.provenance == projection
-    assert worker.attempts == [{"number": 1}]
-    assert worker.state.dependencies == [7]
+def test_job_view_keeps_binding_and_dependencies():
     job = jobs._job_view(
         job_payload(
             {

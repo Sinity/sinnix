@@ -271,13 +271,6 @@ def read_input(path: Path) -> dict[str, Any]:
             "launch input unit_properties must be "
             f"{'/'.join(sorted(UNIT_PROPERTIES | UNIT_PATH_PROPERTIES | UNIT_BANDWIDTH_PROPERTIES))} settings"
         )
-    limit = value.get("max_io_pressure")
-    if limit is not None and (
-        not isinstance(limit, (int, float))
-        or isinstance(limit, bool)
-        or not 0 <= limit <= 100
-    ):
-        raise QueueInputError("launch input max_io_pressure must be a percentage")
     scratch = value.get("scratch")
     if scratch is not None:
         if not isinstance(scratch, dict):

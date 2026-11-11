@@ -1,7 +1,8 @@
 # agentctl
 
-`agentctl` runs declared project operations as queued jobs and reads preserved
-work history. It is an in-process CLI with no daemon.
+`agentctl` runs declared project operations as queued jobs, reads their
+retained results, and retires completed checkouts. It is an in-process CLI with
+no daemon and keeps no copy of another owner's state.
 External tools own the state it reads and writes:
 
 | Owner     | Owns                                                       | Read through                       |
@@ -12,13 +13,13 @@ External tools own the state it reads and writes:
 | Beads     | tasks and claims                                           | `bd ... --json`                    |
 | systemd   | each job's unit, and the timers that start operations      | `systemctl --user`                 |
 
-agentctl itself owns the project descriptors (`.agentctl/project.toml`), each job's launch input and result artifacts, retained historical manifests,
-and the `view` screen.
+agentctl itself owns the project descriptors (`.agentctl/project.toml`), each
+job's launch input and result artifacts, and the `view` screen.
 
 Within the Python package, `job_queries` owns stable-identity reads, selected
 attempts, bounded and redacted artifact pages, and observational waiting.
 `launch` owns admission and mutations; `artifacts` owns invocation storage.
-The CLI, gateway and evidence readers call the query owner directly. Waiting
+The CLI and the gateway call the query owner directly. Waiting
 never cancels a job, and a queue cleanup retains its historical artifacts.
 
 ## Verbs
@@ -26,15 +27,13 @@ never cancels a job, and a queue cleanup retains its historical artifacts.
 | Verb                                                                 | Does                                                                                                                                                 |
 | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `project list \| get [p] \| operations [p]`                          | the configured descriptors                                                                                                                           |
-| `job start [p] <op> [--workspace P] [--wait] [--if-idle] [--fresh] [--priority N] [-- args…]` | queue an operation in its pool, label `<p>:<op>`; `--if-idle` skips it while the same label is queued or running; `--fresh` runs a cached operation even when a matching job exists; `--priority` replaces the declared priority for this job (e.g. to run the landing path first) |
+| `job start [p] <op> [--workspace P] [--wait] [--if-idle] [--fresh] [--priority N] [-- args…]` | queue an operation in its pool, label `<p>:<op>`; `--if-idle` skips it while the same label is queued or running; `--fresh` runs a cached operation even when a matching job exists; `--priority` (-100 to 100, default 0) sets this job's pueue priority: within its pool a higher one starts first |
 | `job list [--project p] [--active] [--all]`                          | job rows, newest first (40 unless `--all`)                                                                                                           |
 | `job snapshot [--limit N]`                                           | group state and counts plus bounded job rows, unfinished first                                                                                       |
 | `job get \| logs \| result \| cancel \| retry \| wait <id>`          | one job by pueue task id, plus `--job-id` to follow it across a reorder; `--attempt` selects a retry; `logs`/`result` page with `--offset`/`--limit` |
 | `job clean <id> \| --all-terminal`                                   | remove terminal queue entries; inputs, attempts, results and evidence are kept                                                                       |
-| `batch status <run>` / `batch list [p]`                              | the manifest joined with pueue state and the landing PR                                                                                              |
-| `worktree clean [p]`                                                 | remove worktrees of landed or abandoned runs, keeping any with uncommitted or unmerged work                                                          |
-| `evidence list \| get`                                               | read original retained native evidence                                                                                                               |
-| `view [p]`                                                           | queue groups, failures, active jobs, open runs and ready tasks                                                                                       |
+| `worktree clean [p] [--path P]`                                      | retire completed checkouts whose work is published, keeping any with unpublished or uncommitted work                                                 |
+| `view [p]`                                                           | queue groups, recent failures, active jobs and ready tasks                                                                                           |
 | `events tail [--lines N] [--follow] [--project p]`                   | the event log (`/realm/state/agentctl/events.jsonl`)                                                                                                 |
 | `pools apply`                                                        | write the declared pool widths into the running pueued                                                                                               |
 | `pressure tick`                                                      | one pass pausing or reopening groups against memory pressure                                                                                         |
@@ -46,8 +45,7 @@ waited job ends without success, both print its failure lines (nextest
 verdicts, compiler errors, panics with their message, refusals and the
 `recorded as run N` history pointer) and the log's last lines to stderr.
 The project is `--project`, a leading positional naming a project or checkout
-path, or the checkout around the working directory. A run is named by its full
-id or its 8-character suffix.
+path, or the checkout around the working directory.
 
 A named project selects the descriptor in its registered project root.
 `--workspace CHECKOUT` changes only the execution working directory; it does
@@ -208,26 +206,27 @@ admission lock instead of waiting up to 60 seconds. An exhausted tick reports
 `action: unavailable` and leaves remaining reconciliation to the next timer.
 
 **Pressure pauses.** `agentctl-pressure.timer` runs `pressure tick` every
-minute.
+minute. Each tick reads every group's state from pueue; it keeps no record of
+its own pauses.
 
 - **Closing:** when host memory `full avg60` is at least 25%, the tick pauses
   one running group (`pueue pause --wait`, so running jobs finish), in the
-  order `pytest-heavy`, `pytest`, `normal`, `bulk`, `pytest-quick`. It records
-  a `pressure` event `closed` with `"owner": "agentctl"` in the event log.
-- **Reopening:** a group whose last recorded pause is agentctl's reopens
-  (`pueue start --group`) once memory `full avg10` is below 10%, one group per
-  tick.
-- **Operator pauses:** a group paused by the operator, with no agentctl `closed`
-  event, is never resumed. Re-pausing a group agentctl already paused does not
-  transfer ownership; resume such a group by hand.
+  order `pytest-heavy`, `pytest`, `normal`, `bulk`, `pytest-quick`, and
+  reports a `pressure` event `closed` to the event log.
+- **Reopening:** once memory `full avg10` is below 10%, the tick reopens
+  (`pueue start --group`) the first paused group of that order, one group per
+  tick, whoever paused it. Groups outside the order are never paused or
+  resumed.
+- **Holding work by hand:** a manual `pueue pause` of a group in the close
+  order lasts only until memory pressure is low. To hold a pool's work
+  regardless of pressure, freeze its slice as below.
 - **Holding running work:** a paused group admits nothing new, but jobs
   already running keep running in their own units. To take the disk or memory
   back now (for example while PostgreSQL finishes a checkpoint), freeze them:
   `systemctl --user freeze agent-ctl.slice`, and `thaw` it afterwards. Each
   unit shows `FreezerState=frozen-by-parent` while held.
 - **I/O pressure** is reported, but it neither closes nor delays admission.
-  An operation declaring `max_io_pressure` refuses to start above it, and
-  long copies and offloads belong in the `background` pool, whose slice has
+  Long copies and offloads belong in the `background` pool, whose slice has
   the plane's lowest I/O weight. Benchmarks and measurements run in the
   one-slot `measure` pool, and full system builds, including `switch` and
   `boot`, in the one-slot `system-build` pool, so neither holds a `bulk` slot
@@ -252,16 +251,19 @@ Retire a completed checkout after publication, using its exact path:
 agentctl worktree clean polylogue --path /realm/worktree/finished-change --json
 ```
 
-Omit `--path` for a project-wide pass. Recorded job ownership and terminal
-outcomes select candidates. An explicit path also identifies the author's
+Omit `--path` for a project-wide pass. Candidates are the checkouts that
+retained launch inputs name as a job's working directory, once every such job
+is terminal. An explicit path also identifies the author's
 completed registered checkout when only foreground checks were needed; it
 never overrides a known active job or unavailable terminal evidence. Git ancestry, matching published trees or an exact
 merged PR head establish publication; the PR's merge must be reachable from
 the fetched default branch. Optional local merge checks have a shared time and
 size budget. Unproved changes stay with a reason.
 
-Cleanup preserves declared artifacts, nextest reports and Git recovery refs
-before removing source and qualified compiler outputs. It checks working bytes,
+Cleanup preserves declared artifacts and nextest reports (under
+`<state_dir>/artifacts/checkouts/`) and the checkout's head as a Git recovery
+ref (`refs/agentctl/recovery/checkouts/…`) before removing source and
+qualified compiler outputs. It checks working bytes,
 Git locks, queued target aliases and process cwd/exe/fd/mappings, refreshing the
 shared holder census after preservation. Tagged Cargo targets and the compiler
 selector's exact per-checkout external cache retire together with the checkout.
@@ -285,82 +287,6 @@ gets SIGTERM, then SIGKILL after ten seconds. An `index.lock` stranded by a
 failed call is removed only from a worktree agentctl owns. Elsewhere it is
 reported, and the job wrapper records any it finds in the outcome's
 `stranded_index_locks`.
-
-## Retained history
-
-`batch list` and `batch status` read the original documents without loading a
-workflow engine. Status may join native queue observations and the recorded PR.
-Unknown original fields, incomplete attempts and artifact mappings remain in
-the document. Inaccessible history is unavailable, not an empty inventory.
-
-New work uses native agents, Git worktrees and selected declared operations.
-Batch start, landing, result filing, resumption, task compilation and abandonment
-commands are retired. An unfinished historical record is inspection-only.
-
-The [worktree cleanup](#worktrees) command also reads retained invocation
-ownership after finished jobs leave the queue. Historical manifests and their
-original evidence remain readable.
-
-### Refusals
-
-Historical manifests may contain these original refusal codes. The batch
-mutation commands are retired; reading a record never resumes its executor.
-
-| code                           | meaning                                                                  |
-| ------------------------------ | ------------------------------------------------------------------------ |
-| `admission_closed`             | the project accepts native changes instead of new batches                |
-| `abandoned`                    | the run was abandoned                                                    |
-| `already_accepted`             | the run already has an acceptance record                                 |
-| `ambiguous_run`                | the suffix names more than one run                                       |
-| `backend`                      | the backend cannot satisfy this queued execution                         |
-| `candidate_mismatch`           | the worktree HEAD does not descend from the filed candidate, or is dirty |
-| `candidate_off_base`           | the candidate does not descend from the run base                         |
-| `check_missing`                | the declared check was not reported within ten minutes                   |
-| `checks_failed`                | a required PR check failed or timed out                                  |
-| `empty_candidate`              | integrating the workers produced no change                               |
-| `exists`                       | a manifest with this run id exists                                       |
-| `foreign_beads`                | the result covers tasks outside the worker                               |
-| `harness`                      | the harness is neither `queued` nor `external`                           |
-| `head_moved`                   | the PR head is no longer the verified candidate                          |
-| `integration_conflict_markers` | a changed file carries a conflict marker                                 |
-| `integration_dirty`            | the integration agent left an unclean tree                               |
-| `integration_failed`           | the integration task did not succeed                                     |
-| `integration_incomplete`       | a worker branch is not merged into the candidate                         |
-| `integration_worktree_missing` | the integration branch has no directory                                  |
-| `invalid_result`               | the worker result does not validate                                      |
-| `landing_in_progress`          | another landing of this run is running                                   |
-| `manifest`                     | the run manifest is unreadable                                           |
-| `mcp_servers`                  | the MCP server selection is invalid or differs from the run              |
-| `members`                      | a task cannot join the batch (`refusals` names each reason)              |
-| `no_candidate_profile`         | the descriptor declares no `verify.candidate`                            |
-| `project`                      | the run belongs to another project                                       |
-| `publish_rejected`             | the push was rejected for a reason a refresh cannot fix                  |
-| `result_already_filed`         | the worker already has a result for this attempt                         |
-| `result_attempt`               | the result is not for the worker's current attempt                       |
-| `result_evidence_binding`      | the result differs from its dispatch-time acceptance binding             |
-| `result_self_review`           | `self_review` is required and missing                                    |
-| `review_failed`                | the review task did not succeed                                          |
-| `review_invalid`               | the verdict does not validate                                            |
-| `review_rejected`              | the verdict is not `pass`                                                |
-| `runner`                       | the agent runner is missing or not executable                            |
-| `scope_violation`              | a `scope_expansion` declaration is malformed                             |
-| `target_moved_twice`           | the default branch moved again after one refresh                         |
-| `task_attempt`                 | the task read names a superseded or unknown attempt                      |
-| `unknown_run`                  | no run has this id or suffix                                             |
-| `verify_failed`                | candidate verification failed or timed out                               |
-| `verify_running`               | candidate verification is still running                                  |
-| `worker_active`                | the worker's task is still queued or running                             |
-| `worker_missing`               | no such worker, or it has no worktree                                    |
-| `worker_not_done`              | a worker's task has not finished                                         |
-| `worker_result_missing`        | a worker filed no valid result                                           |
-| `workspace`                    | the descriptor declares no `[workspace]`                                 |
-
-## Original native evidence
-
-`evidence list` pages summaries and reports unreadable entries. `evidence get`
-returns the complete original record after checking its project, artifact size
-and SHA-256 identity. Filing new worker-schema claims is retired. Record native
-verification and decisions directly with the owning task and repository tools.
 
 ## Descriptors
 
@@ -408,11 +334,8 @@ generation; reboot remains a separate action.
 | `result`              | `exit`, `json` or `pytest`                                                                               |
 | `timeout_seconds`     | 1 to 28,800, or 0 for no limit; default 3,600                                                            |
 | `arguments`           | `none`, or `required` when the caller must pass a selector after `--`                                    |
-| `checkout`            | `any` (the caller's `--workspace` or the project root) or `default` (the project root only)              |
 | `cache`               | `none`, or `tree+environment` to answer a request from an active or successful job with the same clean content tree, environment and arguments, in any checkout of the project and at any commit; after the queue entry is cleaned, its retained outcome still answers (`<state_dir>/results/` maps each request key to its newest job) |
 | `scratch`             | `none`, `tmpfs` or `nvme`                                                                                |
-| `max_io_pressure`     | refuse to start (exit 125) while host I/O `full avg60` exceeds this percentage; for measurements         |
-| `priority`            | -100 to 100, default 0: within its pool pueue starts a higher priority first, so short compile checks pass queued test runs |
 | `admission`           | `{ memory_mib }`: the expected footprint, exported as `AGENTCTL_ADMISSION_MEMORY_MIB`. It is not a limit |
 | `unit_properties`     | resource limits for the unit, e.g. `["MemoryMax=3G", "IOReadBandwidthMax=/realm 20M"]`                   |
 
@@ -423,18 +346,9 @@ Unknown operation fields are ignored with a warning.
 
 `[workspace]` optionally declares `root`, `default_base` and relative
 `retain_artifacts` globs for preservation-aware cleanup. Operations choose their
-own checkouts, resources and argument requirements. The old packet, reviewer,
-verification-profile and publication policy configuration is retired.
-
-`[packets]` is no longer a descriptor table. Remove it when updating a producer.
-Unknown tables are rejected; unknown fields within known tables warn.
-
-For a supported rollback, use revision `4845906d` or later, whose absent packet
-table keeps old admissions closed. Keep current manifests, dispositions, inputs
-and outputs in place. Rollback changes code, never historical state, and does
-not replay old executors. Earlier revisions are for historical source inspection
-and are excluded from automatic activation. Arbitrary same-user native commands
-remain outside this cooperative routing guarantee.
+own resources and argument requirements; a caller picks the checkout with
+`--workspace`. Unknown tables are rejected; unknown fields within known tables
+warn.
 
 Descriptor changes apply on the next call.
 

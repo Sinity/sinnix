@@ -1,17 +1,18 @@
+"""Pressure ticks read paused and running groups from pueue on every pass."""
+
 import json
-import tracemalloc
 from pathlib import Path
 
 import pytest
 from agentctl import pressure as pressure_pause
 
-
-def _spool(tmp_path: Path, *events: dict) -> Path:
-    spool = tmp_path / "events.jsonl"
-    spool.write_text(
-        "".join(json.dumps({"kind": "pressure", **event}) + "\n" for event in events)
-    )
-    return spool
+ORDER = pressure_pause.CLOSE_ORDER["memory"]
+QUIET = {
+    "io_full_avg10": 0.0,
+    "io_full_avg60": 0.0,
+    "memory_full_avg10": 0.0,
+    "memory_full_avg60": 0.0,
+}
 
 
 def _tick(monkeypatch, pressure, groups, spool=None):
@@ -28,395 +29,139 @@ def _tick(monkeypatch, pressure, groups, spool=None):
     return result, calls
 
 
-def _ours(group: str) -> dict:
-    return {"action": "closed", "group": group, "owner": pressure_pause.OWNER}
+def _groups(**states: str) -> dict[str, str]:
+    groups = dict.fromkeys(("agent", *ORDER), "Running")
+    groups.update({name.replace("_", "-"): state for name, state in states.items()})
+    return groups
 
 
 @pytest.mark.parametrize("io", [26.0, 80.0])
 def test_io_pressure_is_observation_without_blanket_admission_veto(monkeypatch, io):
     result, calls = _tick(
         monkeypatch,
-        {
-            "io_full_avg10": io,
-            "io_full_avg60": io,
-            "memory_full_avg10": 0.0,
-            "memory_full_avg60": 0.0,
-        },
-        dict.fromkeys(pressure_pause.MANAGED_GROUPS, "Running"),
+        {**QUIET, "io_full_avg10": io, "io_full_avg60": io},
+        _groups(),
     )
     assert calls == []
     assert result["action"] == "clear"
     assert result["io_full_avg60"] == io
+    assert result["frozen"] == [] and result["signal"] is None
 
 
-def test_owned_io_pause_releases_without_waiting_for_disk_idle(monkeypatch, tmp_path):
-    result, calls = _tick(
-        monkeypatch,
-        {
-            "io_full_avg10": 30.0,
-            "io_full_avg60": 30.0,
-            "memory_full_avg10": 0.0,
-            "memory_full_avg60": 0.0,
-        },
-        {
-            name: "Paused" if name == "bulk" else "Running"
-            for name in pressure_pause.MANAGED_GROUPS
-        },
-        spool=_spool(tmp_path, {**_ours("bulk"), "signal": "io"}),
-    )
-    assert calls == [("resume", "bulk")]
-    assert result["action"] == "opened"
-
-
-def test_io_pause_stays_closed_when_memory_is_unknown(monkeypatch, tmp_path):
+def test_a_pause_stays_closed_while_memory_is_unknown(monkeypatch):
     result, calls = _tick(
         monkeypatch,
         {"io_full_avg10": 30.0, "io_full_avg60": 30.0},
-        {"bulk": "Paused"},
-        spool=_spool(tmp_path, {**_ours("bulk"), "signal": "io"}),
+        _groups(bulk="Paused"),
     )
     assert calls == []
     assert result["action"] == "unknown-pressure"
 
 
-@pytest.mark.parametrize("io_avg10,io_avg60", [(0.0, 0.0), (30.0, 15.0)])
-def test_no_paused_groups_below_closure_threshold_reports_clear(
-    monkeypatch, io_avg10, io_avg60
-) -> None:
+def test_a_paused_group_reopens_on_memory_recovery_in_close_order(monkeypatch):
     result, calls = _tick(
         monkeypatch,
-        {
-            "io_full_avg10": io_avg10,
-            "io_full_avg60": io_avg60,
-            "memory_full_avg10": 0.0,
-            "memory_full_avg60": 0.0,
-        },
-        dict.fromkeys(pressure_pause.MANAGED_GROUPS, "Running"),
+        {**QUIET, "io_full_avg60": 30.0, "memory_full_avg10": 1.0},
+        _groups(pytest="Paused", bulk="Paused"),
     )
-    assert calls == []
-    assert result["action"] == "clear"
-    assert result["frozen"] == [] and result["signal"] is None
+    assert calls == [("resume", "pytest")]
+    assert result["action"] == "opened" and result["group"] == "pytest"
 
 
-def test_owned_pause_without_signal_recovers_on_memory_even_with_busy_io(
-    monkeypatch, tmp_path
-) -> None:
+def test_zero_avg10_is_current_recovery_not_a_stale_avg60_fallback(monkeypatch):
+    """Zero is valid PSI, so it must not select the older high average."""
     result, calls = _tick(
         monkeypatch,
-        {"io_full_avg60": 15.22, "memory_full_avg60": 1.92},
-        {
-            "agent": "Paused",
-            "pytest": "Running",
-            "normal": "Running",
-            "bulk": "Running",
-        },
-        spool=_spool(tmp_path, _ours("agent")),
+        {**QUIET, "io_full_avg60": 30.0, "memory_full_avg60": 30.0},
+        _groups(pytest="Paused"),
     )
-
-    assert calls == [("resume", "agent")]
+    assert calls == [("resume", "pytest")]
     assert result["action"] == "opened"
 
 
-def test_unowned_pause_is_preserved_with_busy_io(monkeypatch) -> None:
+def test_a_group_outside_the_close_order_is_never_resumed(monkeypatch):
+    result, calls = _tick(monkeypatch, QUIET, _groups(agent="Paused"))
+    assert calls == []
+    assert result["action"] == "clear" and result["frozen"] == []
+
+
+def test_memory_closure_stays_until_memory_below_hysteresis(monkeypatch) -> None:
     result, calls = _tick(
         monkeypatch,
-        {"io_full_avg60": 15.0, "memory_full_avg60": 1.0},
-        {
-            "agent": "Running",
-            "pytest": "Paused",
-            "normal": "Running",
-            "bulk": "Running",
-        },
+        {**QUIET, "memory_full_avg10": 15.0, "memory_full_avg60": 15.0},
+        _groups(pytest="Paused"),
     )
+    assert calls == []
+    assert result["action"] == "hold" and result["frozen"] == ["pytest"]
 
+
+def test_memory_pressure_closes_the_first_running_group_of_the_order(
+    monkeypatch,
+) -> None:
+    result, calls = _tick(
+        monkeypatch,
+        {**QUIET, "memory_full_avg10": 30.0, "memory_full_avg60": 30.0},
+        _groups(pytest_heavy="Paused"),
+    )
+    assert calls == [("pause", "pytest")]
+    assert result["action"] == "closed" and result["group"] == "pytest"
+
+
+def test_memory_closure_continues_through_the_order_and_keeps_agent_admissible(
+    monkeypatch,
+) -> None:
+    pressure = {**QUIET, "memory_full_avg10": 30.0, "memory_full_avg60": 30.0}
+    result, calls = _tick(
+        monkeypatch, pressure, _groups(pytest_heavy="Paused", pytest="Paused")
+    )
+    assert calls == [("pause", "normal")]
+    assert result["signal"] == "memory"
+    closed = {name: "Paused" for name in ORDER}
+    result, calls = _tick(monkeypatch, pressure, {"agent": "Running", **closed})
     assert calls == []
     assert result["action"] == "hold"
 
 
-def test_owned_pause_reopens_on_memory_recovery(monkeypatch, tmp_path) -> None:
+def test_a_pressure_event_names_its_action_and_group(monkeypatch, tmp_path) -> None:
+    spool = tmp_path / "events.jsonl"
+    _tick(
+        monkeypatch,
+        {**QUIET, "memory_full_avg10": 30.0, "memory_full_avg60": 30.0},
+        _groups(),
+        spool=spool,
+    )
+    events = [json.loads(line) for line in spool.read_text().splitlines()]
+    assert [(e["kind"], e["group"], e["action"]) for e in events] == [
+        ("pressure", "pytest-heavy", "closed")
+    ]
+
+
+@pytest.mark.parametrize("event_loss", ["truncation", "missing", "append_failure"])
+def test_the_queue_alone_decides_reopening(monkeypatch, tmp_path, event_loss) -> None:
+    """Breaks if reopening depends on anything but pueue's group state."""
+    spool = tmp_path / "events.jsonl"
+    if event_loss == "append_failure":
+
+        def unavailable(*_args, **_kwargs):
+            raise OSError("synthetic unavailable event store")
+
+        monkeypatch.setattr(pressure_pause, "append_jsonl", unavailable)
+    groups = _groups()
     result, calls = _tick(
         monkeypatch,
-        {
-            "io_full_avg10": 2.0,
-            "io_full_avg60": 30.0,
-            "memory_full_avg10": 1.0,
-            "memory_full_avg60": 1.0,
-        },
-        {
-            "agent": "Running",
-            "pytest": "Paused",
-            "normal": "Running",
-            "bulk": "Paused",
-        },
-        spool=_spool(tmp_path, _ours("pytest"), _ours("bulk")),
+        {**QUIET, "memory_full_avg10": 30.0, "memory_full_avg60": 30.0},
+        groups,
+        spool=spool,
     )
-
-    assert calls == [("resume", "pytest")]
+    assert calls == [("pause", "pytest-heavy")]
+    if event_loss == "truncation":
+        spool.write_text("")
+    elif event_loss == "missing":
+        spool.unlink(missing_ok=True)
+    groups["pytest-heavy"] = "Paused"
+    result, calls = _tick(monkeypatch, QUIET, groups, spool=spool)
+    assert calls == [("resume", "pytest-heavy")]
     assert result["action"] == "opened"
-
-
-def test_zero_avg10_is_current_recovery_not_a_stale_avg60_fallback(
-    monkeypatch, tmp_path
-) -> None:
-    """Zero is valid PSI, so it must not select the older high average."""
-    result, calls = _tick(
-        monkeypatch,
-        {
-            "io_full_avg10": 0.0,
-            "io_full_avg60": 30.0,
-            "memory_full_avg10": 0.0,
-            "memory_full_avg60": 30.0,
-        },
-        {
-            "agent": "Running",
-            "pytest": "Paused",
-            "normal": "Running",
-            "bulk": "Running",
-        },
-        spool=_spool(tmp_path, _ours("pytest")),
-    )
-
-    assert calls == [("resume", "pytest")]
-    assert result["action"] == "opened"
-
-
-def test_pressure_replay_memory_does_not_scale_with_retained_history(tmp_path):
-    spool = tmp_path / "events.jsonl"
-    checkpoint = tmp_path / "checkpoint.json"
-    event = {
-        "kind": "pressure",
-        "action": "closed",
-        "group": "bulk",
-        "owner": "agentctl",
-        "signal": "io",
-        "detail": "x" * 200,
-    }
-    line = json.dumps(event) + "\n"
-    with spool.open("w") as stream:
-        for _ in range(20000):
-            stream.write(line)
-    tracemalloc.start()
-    try:
-        state = pressure_pause.event_state(spool, checkpoint=checkpoint)
-        _, peak = tracemalloc.get_traced_memory()
-    finally:
-        tracemalloc.stop()
-    assert state.ours() == {"bulk"}
-    assert state.cursor["offset"] == spool.stat().st_size
-    assert peak < 2 * 1024 * 1024
-
-
-def test_pressure_replay_leaves_partial_record_for_next_read(tmp_path):
-    spool = tmp_path / "events.jsonl"
-    checkpoint = tmp_path / "checkpoint.json"
-    closed = json.dumps({"kind": "pressure", **_ours("bulk")}).encode() + b"\n"
-    opened = json.dumps(
-        {"kind": "pressure", "action": "opened", "group": "bulk"}
-    ).encode()
-    prefix = closed + b"not-json\n\xff\n"
-    spool.write_bytes(prefix + opened[:-4])
-    first = pressure_pause.event_state(spool, checkpoint=checkpoint)
-    assert first.ours() == {"bulk"}
-    assert first.cursor["offset"] == len(prefix)
-    with spool.open("ab") as stream:
-        stream.write(opened[-4:] + b"\n")
-    second = pressure_pause.event_state(spool, checkpoint=checkpoint)
-    assert second.ours() == set()
-    assert second.cursor["offset"] == spool.stat().st_size
-
-
-def test_pressure_replay_read_failure_retains_previous_projection(
-    monkeypatch, tmp_path
-):
-    spool = _spool(tmp_path, _ours("pytest"))
-    checkpoint = tmp_path / "checkpoint.json"
-    previous = pressure_pause.event_state(spool, checkpoint=checkpoint)
-    with spool.open("ab") as stream:
-        stream.write(
-            (json.dumps({"kind": "pressure", **_ours("bulk")}) + "\n").encode()
-        )
-        stream.write(
-            (
-                json.dumps({"kind": "pressure", "action": "opened", "group": "pytest"})
-                + "\n"
-            ).encode()
-        )
-    saved_checkpoint = checkpoint.read_bytes()
-    original_open = Path.open
-
-    class FailingRead:
-        def __init__(self, handle):
-            self.handle = handle
-            self.reads = 0
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            self.handle.close()
-
-        def fileno(self):
-            return self.handle.fileno()
-
-        def seek(self, offset):
-            return self.handle.seek(offset)
-
-        def readline(self, limit):
-            self.reads += 1
-            if self.reads == 2:
-                raise OSError("synthetic read failure")
-            return self.handle.readline(limit)
-
-    def open_with_failure(path, *args, **kwargs):
-        handle = original_open(path, *args, **kwargs)
-        return FailingRead(handle) if path == spool and args == ("rb",) else handle
-
-    with monkeypatch.context() as patching:
-        patching.setattr(Path, "open", open_with_failure)
-        failed = pressure_pause.event_state(spool, checkpoint=checkpoint)
-    assert failed == previous
-    assert checkpoint.read_bytes() == saved_checkpoint
-    recovered = pressure_pause.event_state(spool, checkpoint=checkpoint)
-    assert recovered.ours() == {"bulk"}
-    assert recovered.cursor["offset"] == spool.stat().st_size
-
-
-@pytest.mark.parametrize("stage", ["read", "decode", "apply"])
-@pytest.mark.parametrize("rotate", [False, True])
-def test_deadline_replay_resumes_only_completed_records(
-    monkeypatch, tmp_path, stage, rotate
-):
-    spool = tmp_path / "events.jsonl"
-    checkpoint = tmp_path / "checkpoint.json"
-    first = (
-        json.dumps(
-            {"kind": "pressure", **_ours("bulk"), "detail": "α"}, ensure_ascii=False
-        )
-        + "\n"
-    ).encode()
-    second = (
-        json.dumps({"kind": "pressure", "action": "opened", "group": "bulk"}) + "\n"
-    ).encode()
-    spool.write_bytes(first + second)
-    original_open = Path.open
-    original_loads = json.loads
-    original_apply = pressure_pause.SpoolState.apply
-    interrupted = True
-    seeks = []
-    groups_calls = []
-    holds_calls = []
-
-    class ReplayRead:
-        def __init__(self, handle):
-            self.handle = handle
-            self.reads = 0
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            self.handle.close()
-
-        def fileno(self):
-            return self.handle.fileno()
-
-        def seek(self, offset):
-            seeks.append(offset)
-            return self.handle.seek(offset)
-
-        def readline(self, limit):
-            self.reads += 1
-            if interrupted and stage == "read" and self.reads == 2:
-                raise pressure_pause.TickDeadline("synthetic replay deadline")
-            return self.handle.readline(limit)
-
-    def open_replay(path, *args, **kwargs):
-        handle = original_open(path, *args, **kwargs)
-        return ReplayRead(handle) if path == spool and args == ("rb",) else handle
-
-    def decode(raw, *args, **kwargs):
-        value = original_loads(raw, *args, **kwargs)
-        if interrupted and stage == "decode" and value.get("action") == "opened":
-            raise pressure_pause.TickDeadline("synthetic replay deadline")
-        return value
-
-    def apply(state, event):
-        original_apply(state, event)
-        if interrupted and stage == "apply" and event.get("action") == "opened":
-            raise pressure_pause.TickDeadline("synthetic replay deadline")
-
-    def groups():
-        groups_calls.append(True)
-        return {"bulk": "Paused", "normal": "Paused"}
-
-    def release_holds():
-        holds_calls.append(True)
-        return {"released": [], "waiting": []}
-
-    monkeypatch.setattr(Path, "open", open_replay)
-    monkeypatch.setattr(pressure_pause.json, "loads", decode)
-    monkeypatch.setattr(pressure_pause.SpoolState, "apply", apply)
-    monkeypatch.setattr(
-        pressure_pause,
-        "read_pressure",
-        lambda _: dict.fromkeys(
-            [
-                "io_full_avg10",
-                "io_full_avg60",
-                "memory_full_avg10",
-                "memory_full_avg60",
-            ],
-            0.0,
-        ),
-    )
-    monkeypatch.setattr(pressure_pause.pueue, "groups_status", groups)
-    monkeypatch.setattr(
-        pressure_pause.pueue, "pause", lambda _: pytest.fail("unexpected pause")
-    )
-    monkeypatch.setattr(
-        pressure_pause.pueue, "resume", lambda _: pytest.fail("unowned pause resumed")
-    )
-    decision = pressure_pause.tick(
-        spool=spool, checkpoint=checkpoint, release_holds=release_holds
-    )
-    assert decision == {"action": "unavailable", "error": "synthetic replay deadline"}
-    assert groups_calls == holds_calls == []
-    saved = original_loads(checkpoint.read_text())
-    assert saved["cursor"] == {
-        "device": spool.stat().st_dev,
-        "inode": spool.stat().st_ino,
-        "offset": len(first),
-    }
-    assert saved["pauses"] == {"bulk": {"owner": "agentctl", "signals": []}}
-
-    interrupted = False
-    if rotate:
-        replacement = tmp_path / "replacement.jsonl"
-        replacement.write_bytes(first + second)
-        replacement.replace(spool)
-    decision = pressure_pause.tick(
-        spool=spool, checkpoint=checkpoint, release_holds=release_holds
-    )
-    assert decision["action"] in {"hold", "clear"}
-    assert groups_calls == holds_calls == [True]
-    assert seeks == [0, 0 if rotate else len(first)]
-    saved = original_loads(checkpoint.read_text())
-    assert saved["cursor"] == {
-        "device": spool.stat().st_dev,
-        "inode": spool.stat().st_ino,
-        "offset": len(first) + len(second),
-    }
-    assert saved["pauses"] == {}
-
-
-def test_malformed_checkpoint_recovers_to_empty_state(tmp_path) -> None:
-    checkpoint = tmp_path / "checkpoint.json"
-    checkpoint.write_text("{not-json", encoding="utf-8")
-
-    state = pressure_pause.event_state(None, checkpoint=checkpoint)
-
-    assert state.pauses == {}
-    assert state.cursor is None
 
 
 def test_pressure_append_keeps_compact_jsonl_record(tmp_path) -> None:
@@ -426,347 +171,6 @@ def test_pressure_append_keeps_compact_jsonl_record(tmp_path) -> None:
 
     assert json.loads(spool.read_text(encoding="utf-8")) == record
     assert spool.read_text(encoding="utf-8").endswith("\n")
-
-
-def test_memory_closure_stays_until_memory_below_hysteresis(monkeypatch) -> None:
-    result, calls = _tick(
-        monkeypatch,
-        {"io_full_avg60": 1.0, "memory_full_avg60": 15.0},
-        {
-            "agent": "Running",
-            "pytest": "Paused",
-            "normal": "Running",
-            "bulk": "Running",
-        },
-    )
-
-    assert calls == []
-    assert result["action"] == "hold"
-
-
-def test_signal_transition_reopens_excluded_group_before_closing_another(
-    monkeypatch, tmp_path
-) -> None:
-    result, calls = _tick(
-        monkeypatch,
-        {"io_full_avg60": 30.0, "memory_full_avg60": 1.0},
-        {
-            "agent": "Paused",
-            "pytest": "Running",
-            "normal": "Running",
-            "bulk": "Running",
-        },
-        spool=_spool(tmp_path, _ours("agent")),
-    )
-
-    assert calls == [("resume", "agent")]
-    assert result["group"] == "agent"
-
-
-def test_signal_transition_keeps_group_closed_while_new_signal_still_requires_it(
-    monkeypatch, tmp_path
-) -> None:
-    """An I/O pause cannot reopen pytest-heavy after memory becomes active."""
-    result, calls = _tick(
-        monkeypatch,
-        {
-            "io_full_avg10": 1.0,
-            "io_full_avg60": 1.0,
-            "memory_full_avg10": 30.0,
-            "memory_full_avg60": 30.0,
-        },
-        {
-            "agent": "Running",
-            "pytest-heavy": "Paused",
-            "pytest": "Running",
-            "normal": "Running",
-            "bulk": "Running",
-        },
-        spool=_spool(tmp_path, {**_ours("pytest-heavy"), "signal": "io"}),
-    )
-
-    assert calls == [("pause", "pytest")]
-    assert result["action"] == "closed"
-    assert result["group"] == "pytest"
-
-
-def test_pressure_closes_admission_without_stopping_tasks(monkeypatch) -> None:
-    result, calls = _tick(
-        monkeypatch,
-        {"io_full_avg60": 30.0, "memory_full_avg60": 30.0},
-        {
-            "agent": "Running",
-            "pytest": "Running",
-            "normal": "Running",
-            "bulk": "Running",
-        },
-    )
-
-    assert calls == [("pause", "pytest")]
-    assert result["action"] == "closed"
-
-
-def test_io_pressure_keeps_normal_admissible_after_pytest_is_paused(
-    monkeypatch,
-) -> None:
-    result, calls = _tick(
-        monkeypatch,
-        {"io_full_avg60": 30.0, "memory_full_avg60": 1.0},
-        {
-            "agent": "Running",
-            "pytest": "Paused",
-            "normal": "Running",
-            "bulk": "Running",
-        },
-    )
-
-    assert calls == []
-    assert result["action"] == "hold"
-
-
-def test_memory_pressure_keeps_agent_admissible(monkeypatch) -> None:
-    result, calls = _tick(
-        monkeypatch,
-        {"io_full_avg60": 1.0, "memory_full_avg60": 30.0},
-        {
-            "agent": "Running",
-            "pytest": "Paused",
-            "normal": "Running",
-            "bulk": "Running",
-        },
-    )
-
-    assert calls == [("pause", "normal")]
-    assert result["action"] == "closed"
-
-
-def test_memory_closure_continues_after_io_targets_are_closed(monkeypatch) -> None:
-    result, calls = _tick(
-        monkeypatch,
-        {"io_full_avg60": 30.0, "memory_full_avg60": 30.0},
-        {
-            "agent": "Running",
-            "pytest": "Paused",
-            "normal": "Running",
-            "bulk": "Paused",
-        },
-    )
-
-    assert calls == [("pause", "normal")]
-    assert result["signal"] == "memory"
-
-
-def test_a_pause_event_names_its_owner_and_group(monkeypatch, tmp_path) -> None:
-    spool = tmp_path / "events.jsonl"
-    _tick(
-        monkeypatch,
-        {"io_full_avg60": 30.0, "memory_full_avg60": 30.0},
-        {
-            "agent": "Running",
-            "pytest": "Running",
-            "normal": "Running",
-            "bulk": "Running",
-        },
-        spool=spool,
-    )
-
-    events = [json.loads(line) for line in spool.read_text().splitlines()]
-    assert [(e["owner"], e["group"], e["action"]) for e in events] == [
-        ("agentctl", "pytest", "closed")
-    ]
-
-
-def test_an_operator_pause_is_not_resumed(monkeypatch, tmp_path) -> None:
-    """`pueue pause -g agent` by hand leaves no event of ours; it stays paused."""
-    result, calls = _tick(
-        monkeypatch,
-        {"io_full_avg60": 1.0, "memory_full_avg60": 1.0},
-        {"agent": "Paused", "pytest": "Paused", "normal": "Running", "bulk": "Running"},
-        spool=_spool(tmp_path, _ours("pytest")),
-    )
-
-    assert calls == [("resume", "pytest")]
-    assert result["group"] == "pytest"
-
-    result, calls = _tick(
-        monkeypatch,
-        {"io_full_avg60": 1.0, "memory_full_avg60": 1.0},
-        {
-            "agent": "Paused",
-            "pytest": "Running",
-            "normal": "Running",
-            "bulk": "Running",
-        },
-        spool=_spool(
-            tmp_path,
-            _ours("pytest"),
-            {"action": "opened", "group": "pytest", "owner": "agentctl"},
-        ),
-    )
-    assert calls == []
-    assert result["action"] == "hold"
-
-
-def test_a_pause_someone_else_recorded_after_ours_is_theirs(
-    monkeypatch, tmp_path
-) -> None:
-    result, calls = _tick(
-        monkeypatch,
-        {"io_full_avg60": 1.0, "memory_full_avg60": 1.0},
-        {
-            "agent": "Running",
-            "pytest": "Paused",
-            "normal": "Running",
-            "bulk": "Running",
-        },
-        spool=_spool(
-            tmp_path,
-            _ours("pytest"),
-            {"action": "opened", "group": "pytest", "owner": "agentctl"},
-            {"action": "closed", "group": "pytest", "owner": "operator"},
-        ),
-    )
-
-    assert calls == []
-    assert result["action"] == "hold"
-
-
-def test_a_group_seen_running_after_our_pause_is_released_and_an_operator_repause_holds(
-    monkeypatch, tmp_path
-) -> None:
-    """`pueue start -g X` by the operator after our pause, then their own
-    `pueue pause -g X`: the second pause is theirs and stays."""
-    spool = _spool(tmp_path, _ours("pytest"))
-    result, calls = _tick(
-        monkeypatch,
-        {"io_full_avg60": 1.0, "memory_full_avg60": 1.0},
-        {
-            "agent": "Running",
-            "pytest": "Running",
-            "normal": "Running",
-            "bulk": "Running",
-        },
-        spool=spool,
-    )
-    assert calls == [] and result["action"] == "clear"
-    events = [json.loads(line) for line in spool.read_text().splitlines()]
-    assert [(e["action"], e["group"]) for e in events] == [
-        ("closed", "pytest"),
-        ("released", "pytest"),
-    ]
-    assert pressure_pause.paused_by_us(spool) == set()
-
-    result, calls = _tick(
-        monkeypatch,
-        {"io_full_avg60": 1.0, "memory_full_avg60": 1.0},
-        {
-            "agent": "Running",
-            "pytest": "Paused",
-            "normal": "Running",
-            "bulk": "Running",
-        },
-        spool=spool,
-    )
-    assert calls == [] and result["action"] == "hold"
-
-
-def test_io_pressure_keeps_focused_tests_admissible(monkeypatch) -> None:
-    """A long reader must not close the bounded test pool after closing bulk."""
-    result, calls = _tick(
-        monkeypatch,
-        {"io_full_avg60": 60.0, "memory_full_avg60": 1.0},
-        {"pytest": "Paused", "bulk": "Paused", "pytest-quick": "Running"},
-    )
-    assert calls == []
-    assert result["action"] == "hold"
-
-
-def test_owned_pause_recovers_on_memory_with_busy_io(monkeypatch, tmp_path) -> None:
-    """Retired I/O rules do not keep an owned pause closed."""
-    result, calls = _tick(
-        monkeypatch,
-        {"io_full_avg60": 60.0, "memory_full_avg60": 1.0},
-        {"pytest": "Paused", "bulk": "Paused", "pytest-quick": "Paused"},
-        spool=_spool(tmp_path, _ours("pytest-quick")),
-    )
-    assert calls == [("resume", "pytest-quick")]
-    assert result["action"] == "opened"
-
-
-def test_memory_pressure_still_closes_focused_tests(monkeypatch) -> None:
-    result, calls = _tick(
-        monkeypatch,
-        {"io_full_avg60": 60.0, "memory_full_avg60": 30.0},
-        {
-            "pytest": "Paused",
-            "normal": "Paused",
-            "bulk": "Paused",
-            "pytest-quick": "Running",
-        },
-    )
-    assert calls == [("pause", "pytest-quick")]
-    assert result["action"] == "closed"
-
-
-def test_operator_focused_test_pause_is_preserved_under_io_pressure(
-    monkeypatch, tmp_path
-) -> None:
-    result, calls = _tick(
-        monkeypatch,
-        {"io_full_avg60": 60.0, "memory_full_avg60": 1.0},
-        {"pytest": "Paused", "bulk": "Paused", "pytest-quick": "Paused"},
-        spool=_spool(
-            tmp_path, {"action": "closed", "group": "pytest-quick", "owner": "operator"}
-        ),
-    )
-    assert calls == []
-    assert result["action"] == "hold"
-
-
-@pytest.mark.parametrize(
-    "event_loss", ["rotation", "truncation", "missing", "append_failure"]
-)
-def test_owned_pause_reopens_after_event_loss(
-    monkeypatch, tmp_path, event_loss
-) -> None:
-    spool = _spool(tmp_path)
-    groups = {
-        "agent": "Running",
-        "pytest": "Running",
-        "normal": "Running",
-        "bulk": "Running",
-    }
-    if event_loss == "append_failure":
-
-        def unavailable(*_args, **_kwargs):
-            raise OSError("synthetic unavailable event store")
-
-        monkeypatch.setattr(pressure_pause, "append_jsonl", unavailable)
-    result, calls = _tick(
-        monkeypatch,
-        {"io_full_avg60": 30.0, "memory_full_avg60": 30.0},
-        groups,
-        spool=spool,
-    )
-    assert calls == [("pause", "pytest")]
-    assert result["action"] == "closed"
-    if event_loss == "rotation":
-        spool.rename(tmp_path / "previous.jsonl")
-        spool.write_text("")
-    elif event_loss == "truncation":
-        spool.write_text("")
-    elif event_loss == "missing":
-        spool.unlink()
-    groups["pytest"] = "Paused"
-    result, calls = _tick(
-        monkeypatch,
-        {"io_full_avg60": 1.0, "memory_full_avg60": 1.0},
-        groups,
-        spool=spool,
-    )
-    assert calls == [("resume", "pytest")]
-    assert result["action"] == "opened"
-    assert pressure_pause.paused_by_us(spool) == set()
 
 
 @pytest.mark.parametrize(

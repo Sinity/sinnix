@@ -4,8 +4,7 @@ Every verb runs to completion in this process, does what it was told, and
 reports.
 
 Reads print tables or JSON; native mutations print JSON and a summary line.
-Batch and evidence verbs read retained records only. Worktree cleanup preserves
-checkout-only bytes and original history before release.
+Worktree cleanup preserves checkout-only bytes and Git history before release.
 
 The project is ``--project``, a leading positional that names a configured
 project or a checkout path, or else the checkout enclosing the working
@@ -33,7 +32,6 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from . import (
-    evidence,
     job_queries,
     launch,
     operator_view,
@@ -41,11 +39,10 @@ from . import (
     pressure,
     worktree_cleanup,
 )
-from .batch_history import HistoryError, HistoryRefusal, list_runs, load, resolve_run_id
 from .config import Config, ConfigError, load_config, resolve_project
 from .github import GithubError
 from .job_queries import JobError
-from .operator_view import DEFAULT_JOB_ROWS, Output, local_clock, table
+from .operator_view import DEFAULT_JOB_ROWS, Output, TaskReadError, local_clock, table
 from .projects import (
     ProjectAdapter,
     ProjectConfigError,
@@ -53,7 +50,6 @@ from .projects import (
     ProjectOperation,
 )
 from .pueue import PueueError
-from .task_reads import TaskReadError
 from .worktree_cleanup import CleanupError
 from .worktrunk import WorktrunkError
 
@@ -69,7 +65,6 @@ FOLLOW_POLL_SECONDS = 1.0
 MAX_EVENT_LINE_BYTES = 1024 * 1024
 
 _REFUSALS = (
-    HistoryRefusal,
     ConfigError,
     JobError,
     TaskReadError,
@@ -78,7 +73,6 @@ _REFUSALS = (
 )
 _SUBSTRATE_ERRORS = (
     CleanupError,
-    HistoryError,
     GithubError,
     PueueError,
     WorktrunkError,
@@ -88,18 +82,12 @@ PROJECT_HELP = "project id or checkout path (default: the checkout enclosing the
 
 
 def _output_arguments(target: argparse.ArgumentParser) -> None:
-    """``--json`` and ``--full`` after the verb; the root flags set the defaults."""
+    """``--json`` after the verb; the root flag sets the default."""
     target.add_argument(
         "--json",
         action="store_true",
         default=argparse.SUPPRESS,
         help="print the document instead of a table",
-    )
-    target.add_argument(
-        "--full",
-        action="store_true",
-        default=argparse.SUPPRESS,
-        help="print complete run ids and commits",
     )
 
 
@@ -118,16 +106,13 @@ def _job_id_option(target: argparse.ArgumentParser) -> None:
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(
         prog="agentctl",
-        description="Native project jobs, preserved worktrees and retained history.",
+        description="Declared project jobs, their retained results, and checkout cleanup.",
     )
     root.add_argument(
         "--config", type=Path, help="agentctl.json (default /etc/sinnix/agentctl.json)"
     )
     root.add_argument(
         "--json", action="store_true", help="print the document instead of a table"
-    )
-    root.add_argument(
-        "--full", action="store_true", help="print complete run ids and commits"
     )
     verbs = root.add_subparsers(dest="verb", required=True)
 
@@ -141,11 +126,11 @@ def parser() -> argparse.ArgumentParser:
         _output_arguments(one)
 
     worktree = verbs.add_parser(
-        "worktree", help="preserve and clean terminal owned checkouts"
+        "worktree", help="retire completed checkouts, preserving their work"
     )
     worktree_verbs = worktree.add_subparsers(dest="worktree_verb", required=True)
     clean = worktree_verbs.add_parser(
-        "clean", help="remove terminal owned checkouts, retaining unpreserved work"
+        "clean", help="remove completed published checkouts, keeping any with unpublished work"
     )
     clean.add_argument("selector", nargs="?", metavar="project", help=PROJECT_HELP)
     clean.add_argument(
@@ -274,38 +259,6 @@ def parser() -> argparse.ArgumentParser:
     _job_id_option(wait)
     wait.add_argument("--timeout-seconds", type=int, default=DEFAULT_WAIT_SECONDS)
     _output_arguments(wait)
-
-    history = verbs.add_parser("batch", help="read retained batch history")
-    history_verbs = history.add_subparsers(dest="batch_verb", required=True)
-    status = history_verbs.add_parser(
-        "status", help="read an original run with native job observations"
-    )
-    status.add_argument("run_id", help="a run id or its suffix")
-    _project_option(status)
-    _output_arguments(status)
-    listing = history_verbs.add_parser("list", help="read retained runs for a project")
-    listing.add_argument("selector", nargs="?", metavar="project", help=PROJECT_HELP)
-    _project_option(listing)
-    _output_arguments(listing)
-
-    native_evidence = verbs.add_parser("evidence", help="read retained native evidence")
-    evidence_verbs = native_evidence.add_subparsers(dest="evidence_verb", required=True)
-    evidence_list = evidence_verbs.add_parser(
-        "list", help="retained evidence of work done outside a batch, for one project"
-    )
-    evidence_list.add_argument(
-        "selector", nargs="?", metavar="project", help=PROJECT_HELP
-    )
-    evidence_list.add_argument("--cursor")
-    evidence_list.add_argument("--limit", type=int, default=evidence.MAX_PAGE_SIZE)
-    _project_option(evidence_list)
-    _output_arguments(evidence_list)
-    evidence_get = evidence_verbs.add_parser(
-        "get", help="retrieve one complete evidence record by id"
-    )
-    evidence_get.add_argument("evidence_id")
-    _project_option(evidence_get)
-    _output_arguments(evidence_get)
 
     view = verbs.add_parser("view", help="the operator screen")
     view.add_argument("selector", nargs="?", metavar="project", help=PROJECT_HELP)
@@ -555,42 +508,6 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         _report_failure(config, waited)
         return EXIT_OK if waited.get("phase") == "succeeded" else EXIT_JOB_NOT_SUCCEEDED
     raise AssertionError(verb)
-
-
-def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
-    if arguments.batch_verb == "status":
-        run_id = resolve_run_id(config, arguments.run_id)
-        project = resolve_project(
-            config, arguments.project or load(config, run_id).project
-        )
-        document = operator_view.status(config, run_id, project=project)
-        out.read(document, out.run_lines(document))
-        return EXIT_OK
-    if arguments.batch_verb == "list":
-        project = _select_project(config, arguments.project, arguments.selector)
-        rows = [
-            operator_view.status(config, run.run_id, project=project)
-            for run in list_runs(config, project.project_id)
-        ]
-        out.read(rows, out.runs_table(rows))
-        return EXIT_OK
-    raise AssertionError(arguments.batch_verb)
-
-
-def _evidence(arguments: argparse.Namespace, config: Config, out: Output) -> int:
-    if arguments.evidence_verb == "list":
-        project = _select_project(config, arguments.project, arguments.selector)
-        records = evidence.list_records(
-            config, project.project_id, cursor=arguments.cursor, limit=arguments.limit
-        )
-        out.read(records, json.dumps(records, indent=2, sort_keys=True))
-        return EXIT_OK
-    if arguments.evidence_verb == "get":
-        project = resolve_project(config, arguments.project)
-        record = evidence.get_record(config, project.project_id, arguments.evidence_id)
-        out.read(record, json.dumps(record, indent=2, sort_keys=True))
-        return EXIT_OK
-    raise AssertionError(arguments.evidence_verb)
 
 
 def _event_line(event: Mapping[str, Any]) -> str:
@@ -852,11 +769,7 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
     if verb == "worktree":
         if arguments.worktree_verb == "clean":
             project = _select_project(config, arguments.project, arguments.selector)
-            cleaned = (
-                worktree_cleanup.clean(config, project, paths=arguments.path)
-                if arguments.path
-                else worktree_cleanup.clean(config, project)
-            )
+            cleaned = worktree_cleanup.clean(config, project, paths=arguments.path)
             kept = [f"{row['branch']}: {row['reason']}" for row in cleaned["kept"]]
             out.write(
                 cleaned,
@@ -865,10 +778,6 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
             )
             return EXIT_OK
         raise AssertionError(arguments.worktree_verb)
-    if verb == "batch":
-        return _batch(arguments, config, out)
-    if verb == "evidence":
-        return _evidence(arguments, config, out)
     if verb == "view":
         project = _select_project(config, arguments.project, arguments.selector)
         snapshot = operator_view.collect(config, project, now=out.now)
@@ -888,10 +797,8 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
         )
         return EXIT_OK
     if verb == "pressure":
-        checkpoint = config.state_dir / "pressure-state.json"
         decision = pressure.tick(
             spool=config.event_spool,
-            checkpoint=checkpoint,
             pools=config.pools,
             release_holds=lambda: launch.release_holds(config, wait=False),
         )
@@ -923,7 +830,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if extra and not (arguments.verb == "job" and arguments.job_verb == "start"):
         command_parser.error("arguments after -- are only supported by job start")
     arguments.extra = extra
-    out = Output(as_json=arguments.json, full=arguments.full)
+    out = Output(as_json=arguments.json)
     try:
         config = load_config(arguments.config)
         return _dispatch(arguments, config, out)
@@ -936,27 +843,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _report_error(error: Exception, out: Output) -> None:
-    """Keep retained recovery work visible in either CLI representation."""
-    run_id = getattr(error, "run_id", None)
-    unprovisioned = getattr(error, "unprovisioned", [])
-    rows = [row for row in unprovisioned if isinstance(row, Mapping)]
     if out.as_json:
-        document: dict[str, Any] = {"error": str(error)}
-        if isinstance(run_id, str) and run_id:
-            document["retained_run"] = run_id
-        if rows:
-            document["unprovisioned"] = [dict(row) for row in rows]
-        print(json.dumps(document, sort_keys=True))
+        print(json.dumps({"error": str(error)}, sort_keys=True))
         return
     print(f"agentctl: {error}", file=sys.stderr)
-    if isinstance(run_id, str) and run_id:
-        print(f"agentctl: retained run {run_id}", file=sys.stderr)
-    for row in rows:
-        worker = row.get("worker") or row.get("id") or "worker"
-        beads = ", ".join(str(bead) for bead in row.get("beads") or [])
-        reason = row.get("reason") or "unprovisioned"
-        suffix = f" ({beads})" if beads else ""
-        print(f"agentctl: pending {worker}{suffix}: {reason}", file=sys.stderr)
 
 
 if __name__ == "__main__":  # pragma: no cover - console entry point

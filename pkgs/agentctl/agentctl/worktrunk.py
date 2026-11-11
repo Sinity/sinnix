@@ -7,8 +7,7 @@ only place that shells out to it.
 Reading is `git worktree list`, which publishes every worktree's path and
 branch from the registry without entering a working tree. A listing that
 statuses each worktree instead costs the whole content of every worktree on
-every call, and agentctl looks a branch up on each batch start, land, status
-and abandon.
+every call, and a cleanup pass lists the registry several times.
 
 Creation and removal write the repository's shared Git state: they hold one
 lock per repository and return only once Git has released that repository's

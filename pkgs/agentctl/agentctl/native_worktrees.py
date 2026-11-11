@@ -390,7 +390,7 @@ def clean_native(
                     continue
                 try:
                     prepared[path] = _preserve_artifacts(
-                        config, project, None, path, artifacts=retained
+                        config, project, path, artifacts=retained
                     )
                 except (OSError, CleanupError) as error:
                     kept.append({"branch": str(path), "reason": str(error)})
@@ -436,7 +436,6 @@ def clean_native(
                     config,
                     project,
                     tree.branch or "",
-                    base=published.base,
                     recorded_path=path,
                     artifacts=retained,
                     delete_branch=bool(tree.branch),
@@ -489,7 +488,7 @@ def clean_native(
                         {"branch": name, "reason": "unpreserved build-remnant evidence"}
                     )
                     continue
-                _recovery_ref(project.root, None, path, head)
+                _recovery_ref(project.root, path, head)
                 if external[path]:
                     if _external_cache(path) != external[path]:
                         kept.append(

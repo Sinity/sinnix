@@ -5,9 +5,7 @@ from __future__ import annotations
 import errno
 import fcntl
 import hashlib
-import json
 import os
-import re
 import shutil
 import stat
 import subprocess
@@ -16,11 +14,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterator, Mapping, Sequence
 
-from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.procfs import held_paths
 
 from . import gitcmd, pueue, worktrunk
-from .batch_history import Run, list_runs, load, manifest_path, runs_dir
 from .limits import CALL_TIMEOUT_SECONDS
 from .projects import ProjectAdapter
 from .pueue import PueueError
@@ -48,28 +44,13 @@ def _custody_lock(path: Path) -> Iterator[bool]:
 
 
 def project_locked(config: Config, project_id: str) -> Iterator[bool]:
-    # Keep the established lock address while older recovery binaries exist.
-    return _custody_lock(runs_dir(config) / f"{project_id}.lock")
-
-
-def _update_custody(
-    config: Config, run_id: str, retain: Callable[[dict[str, Any]], None]
-) -> None:
-    path = manifest_path(config, run_id)
-    with _custody_lock(path.with_suffix(".lock")):
-        document = load(config, run_id).to_dict()
-        retain(document)
-        Run.from_dict(document)
-        atomic_publish(
-            path,
-            (json.dumps(document, indent=2, sort_keys=True) + "\n").encode(),
-            fsync=False,
-            mode=0o600,
-        )
+    """One cleanup pass per project at a time."""
+    return _custody_lock(config.state_dir / "worktree-cleanup" / f"{project_id}.lock")
 
 
 WORKTREE_STATE_DIR = ".agentctl"
-_BATCH_BRANCH = re.compile(r"^batch/(?P<run>[^/]+)/[^/]+$")
+#: Preserved checkout artifacts and Git recovery refs live under this name.
+RETAINED = "checkouts"
 
 
 def _git(
@@ -444,13 +425,13 @@ def _artifact_paths(path: Path, patterns: Sequence[str]) -> list[Path]:
 
 
 def _artifact_destination(
-    config: Config, run_id: str, worktree: Path, relative: Path, digest: str
+    config: Config, worktree: Path, relative: Path, digest: str
 ) -> Path:
     token = hashlib.sha256(str(worktree).encode()).hexdigest()[:16]
     return (
         config.state_dir
         / "artifacts"
-        / run_id
+        / RETAINED
         / token
         / relative.parent
         / f"{relative.name}.{digest[:16]}"
@@ -468,7 +449,6 @@ def _digest(path: Path) -> str:
 def _preserve_artifacts(
     config: Config,
     project: ProjectAdapter,
-    run_id: str | None,
     path: Path,
     *,
     artifacts: list[dict[str, str]],
@@ -482,9 +462,7 @@ def _preserve_artifacts(
     for source in _artifact_paths(path, patterns):
         relative = source.relative_to(path)
         before = _digest(source)
-        destination = _artifact_destination(
-            config, run_id or "orphan", path, relative, before
-        )
+        destination = _artifact_destination(config, path, relative, before)
         destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(destination.parent, 0o700)
         if destination.exists():
@@ -502,19 +480,9 @@ def _preserve_artifacts(
     return replacements
 
 
-def _replace_paths(value: Any, replacements: Mapping[str, str]) -> Any:
-    if isinstance(value, str):
-        return replacements.get(value, value)
-    if isinstance(value, list):
-        return [_replace_paths(item, replacements) for item in value]
-    if isinstance(value, dict):
-        return {key: _replace_paths(item, replacements) for key, item in value.items()}
-    return value
-
-
-def _recovery_ref(root: Path, run_id: str | None, path: Path, head: str) -> str:
+def _recovery_ref(root: Path, path: Path, head: str) -> str:
     token = hashlib.sha256(str(path).encode()).hexdigest()[:16]
-    ref = f"refs/agentctl/recovery/{run_id or 'orphan'}/{token}/{head}"
+    ref = f"refs/agentctl/recovery/{RETAINED}/{token}/{head}"
     existing = gitcmd.git(
         root,
         "rev-parse",
@@ -620,9 +588,7 @@ def _drop_branch(
     project: ProjectAdapter,
     branch: str,
     *,
-    base: str,
     recorded_path: Path | None = None,
-    run_id: str | None = None,
     artifacts: list[dict[str, str]] | None = None,
     delete_branch: bool = False,
     registry: Sequence[worktrunk.Worktree] | None = None,
@@ -649,7 +615,7 @@ def _drop_branch(
         if head:
             if expected_head is not None and head != expected_head:
                 raise CleanupError("branch moved after publication proof")
-            _recovery_ref(project.root, run_id, recorded_path or project.root, head)
+            _recovery_ref(project.root, recorded_path or project.root, head)
             _git(project.root, "update-ref", "-d", f"refs/heads/{branch}", head)
 
     registry = (
@@ -754,7 +720,7 @@ def _drop_branch(
                 error=CleanupError,
             )
             if detached or delete_branch:
-                _recovery_ref(project.root, run_id, path, head)
+                _recovery_ref(project.root, path, head)
             if not detached and branch_head != head:
                 return "worktree kept; branch no longer names checkout HEAD"
             copied = (
@@ -763,40 +729,10 @@ def _drop_branch(
                 else _preserve_artifacts(
                     config,
                     project,
-                    run_id,
                     path,
                     artifacts=artifacts if artifacts is not None else [],
                 )
             )
-            if copied and run_id is not None:
-
-                def retain(document: dict[str, Any]) -> None:
-                    replacements = dict(copied)
-                    for artifact in document.get("artifacts", []):
-                        source = artifact.get("source")
-                        destination = artifact.get("destination")
-                        if source in copied and isinstance(destination, str):
-                            replacements[destination] = copied[source]
-                    history = list(document.get("artifacts", []))
-                    updated = _replace_paths(
-                        {
-                            key: value
-                            for key, value in document.items()
-                            if key != "artifacts"
-                        },
-                        replacements,
-                    )
-                    document.clear()
-                    document.update(updated)
-                    document["artifacts"] = [
-                        *history,
-                        *(
-                            {"source": source, "destination": destination}
-                            for source, destination in copied.items()
-                        ),
-                    ]
-
-                _update_custody(config, run_id, retain)
             obstacle = _cleanup_obstacle(project, path, copied, disposable)
             if obstacle:
                 return obstacle
@@ -861,251 +797,19 @@ def _drop_branch(
     return None
 
 
-def _drop_worktrees(
-    config: Config, project: ProjectAdapter, run: Run, *, published: str | None = None
-) -> list[str]:
-    with project_locked(config, project.project_id):
-        return _drop_worktrees_locked(config, project, run, published=published)
-
-
-def _drop_worktrees_locked(
-    config: Config, project: ProjectAdapter, run: Run, *, published: str | None = None
-) -> list[str]:
-    """Drop the run's worker and integration worktrees; name the ones kept.
-
-    ``published`` is the candidate a landing published. The integration
-    worktree is measured against it rather than against the run's base: its
-    commits are out, so only uncommitted changes in it are still work.
-    """
-    branches = [
-        (
-            worker["branch"],
-            run.base_commit,
-            Path(worker["worktree"]) if worker.get("worktree") else None,
-        )
-        for worker in run.workers
-    ]
-    branches.append(
-        (
-            run.landing["integration_branch"],
-            published or run.base_commit,
-            (
-                Path(run.landing["integration_worktree"])
-                if run.landing.get("integration_worktree")
-                else None
-            ),
-        )
-    )
-    residual: list[str] = []
-    for branch, base, recorded_path in branches:
-        kept = _drop_branch(
-            config,
-            project,
-            branch,
-            base=base,
-            recorded_path=recorded_path,
-            run_id=run.run_id,
-        )
-        if kept:
-            residual.append(f"{branch}: {kept}")
-    return residual
-
-
-def _branch_reachable_from(root: Path, branch: str, base: str) -> bool:
-    """Whether the branch tip is already preserved by the default branch."""
-    try:
-        gitcmd.git(
-            root,
-            "merge-base",
-            "--is-ancestor",
-            f"refs/heads/{branch}",
-            base,
-            error=CleanupError,
-        )
-    except CleanupError:
-        return False
-    return True
-
-
 def clean(
     config: Config, project: ProjectAdapter, *, paths: Sequence[Path] | None = None
 ) -> dict[str, Any]:
-    """Remove the worktrees of runs that are over. Run state, never age.
+    """Retire this project's completed native checkouts, or only ``paths``.
 
-    A worktree is a candidate only when its branch names a batch run of this
-    project that no longer holds its beads: landed, abandoned, or with no
-    manifest left at all. It is removed only when nothing would be lost with
-    it, and one that is kept is named with the reason.
+    A checkout is a candidate when its recorded jobs are terminal (or an
+    explicit path names it) and its work is published. Each one kept is named
+    with the reason.
     """
-    try:
-        default_base = _git(
-            project.root,
-            "rev-parse",
-            "--verify",
-            (
-                f"{project.workspace.default_base}^{{commit}}"
-                if project.workspace
-                else "refs/remotes/origin/HEAD^{commit}"
-            ),
-        )
-    except CleanupError:
-        # Without a base every commit is judged by the refs that hold it,
-        # which is the check that decides preservation anyway.
-        default_base = ""
-    selected = {path.absolute() for path in paths} if paths is not None else None
-    removed: list[str] = []
-    absent: list[str] = []
-    kept: list[dict[str, str]] = []
-    retained_artifacts: list[dict[str, str]] = []
-    with project_locked(config, project.project_id):
-        # Preparation holds this lock while creating checkouts. Read their
-        # owners after acquiring it, including starts that just finished.
-        runs = {
-            run.run_id: run
-            for run in list_runs(config, project.project_id, strict=True)
-        }
-        targets: list[tuple[str, Run | None, Path | None]] = []
-        for owner in runs.values():
-            if owner.live:
-                continue
-            targets.extend(
-                (worker["branch"], owner, Path(worker["worktree"]))
-                for worker in owner.workers
-                if worker.get("worktree")
-            )
-            integration = owner.landing.get("integration_worktree")
-            if integration:
-                targets.append(
-                    (owner.landing["integration_branch"], owner, Path(integration))
-                )
-        for tree in worktrunk.worktrunk_list(project.root):
-            match = _BATCH_BRANCH.match(tree.branch or "")
-            if tree.main or match is None:
-                continue
-            owner = runs.get(match.group("run"))
-            if owner is not None:
-                continue
-            if owner is None and not match.group("run").startswith(
-                f"{project.project_id}-"
-            ):
-                continue
-            targets.append((str(tree.branch), owner, None))
-        seen: set[tuple[str, Path | None]] = set()
-        for branch, owner, recorded_path in targets:
-            if selected is not None:
-                target = recorded_path or next(
-                    (
-                        tree.path
-                        for tree in worktrunk.worktrunk_list(project.root)
-                        if tree.branch == branch
-                    ),
-                    None,
-                )
-                if target not in selected:
-                    continue
-            key = (branch, recorded_path)
-            if key in seen:
-                continue
-            seen.add(key)
-            registered = worktrunk.worktrunk_find(project.root, branch)
-            if recorded_path is not None:
-                registered = registered or next(
-                    (
-                        tree
-                        for tree in worktrunk.worktrunk_list(project.root)
-                        if not tree.main
-                        and tree.branch is None
-                        and tree.path == recorded_path
-                    ),
-                    None,
-                )
-            try:
-                recorded_present = recorded_path is not None and _path_entry_exists(
-                    recorded_path
-                )
-            except OSError as error:
-                kept.append(
-                    {
-                        "branch": branch,
-                        "reason": f"worktree kept; cannot inspect recorded checkout: {error}",
-                    }
-                )
-                continue
-            checkout_absent = (
-                registered is None or registered.path is None
-            ) and not recorded_present
-            if registered is None or registered.path is None:
-                if not recorded_present:
-                    # A terminal manifest still owns the branch when its
-                    # checkout has already disappeared.
-                    may_delete = owner is not None and (
-                        owner.acceptance is not None
-                        or (
-                            owner.abandoned is not None
-                            and bool(default_base)
-                            and _branch_reachable_from(
-                                project.root, branch, default_base
-                            )
-                        )
-                    )
-                    if not may_delete:
-                        if owner is not None and owner.abandoned is not None:
-                            kept.append(
-                                {
-                                    "branch": branch,
-                                    "reason": (
-                                        "branch kept; commits are not reachable from default branch"
-                                        if default_base
-                                        else "branch kept; default branch could not be resolved"
-                                    ),
-                                }
-                            )
-                            continue
-                        absent.append(branch)
-                        continue
-            copied: list[dict[str, str]] = []
-            reason = _drop_branch(
-                config,
-                project,
-                branch,
-                base=owner.base_commit if owner else default_base,
-                recorded_path=recorded_path,
-                run_id=owner.run_id if owner else None,
-                artifacts=copied,
-                delete_branch=(
-                    owner is not None
-                    and (
-                        owner.acceptance is not None
-                        or (
-                            owner.abandoned is not None
-                            and bool(default_base)
-                            and _branch_reachable_from(
-                                project.root, branch, default_base
-                            )
-                        )
-                    )
-                ),
-            )
-            if reason:
-                kept.append({"branch": branch, "reason": reason})
-            elif checkout_absent:
-                absent.append(branch)
-            else:
-                removed.append(branch)
-            retained_artifacts.extend(copied)
     from .native_worktrees import clean_native
 
-    native = clean_native(config, project, selected)
-    removed.extend(native["removed"])
-    kept.extend(native["kept"])
-    retained_artifacts.extend(native["artifacts"])
-    return {
-        "project": project.project_id,
-        "removed": removed,
-        "absent": absent,
-        "kept": kept,
-        "artifacts": retained_artifacts,
-    }
+    selected = {path.absolute() for path in paths} if paths is not None else None
+    return {"project": project.project_id, **clean_native(config, project, selected)}
 
 
 def clean_published(
