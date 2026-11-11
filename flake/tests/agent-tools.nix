@@ -16,6 +16,42 @@ in
     }:
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
+      sinexProbe = pkgs.writeShellScriptBin "sinexctl" ''
+        printf '%s\n' "''${SINEX_TOKEN_FILE:-native-client-default}" "$SINEX_ENDPOINT" "$@"
+      '';
+      sinexLauncher =
+        pkgs.writeScript "mcp-sinex-fixture"
+          (import ../../modules/features/dev/agents/mcp-tools.nix {
+            inherit lib pkgs inputs;
+            scriptPkgs = { };
+            config.services.sinex = {
+              package = sinexProbe;
+              stateDir = "/var/lib/fixture/current-generation";
+            };
+          }).mcpSinexText;
+      headlessSinexLauncher =
+        pkgs.writeScript "mcp-sinex-headless-fixture"
+          (import ../../modules/features/dev/agents/mcp-tools.nix {
+            inherit lib pkgs;
+            inputs.sinex.packages.${system}.sinexctl = sinexProbe;
+            scriptPkgs = { };
+            config = { };
+          }).mcpSinexText;
+      sinexMcpBinding = pkgs.runCommand "sinex-mcp-binding" { } ''
+        env -u SINEX_TOKEN_FILE -u SINEX_ENDPOINT ${sinexLauncher} fixture-argument > actual
+        printf '%s\n' /var/lib/fixture/current-generation/tokens/agent.token \
+          http://127.0.0.1:7171 mcp fixture-argument > expected
+        cmp expected actual
+        SINEX_TOKEN_FILE=/fixture/explicit.token SINEX_ENDPOINT=unix:/fixture/explicit.sock \
+          ${sinexLauncher} explicit-argument > actual
+        printf '%s\n' /fixture/explicit.token unix:/fixture/explicit.sock \
+          mcp explicit-argument > expected
+        cmp expected actual
+        env -u SINEX_TOKEN_FILE -u SINEX_ENDPOINT ${headlessSinexLauncher} --help > actual
+        printf '%s\n' native-client-default http://127.0.0.1:7171 mcp --help > expected
+        cmp expected actual
+        touch "$out"
+      '';
       polylogueSentinelDataDir = "/tmp/sinnix-polylogue-agent-tools-sentinel";
       runtimeDefaults = import ../data/runtime-defaults.nix { inherit lib; };
       mcpRegistry = import ../data/mcp-registry.nix { inherit lib; };
@@ -1080,7 +1116,9 @@ in
 
             "$HOME/.local/bin/mcp-polylogue" --help > mcp-polylogue-help
             grep -q 'MCP' mcp-polylogue-help
-            grep -Fq 'sinnix-mcp-sinex-script' "$(readlink -f "$HOME/.local/bin/mcp-sinex")"
+            SINEX_TOKEN_FILE="$HOME/synthetic-agent.token" \
+              "$HOME/.local/bin/mcp-sinex" --help > mcp-sinex-help
+            grep -q 'mcp' mcp-sinex-help
             for helper in \
               "$HOME/.local/bin/sinnix-chrome-control" \
               "$HOME/.local/bin/sinnix-hypr-control" \
@@ -1518,6 +1556,7 @@ in
     in
     {
       checks = {
+        sinex-mcp-binding = sinexMcpBinding;
         agent-resource-policy = agentResourcePolicy;
         agent-npm-bootstrap-recovery = agentNpmBootstrapRecovery;
         agent-scope-guard = agentScopeGuardFixture;

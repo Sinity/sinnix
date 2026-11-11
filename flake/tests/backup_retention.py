@@ -53,20 +53,46 @@ with tempfile.TemporaryDirectory() as temporary:
             cwd=root,
             env=env,
         )
+    native_repositories = []
+    for name in ("borg-sinex-core-v1", "borg-sinex-keys-v1"):
+        native = repo.parent / name
+        run(["borg", "init", "--encryption=none", str(native)], env=env)
+        for suffix, age in (("current", 0), ("old", 400), ("day-a", 30), ("day-b", 30)):
+            moment = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=age)
+            if suffix.startswith("day-"):
+                moment = moment.replace(
+                    hour=12, minute=10 if suffix.endswith("a") else 20, second=0
+                )
+            run(
+                [
+                    "borg", "create", "--timestamp",
+                    moment.strftime("%Y-%m-%dT%H:%M:%S"),
+                    f"{native}::sinex-core-{suffix}", "payload",
+                ],
+                cwd=root,
+                env=env,
+            )
+        native_repositories.append(native)
+
     script = root / "maintenance.sh"
     script.write_text(Path(sys.argv[1]).read_text())
 
-    def archives():
+    def archives(repository=repo):
         return {
             a["name"]
             for a in json.loads(
-                run(["borg", "list", "--json", str(repo)], env=env).stdout
+                run(["borg", "list", "--json", str(repository)], env=env).stdout
             )["archives"]
         }
 
-    before = archives()
+    before = {
+        repository: archives(repository)
+        for repository in [repo, *native_repositories]
+    }
     run(["bash", str(script)], env=dict(env, SINNIX_BORG_MAINTENANCE_DRY_RUN="1"))
-    assert archives() == before, "preview changed archives"
+    assert all(
+        archives(repository) == names for repository, names in before.items()
+    ), "preview changed archives"
     run(["bash", str(script)], env=env)
     # Borg preserves the oldest endpoint while fewer than six months exist.
     assert archives() == {
@@ -85,6 +111,17 @@ with tempfile.TemporaryDirectory() as temporary:
         ["borg", "extract", "--stdout", f"{repo}::realm-current", "payload"], env=env
     ).stdout
     assert restored == (root / "payload").read_text()
+    for native in native_repositories:
+        assert archives(native) == {
+            "sinex-core-current",
+            "sinex-core-old",
+            "sinex-core-day-b",
+        }, archives(native)
+        restored = run(
+            ["borg", "extract", "--stdout", f"{native}::sinex-core-current", "payload"],
+            env=env,
+        ).stdout
+        assert restored == (root / "payload").read_text()
     marker = root / "dead-holder/cache-drain/maintenance.last-success"
     stamp = marker.read_bytes()
     run(["bash", str(script)], env=env)

@@ -1,6 +1,6 @@
 # Sinex on this host: its Sinnix options. The host imports Sinex's NixOS module and
 # modules/services/sinex/bridge.nix, which places its state, secrets and units;
-# the host's own configuration names the sources under `services.sinex.sources`.
+# the host supplies canonical roots under `services.sinex.discovery`.
 { lib, ... }:
 {
   options.sinnix.services.sinex = {

@@ -73,7 +73,7 @@ in
             mcp =
               cli:
               (import ../../modules/features/dev/agents/mcp-tools.nix {
-                inherit lib pkgs;
+                inherit lib pkgs inputs;
                 scriptPkgs = { };
                 config.system.build.polylogueCli = cli;
               }).mcpPolylogueBin;

@@ -9,6 +9,7 @@
   lib,
   helpers,
   pkgs,
+  inputs,
   ...
 }@args:
 let
@@ -20,6 +21,7 @@ let
       pkgs
       scriptPkgs
       config
+      inputs
       ;
   };
   jsonFormat = pkgs.formats.json { };

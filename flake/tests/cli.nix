@@ -190,7 +190,7 @@ in
               [[ "$1" = -m && "$2" = lynchpin.mcp.cli && "$3" = fixture-argument ]]
             '';
             wrappers = import ../../modules/features/dev/agents/mcp-tools.nix {
-              inherit lib pkgs;
+              inherit lib pkgs inputs;
               scriptPkgs.lynchpin-python = probe;
               config = {
                 environment.variables = {

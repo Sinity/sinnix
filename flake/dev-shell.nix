@@ -61,8 +61,14 @@
                 _repo=$(${pkgs.jq}/bin/jq -er --arg n "$_product" '.nodes[$n].locked
                   | if .type == "github" then "\(.owner)/\(.repo)"
                     else .url | capture("^https://github.com/(?<r>[^/]+/[^/.]+)").r end' "$_lock_dir/flake.lock")
+                _nar_hash=$(${pkgs.jq}/bin/jq -er --arg n "$_product" '.nodes[$n].locked.narHash | @uri' "$_lock_dir/flake.lock")
                 echo "update: fetching $_product $_new from sinity.cachix.org" >&2
-                if ! ${nix} build --max-jobs 0 --no-link "github:$_repo/$_new#default"; then
+                # symlinkJoin defaults to refusing substitutes even when its
+                # exact aggregate was published alongside the runtime packages.
+                # Bind the exported tree too: Git and GitHub archives can
+                # differ at export-ignore paths for the same commit.
+                if ! ${nix} build --max-jobs 0 --option always-allow-substitutes true \
+                  --no-link "github:$_repo/$_new?narHash=$_nar_hash#default"; then
                   echo "update: $_repo $_new is not in sinity.cachix.org; flake.lock is unchanged." >&2
                   echo "update: its package workflow publishes master commits; for another revision run" >&2
                   echo "update:   gh workflow run package -R $_repo -f rev=$_new" >&2
@@ -215,9 +221,6 @@
           pkgs.fd
           pkgs.ripgrep
           scriptPkgs.lsp-root
-          # Declared AgentCTL operation body. It is intentionally available
-          # by name in the project environment, never as a command shim.
-          scriptPkgs.sinnix-sinex-backfill
           scriptPkgs.sinnix-rank
           scriptPkgs.sinnix-fs
           scriptPkgs.sinnix-url-ledger

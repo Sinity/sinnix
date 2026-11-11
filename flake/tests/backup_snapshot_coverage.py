@@ -2145,12 +2145,25 @@ class DrainFixture(unittest.TestCase):
                 "polylogue-stage-root",
             ):
                 (root / path).mkdir(parents=True, exist_ok=True)
+            # Btrfs is synthetic here, so its post-delete I/O pressure must be
+            # synthetic too. Start busy; the sleep stub settles it immediately.
+            (root / "io-pressure").write_text(
+                "full avg10=20.00 avg60=20.00 avg300=20.00 total=1\n"
+            )
+            scripts = {
+                name: script.replace("/proc/pressure/io", str(root / "io-pressure"))
+                for name, script in scripts.items()
+            }
             (root / "identities.json").write_text("{}")
             (root / "generations.json").write_text("{}")
             mock = """#!PYTHON
 import json, os, pathlib, shutil, subprocess, sys, uuid
 root=pathlib.Path(os.environ['TMPDIR']); command=pathlib.Path(sys.argv[0]).name; args=sys.argv[1:]
 with (root/'logs/commands').open('a') as log: log.write(json.dumps([command,*args])+'\\n')
+if command=='sleep':
+    assert args==['5'], args
+    (root/'io-pressure').write_text('full avg10=0.00 avg60=0.00 avg300=0.00 total=1\\n')
+    sys.exit(0)
 if command=='borg':
     if args[0]=='create' and (root/'fail-create').exists(): sys.exit(2)
     if args[0]=='create' and (root/'logs/append-hooks').exists() and any(arg.startswith('::polylogue-state-') for arg in args):
@@ -2164,6 +2177,8 @@ if command=='borg':
     os.execv(REAL_BORG, [REAL_BORG,*args])
 if command=='systemctl':
     if args[0]=='stop': sys.exit(0)
+    if args==['start','sinex-backup.service']:
+        sys.exit(1 if (root/'fail-sinex-backup-unit').exists() else 0)
     lane={'borgbackup-job-persist.service':'persist', 'borgbackup-job-realm.service':'realm', 'borgbackup-job-genome.service':'genome'}.get(args[-1])
     if lane is None: sys.exit(0)
     if lane=='persist' and (root/'fail-persist-unit').exists(): sys.exit(1)
@@ -2224,6 +2239,7 @@ elif command=='btrfs':
                 "btrfs",
                 "borg",
                 "systemctl",
+                "sleep",
             ):
                 (root / "mock-bin" / name).write_text(mock)
                 (root / "mock-bin" / name).chmod(0o755)
@@ -2486,6 +2502,8 @@ else: sys.exit(1)
                 if entry[:3] == ["btrfs", "subvolume", "delete"]
             ]
             self.assertEqual(deleted, [str(old)])
+            self.assertEqual(commands.count(["sleep", "5"]), 1)
+
 
             rollback = snapshot(
                 "realm.20260401T233000+0000",
@@ -2554,11 +2572,11 @@ else: sys.exit(1)
                 creates_before,
             )
 
-            # Direct-source jobs must keep the evaluated CAS path and exclude
-            # mutable Polylogue databases. These use real Borg too.
+            # Retained Sinex stores keep both CAS and producer state; direct
+            # Polylogue coverage excludes its mutable databases. These use real Borg too.
             for relative, data in {
-                "live-cas/objects/ab/cdef": "synthetic CAS",
-                "live-sinex-spool/producer/frame": "synthetic spool frame",
+                "retained-sinex/store/objects/ab/cdef": "synthetic CAS",
+                "retained-sinex/spool/producer/frame": "synthetic spool frame",
                 "live-polylogue/blob/objects/cd/ef01": "synthetic blob",
                 "live-polylogue/source.db": "mutable database",
                 "live-polylogue/.salvage-internals-20261008/embeddings.db": "inert synthetic salvage",
@@ -2580,8 +2598,8 @@ else: sys.exit(1)
             run("polylogue")
             (root / "logs/append-hooks").unlink()
             for repo, source, excluded in (
-                ("borg-sinex-blobs-v1", "live-cas/objects/ab/cdef", None),
-                ("borg-sinex-blobs-v1", "live-sinex-spool/producer/frame", None),
+                ("borg-sinex-blobs-v1", "retained-sinex/store/objects/ab/cdef", None),
+                ("borg-sinex-blobs-v1", "retained-sinex/spool/producer/frame", None),
                 (
                     "borg-polylogue-state-v1",
                     "live-polylogue/blob/objects/cd/ef01",
@@ -3203,6 +3221,7 @@ else: sys.exit(1)
                 "polylogue-sqlite-backup.service",
                 "btrbk.service",
                 "borgbackup-job-polylogue-state.service",
+                "sinex-backup.service",
                 "borgbackup-job-sinex-blobs.service",
                 "borgbackup-job-realm.service",
                 "borgbackup-job-genome.service",
@@ -3213,6 +3232,13 @@ else: sys.exit(1)
                 "borgbackup-local-dumps.service",
             ]
             expected_starts = [["start", unit] for unit in coordinator_steps]
+            archive_starts = expected_starts[3:]
+            expected_calls = [
+                ["systemctl", *call]
+                for call in expected_starts[:3]
+                + [["stop", "borgbackup-verify.service"]]
+                + archive_starts
+            ]
             queued_persist = snapshot(
                 "persist.20260406T010000+0000",
                 {"unique": "persist after retry"},
@@ -3229,7 +3255,9 @@ else: sys.exit(1)
             )
             (root / "fail-genome-unit").touch()
             (root / "fail-persist-unit").touch()
-            run("coordinator", ok=False)
+            (root / "fail-sinex-backup-unit").touch()
+            result = run("coordinator", ok=False)
+            self.assertIn("unit=sinex-backup.service status=failed", result.stderr)
             self.assertTrue(queued_persist.exists())
             self.assertTrue(queued_realm.exists())
             self.assertTrue(queued_genome.exists())
@@ -3239,15 +3267,8 @@ else: sys.exit(1)
                 if '"systemctl"' in line
             ]
             self.assertEqual(
-                calls[-13:],
-                [
-                    ["systemctl", *call]
-                    for call in (
-                        expected_starts[:3]
-                        + [["stop", "borgbackup-verify.service"]]
-                        + expected_starts[3:]
-                    )
-                ],
+                calls[-len(expected_calls) :],
+                expected_calls,
                 "failed native lanes must not suppress later independent jobs",
             )
             self.assertFalse(
@@ -3259,6 +3280,7 @@ else: sys.exit(1)
             )
             (root / "fail-persist-unit").unlink()
             (root / "fail-genome-unit").unlink()
+            (root / "fail-sinex-backup-unit").unlink()
             previous_calls = len(calls)
             run("coordinator")
             self.assertTrue(queued_persist.exists())
@@ -3271,8 +3293,8 @@ else: sys.exit(1)
                 any(call[-1] in coordinator_steps[:3] for call in restarted_calls)
             )
             self.assertEqual(
-                restarted_calls[-9:],
-                [["systemctl", *call] for call in expected_starts[3:]],
+                restarted_calls[-len(archive_starts) :],
+                [["systemctl", *call] for call in archive_starts],
                 "boot catch-up after an interrupted archive must reuse the completed dump/cut",
             )
 
@@ -3370,7 +3392,7 @@ else: sys.exit(1)
                 for line in (empty / "commands").read_text().splitlines()
             ]
             self.assertNotIn(["start", "btrbk.service"], calls)
-            self.assertEqual(calls[-9:], expected_starts[3:])
+            self.assertEqual(calls[-len(archive_starts) :], archive_starts)
             self.assertIn("reason=dump-failure", result.stderr)
 
             # Eligibility is checked at each phase, not against a scheduler
@@ -3409,6 +3431,7 @@ else: sys.exit(1)
             self.assertNotIn(["start", "btrbk.service"], calls)
             for unit in (
                 "borgbackup-job-polylogue-state.service",
+                "sinex-backup.service",
                 "borgbackup-job-sinex-blobs.service",
             ):
                 self.assertIn(["start", unit], calls)

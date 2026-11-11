@@ -103,7 +103,7 @@
     # rebuild it. Sinex's CI builds and publishes its package to
     # sinity.cachix.org, and `update sinex` moves the pin only after fetching
     # that package, so a switch downloads Sinex instead of compiling it.
-    sinex.url = "git+https://github.com/Sinity/sinex?ref=fix/deployed-read-boundary-20261108";
+    sinex.url = "github:Sinity/sinex/master";
 
     # BTRFS rollback impermanence (see modules/persistence.nix)
     impermanence = {

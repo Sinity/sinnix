@@ -46,6 +46,7 @@ let
     # snapshot backlog. Native drain queues themselves remain lossless.
     lib.optional config.sinnix.services.polylogue.enable "borgbackup-job-polylogue-state"
     ++ [
+      "sinex-backup"
       "borgbackup-job-sinex-blobs"
       "borgbackup-job-realm"
       "borgbackup-job-genome"

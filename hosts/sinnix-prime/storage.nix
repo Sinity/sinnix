@@ -493,7 +493,7 @@ in
       "h ${realmRoot}/state/cache/nix-build - - - - +C"
       # The session producer fsyncs small appends; on CoW each one rewrote whole
       # extents (5.6 GB written for 44 MB of frames). New segments inherit No_COW.
-      "H /home/${username}/.local/state/sinex-session/spool - - - - +C"
+      "H ${config.services.sinex.session.stateDir}/spool - - - - +C"
       # Stash's SQLite database is rewritten in place; new files inherit No_COW.
       "h ${realmRoot}/state/stashbox - - - - +C"
     ];

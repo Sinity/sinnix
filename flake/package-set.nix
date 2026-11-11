@@ -253,9 +253,6 @@ let
       };
     };
 
-    # The deployed Sinex package; its sinexctl serves the MCP provider.
-    sinexctl = inputs.sinex.packages.${pkgs.stdenv.hostPlatform.system}.sinexctl;
-
     mcp-github = mkNodeCliPackage {
       pname = "mcp-github";
       version = "2025.4.8";
@@ -357,7 +354,6 @@ let
     };
     sinnix-phone-app = phoneAppPackage;
     sinnix-phone-app-install = phoneAppPackage.install;
-
 
     sinnix-agent-cli-locks = pkgs.writeShellApplication {
       name = "sinnix-agent-cli-locks";

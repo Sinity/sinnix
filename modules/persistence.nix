@@ -173,7 +173,7 @@ in
       ".local/share/atuin" # shell history DB
       ".local/share/activitywatch" # AW SQLite DB
       ".local/state/devkit" # history.db and its SQLite WAL/SHM companions
-      ".local/state/sinex-session" # session capture spools and cursors, incl. unacknowledged frames
+      ".local/state/sinex-session" # frozen predecessor producer state, retained for rollback
       ".local/state/claude-quota" # timestamped usage samples
       ".config/activitywatch" # AW watcher configs (runtime-written)
       ".config/awatcher" # awatcher config.toml

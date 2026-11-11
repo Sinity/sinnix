@@ -6,6 +6,7 @@
   pkgs,
   scriptPkgs,
   config,
+  inputs,
 }:
 let
   firecrawlSecretPath = lib.attrByPath [ "sinnix" "secrets" "paths" "firecrawl-api-key" ] null config;
@@ -58,10 +59,27 @@ let
       LYNCHPIN_LOCAL_ROOT = "${config.environment.variables.LYNCHPIN_REPO_ROOT}/.lynchpin";
     };
   };
-  mcpPolylogueBin = pkgs.runCommand "mcp-polylogue" { nativeBuildInputs = [ pkgs.makeBinaryWrapper ]; } ''
-    mkdir -p $out/bin
-    makeBinaryWrapper ${config.system.build.polylogueCli}/bin/polylogue $out/bin/mcp-polylogue \
-      --add-flags mcp
+  mcpPolylogueBin =
+    pkgs.runCommand "mcp-polylogue" { nativeBuildInputs = [ pkgs.makeBinaryWrapper ]; }
+      ''
+        mkdir -p $out/bin
+        makeBinaryWrapper ${config.system.build.polylogueCli}/bin/polylogue $out/bin/mcp-polylogue \
+          --add-flags mcp
+      '';
+  sinex = lib.attrByPath [ "services" "sinex" ] null config;
+  sinexPackage =
+    if sinex == null then
+      inputs.sinex.packages.${pkgs.stdenv.hostPlatform.system}.sinexctl
+    else
+      sinex.package;
+  mcpSinexText = ''
+    #!${pkgs.runtimeShell}
+    set -euo pipefail
+    export SINEX_ENDPOINT="''${SINEX_ENDPOINT:-http://127.0.0.1:7171}"
+    ${lib.optionalString (sinex != null) ''
+      export SINEX_TOKEN_FILE="''${SINEX_TOKEN_FILE:-${sinex.stateDir}/tokens/agent.token}"
+    ''}
+    exec ${sinexPackage}/bin/sinexctl mcp "$@"
   '';
   # The user-facing files stay tiny out-of-store launchers, while the gateway
   # consumes the identical store-backed commands directly.
@@ -83,5 +101,6 @@ in
     mcpPolylogueBin
     mcpLynchpinText
     mcpPolylogueText
+    mcpSinexText
     ;
 }

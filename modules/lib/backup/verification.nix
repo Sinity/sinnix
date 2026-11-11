@@ -4,6 +4,7 @@
   lib,
   config,
   sinexStorePaths,
+  sinexBackupRepositories,
   scriptPkgs,
   borgDrainStateRoot,
   borgIntegrityReceipt,
@@ -31,7 +32,7 @@
         assertion = lib.all (
           path: lib.hasInfix path config.systemd.services.borgbackup-job-sinex-blobs.script
         ) sinexStorePaths;
-        message = "The sinex-blobs Borg job must archive every Sinex content store (services.sinex.storeDir and sinnix.services.sinex.retainedStores)";
+        message = "The sinex-blobs Borg job must archive every retained Sinex predecessor store";
       }
       ++ [
         {
@@ -86,7 +87,21 @@
         jq -cn \
           --arg operation_kind integrity_check \
           --arg run_id "$run_id" \
-          --argjson expected_jobs '["persist","realm","sinex-blobs"]' \
+          --argjson expected_jobs ${
+            lib.escapeShellArg (
+              builtins.toJSON (
+                [
+                  "persist"
+                  "realm"
+                  "sinex-blobs"
+                ]
+                ++ lib.optionals (lib.any (repo: repo != null) sinexBackupRepositories) [
+                  "sinex"
+                  "sinex-keys"
+                ]
+              )
+            )
+          } \
           --argjson start_epoch "$start_epoch" \
           --argjson deadline_epoch "$deadline_epoch" \
           --arg state "$state" \
@@ -125,6 +140,9 @@
       ${pkgs.borgbackup}/bin/borg check --repository-only --max-duration 1800 ${borgRepoPersist}
       ${pkgs.borgbackup}/bin/borg check --repository-only --max-duration 7200 ${borgRepoRealm}
       ${pkgs.borgbackup}/bin/borg check --repository-only --max-duration 1800 ${borgRepoSinexBlobs}
+      ${lib.concatMapStringsSep "\n" (repo: ''
+        ${pkgs.borgbackup}/bin/borg check --repository-only --max-duration 900 ${lib.escapeShellArg repo}
+      '') (lib.filter (repo: repo != null) sinexBackupRepositories)}
 
       trap - EXIT
       write_integrity_receipt completed

@@ -21,19 +21,16 @@
 }:
 let
   inherit (config.sinnix.paths) realmRoot;
-  # Sinex's content stores: the running one, read from its evaluated
-  # configuration so a storage move cannot leave Borg reading an old path, and
-  # those of earlier deployments kept under dated names. Empty without Sinex.
-  # The producer spools under stateDir hold frames not yet acknowledged; Sinex's
-  # backup contract (docs/operations.md, "What a backup contains") lists them,
-  # and /var/lib/sinex is a separate subvolume outside the realm snapshots.
-  sinexStorePaths = lib.optionals (options.services ? sinex && config.services.sinex.enable) (
-    [
-      config.services.sinex.storeDir
-      "${config.services.sinex.stateDir}/spool"
-    ]
-    ++ config.sinnix.services.sinex.retainedStores
-  );
+  # Closed predecessor stores remain direct-path Borg inputs until their
+  # import comparison is complete. The active store's native paired backup
+  # holds an immutable boundary including SQL and producer spools.
+  sinexStorePaths = lib.optionals (
+    options.services ? sinex && config.services.sinex.enable
+  ) config.sinnix.services.sinex.retainedStores;
+  sinexBackupRepositories = lib.optionals (options.services ? sinex && config.services.sinex.enable) [
+    config.services.sinex.backup.repo
+    config.services.sinex.backup.keysRepo
+  ];
   borgRepoRoot = "${config.sinnix.paths.outerRealm}/backup";
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   username = config.sinnix.user.name;
@@ -46,7 +43,7 @@ let
   # Pulling it into btrbk directly was tried and reverted (commits 9c2c068d,
   # a99f2f7b) because a snapshot forces copy-on-write on the daemon's
   # nodatacow SQLite files on their next write. The fix is the same shape
-  # sinex-dump and machine-telemetry-sqlite-backup already use: a
+  # machine-telemetry-sqlite-backup already uses: a
   # logical dump/direct-path copy on a timer, landing in a plain directory
   # that IS covered by ordinary realm snapshot+borg. No daemon writes this
   # Python archive any more, so these jobs run against a quiescent tree.
@@ -136,7 +133,9 @@ let
     lib.optional (
       options.services ? sinex && config.services.sinex.enable
     ) "${config.services.sinex.stateDir}/spool"
-    ++ [ "${config.users.users.${username}.home}/.local/state/sinex-session/spool" ];
+    ++ lib.optional (
+      options.services ? sinex && config.services.sinex.enable
+    ) "${config.services.sinex.session.stateDir}/spool";
   borgStaleLockMinutes = 120;
   borgGlobalLock = "/run/lock/sinnix-borg.lock";
   # Every Beads task store a project declares as its task authority. The
@@ -1587,6 +1586,7 @@ in
           lib
           realmRoot
           sinexStorePaths
+          sinexBackupRepositories
           scriptPkgs
           username
           polylogueStateRoot
@@ -1711,6 +1711,7 @@ in
           lib
           config
           sinexStorePaths
+          sinexBackupRepositories
           scriptPkgs
           borgDrainStateRoot
           borgIntegrityReceipt

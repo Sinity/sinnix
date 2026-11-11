@@ -5,6 +5,7 @@
   lib,
   realmRoot,
   sinexStorePaths,
+  sinexBackupRepositories,
   scriptPkgs,
   username,
   polylogueStateRoot,
@@ -124,6 +125,9 @@ let
       maintain_repo ${lib.escapeShellArg borgRepoPersist} 'persist-* hourly-persist-*' 'sinnix-prime-persist-*'
       maintain_repo ${lib.escapeShellArg borgRepoRealm} 'realm-* genome-genome.*' 'sinnix-prime-realm-*' 'machine-telemetry-dumps-*'
       maintain_repo ${lib.escapeShellArg borgRepoSinexBlobs} 'sinex-blobs-*'
+      ${lib.concatMapStringsSep "\n" (repo: ''
+        maintain_repo ${lib.escapeShellArg repo} 'sinex-core-*'
+      '') (lib.filter (repo: repo != null) sinexBackupRepositories)}
       maintain_repo ${lib.escapeShellArg borgRepoRootSnapshots} 'root-*'
       maintain_repo ${lib.escapeShellArg borgRepoPolylogueState} 'polylogue-state-*'
       maintain_repo ${lib.escapeShellArg borgRepoLiveSmall} 'live-small-* polylogue-archive-*'
@@ -140,13 +144,12 @@ let
 in
 [
   # ─── Sinex content-store Borg job ───
-  # The content stores live outside the /realm snapshot stream, so Borg reads
-  # them in place. Stored files are never rewritten, which makes this safe
-  # without a snapshot; `RequiresMountsFor` keeps the source mount
-  # authoritative. The coordinator includes this job only when it exists.
+  # Closed predecessor stores live outside the /realm snapshot stream, so
+  # Borg reads them in place. No service writes these retained stores;
+  # `RequiresMountsFor` keeps the source mount authoritative. The coordinator includes this job only when it exists.
   (lib.mkIf (sinexStorePaths != [ ]) (
     mkBackupJob "borgbackup-job-sinex-blobs" {
-      description = "Back up the Sinex content stores into Borg";
+      description = "Back up retained Sinex predecessor stores into Borg";
       unit = {
         after = [
           "persist.mount"
@@ -181,23 +184,13 @@ in
         fi
 
         archive_name="sinex-blobs-$(date -u +%Y%m%dT%H%M%SZ)"
-        # The running store's incoming/ frame bytes and the producer spools
-        # are written while Borg reads them. Modern exit codes give "file
-        # changed while we backed it up" its own status, 100; only that one
-        # warning is accepted, since such a file is a frame not yet recorded
-        # or an appended spool tail, which the producer still holds and the
-        # next archive takes. Any other warning or error fails the unit.
-        create_status=0
+        # These retained inputs are immutable. Any changed-file warning is
+        # a failed backup rather than an expected producer-spool append.
         BORG_EXIT_CODES=modern with_borg_lock borg create \
           --compression auto,zstd,1 \
           --lock-wait ${toString borgLockWaitSec} \
           "::$archive_name" \
-          ${lib.escapeShellArgs sinexStorePaths} || create_status=$?
-        if [ "$create_status" -eq 100 ]; then
-          echo "sinex blob backup: accepted files that changed while read (live frames and spools)"
-        elif [ "$create_status" -ne 0 ]; then
-          exit "$create_status"
-        fi
+          ${lib.escapeShellArgs sinexStorePaths}
         echo "sinex blob backup complete: $archive_name"
 
         # The borg-sinex-blobs-archive capture lane (this surface's
@@ -218,9 +211,7 @@ in
 
   # ─── Polylogue nested-subvolume coverage (sinnix-3pvd) ───
   #
-  # Two jobs cover state/polylogue, split the same way Sinex is split
-  # between sinex-dump (logical dump of the live database) and
-  # borgbackup-job-sinex-blobs (direct-path Borg of the content stores):
+  # Two jobs cover state/polylogue:
   # sqlite-safe dumps for the live databases, and a direct-path borg job
   # for everything else (blob/ CAS, hooks/, browser-capture/, inbox/, and
   # the retired/historical db siblings that are no longer written).

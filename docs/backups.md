@@ -3,6 +3,22 @@
 Everything is backed up locally to Borg repositories on the HDD at
 `/outer-realm/backup/`. Nothing is stored off-site.
 
+## Sinex
+
+The nightly drain runs Sinex's native `sinex-backup.service`. Sinex prepares
+one immutable core artifact with its database, content and producer state,
+then archives its main material and key table into distinct repositories,
+`borg-sinex-core-v1` and `borg-sinex-keys-v1`. Both repositories must be
+initialized explicitly before the first run. Sinex releases the artifact's
+hold only after it verifies both exact archive identities; a failed run keeps
+its artifact and hold for diagnosis.
+
+The session health reports the service outcome. Complete backup evidence is
+Sinex's private `latest-complete.json` artifact, inspected with its owning
+identity. Historical stores stay under the existing `sinex-blobs` archive
+route until their import comparisons are complete. Existing database dumps
+and Borg archives remain preserved; activation does not delete them.
+
 ## Retention
 
 `borgbackup-maintenance` runs after the native archive jobs in the nightly

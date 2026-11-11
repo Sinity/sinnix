@@ -56,6 +56,7 @@ assert lib.assertMsg (
           mountTmpfsRoots
           baseTestConfig
           inputs.sinex.nixosModules.default
+          ../../modules/services/sinex/bridge.nix
           (_: {
             networking.hostName = "backup-runtime";
             sinnix.backup.enable = true;
@@ -63,7 +64,9 @@ assert lib.assertMsg (
             sinnix.services = {
               "machine-telemetry".enable = true;
               polylogue.enable = true;
+              sinex.enable = true;
             };
+            sinnix.services.sinex.retainedStores = [ "/var/lib/sinex/retained" ];
             services.sinex = {
               enable = true;
               storeDir = "/var/lib/sinex/daemon/store";
@@ -82,8 +85,27 @@ assert lib.assertMsg (
             message = "Telemetry sealing must not restart on activation, and each sealed file's one structural check must run to completion.";
           }
           {
-            assertion = lib.hasInfix config.services.sinex.storeDir config.systemd.services.borgbackup-job-sinex-blobs.script;
-            message = "The sinex-blobs Borg job must archive the evaluated content store";
+            assertion = lib.all (
+              path: lib.hasInfix path config.systemd.services.borgbackup-job-sinex-blobs.script
+            ) config.sinnix.services.sinex.retainedStores;
+            message = "The predecessor archive job must cover every retained Sinex store";
+          }
+          {
+            assertion =
+              config.services.sinex.backup.repo != config.services.sinex.backup.keysRepo
+              && config.services.sinex.backup.startAt == [ ]
+              &&
+                config.systemd.services.sinex-backup.unitConfig.PropagatesStopTo == [
+                  "borgbackup-job-sinex.service"
+                  "borgbackup-job-sinex-keys.service"
+                ]
+              && lib.hasInfix "sinex-backup.service" config.systemd.services.borgbackup-drain-coordinator.script
+              && lib.all (name: config.systemd.services.${name}.serviceConfig.Slice == "background.slice") [
+                "sinex-backup"
+                "borgbackup-job-sinex"
+                "borgbackup-job-sinex-keys"
+              ];
+            message = "The nightly drain must run the native paired Sinex backup in its declared background slice.";
           }
           {
             # Every backup job's freshness marker is watched by the sentinel
@@ -512,12 +534,8 @@ assert lib.assertMsg (
               to = "install -d -m 0755";
             }
             {
-              from = "/var/lib/sinex/daemon/store";
-              to = "$TMPDIR/live-cas";
-            }
-            {
-              from = "/var/lib/sinex/spool";
-              to = "$TMPDIR/live-sinex-spool";
+              from = "/var/lib/sinex/retained";
+              to = "$TMPDIR/retained-sinex";
             }
           ];
 
@@ -663,8 +681,8 @@ assert lib.assertMsg (
           ];
 
       # The same guard through the maintenance job's call site, which passes
-      # the repository as an argument. Only the realm repository is created,
-      # so the other four are skipped as uninitialized.
+      # the repository as an argument. The retention fixture creates realm
+      # and both native Sinex repositories; other stores stay uninitialized.
       deadHolderLockScript =
         rewriteBackupHook backupRuntimeEval.config.systemd.services.borgbackup-maintenance.script
           [
@@ -740,6 +758,7 @@ assert lib.assertMsg (
               "polylogue-sqlite-backup.service"
               "btrbk.service"
               "borgbackup-job-polylogue-state.service"
+              "sinex-backup.service"
               "borgbackup-job-sinex-blobs.service"
               "borgbackup-job-realm.service"
               "borgbackup-job-genome.service"

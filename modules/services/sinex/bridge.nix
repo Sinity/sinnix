@@ -4,7 +4,7 @@
 # pinned `sinex` flake input): where its state lives, the agenix secrets that
 # carry the NATS passwords, the operator's session, and the runtime inventory
 # entries of its units. The sources a host reads are host facts and are set in
-# the host's configuration under `services.sinex.sources`.
+# the host's canonical roots under `services.sinex.discovery`.
 #
 # State is on /var/lib/sinex, the /state/sinex subvolume on the /realm NVMe
 # (hosts/sinnix-prime/storage.nix), outside the realm snapshots:
@@ -14,9 +14,9 @@
 #                sets the attribute so every file the cluster creates inherits it)
 # State of earlier deployments stays beside them under dated names.
 #
-# Backups: the content store is archived by the sinex-blobs Borg job
-# (modules/backup.nix). The daily database dump lands in
-# /realm/state/db-dumps/sinex, inside the realm snapshot and Borg coverage.
+# Sinex owns the immutable core artifact and paired content/key Borg archives.
+# Sinnix runs that native service in its nightly drain; dated predecessor
+# stores remain covered separately until their import comparison is complete.
 #
 # Activation never restarts sinexd or its NATS; restart them by hand after a
 # deploy and check the running binary.
@@ -24,7 +24,7 @@
   config,
   lib,
   options,
-  inputs,
+  pkgs,
   ...
 }:
 let
@@ -32,7 +32,11 @@ let
   operator = config.sinnix.user.name;
   secrets = config.sinnix.secrets.paths;
   root = "/var/lib/sinex";
-  dumpRoot = "${config.sinnix.paths.realmRoot}/state/db-dumps";
+  backupRoot = "${config.sinnix.paths.outerRealm}/backup";
+  backupArchiveUnits = [
+    "borgbackup-job-sinex"
+    "borgbackup-job-sinex-keys"
+  ];
   # SQLite opens a WAL-mode database's -shm index and -wal log writable even
   # for a read-only connection, which never writes the database; readAnyFile
   # reads files but cannot write them. The sinex user gets write access to
@@ -49,13 +53,13 @@ let
   # write access to the directory, so sinexd never creates a file there:
   # while the program is closed and its index absent, the source reports the
   # database unavailable.
-  sqlitePaths = lib.concatMap (
-    source:
-    let
-      configured = config.services.sinex.sources.${source.name};
-    in
-    lib.optionals (configured.enable && lib.elem "sqlite-rows" source.drivers) configured.paths
-  ) (lib.importJSON "${inputs.sinex}/nix/catalog.json").sources;
+  # These are the existing local WAL readers' host permissions. Discovery
+  # belongs to Sinex and receives roots, rather than per-source path copies.
+  sqlitePaths = [
+    "${config.users.users.${operator}.home}/.local/share/atuin/history.db"
+    "${config.users.users.${operator}.home}/.local/share/activitywatch/aw-server-rust/sqlite.db"
+    "${config.sinnix.paths.realmRoot}/project/steering/repo/steering.sqlite"
+  ];
   # `-`: an index that does not exist yet (a database not in WAL mode, or a
   # program not running) is not an activation failure.
   sqliteIndexRules = lib.concatMap (path: [
@@ -105,14 +109,15 @@ in
         producers.polylogue.passwordFile = secrets.sinex-nats-polylogue;
       };
       session = {
-        enable = true;
         user = operator;
+        stateDir = "${config.users.users.${operator}.home}/.local/state/sinex-session-v3";
         passwordFile = secrets.sinex-nats-session;
       };
       backup = {
-        dumpDir = "${dumpRoot}/sinex";
-        # Empty while no source is sealed.
-        keysDir = "${dumpRoot}/sinex-keys";
+        repo = "${backupRoot}/borg-sinex-core-v1";
+        keysRepo = "${backupRoot}/borg-sinex-keys-v1";
+        passCommand = "${pkgs.coreutils}/bin/cat ${secrets.borg-passphrase}";
+        startAt = [ ];
       };
     };
 
@@ -139,6 +144,9 @@ in
     boot.kernelParams = [ "hugepages=${toString hugePages}" ];
 
     systemd.tmpfiles.rules = sqliteIndexRules;
+    sinnix.persistence.home.directories = lib.optional (lib.hasPrefix "${config.users.users.${operator}.home}/" config.services.sinex.session.stateDir) (
+      lib.removePrefix "${config.users.users.${operator}.home}/" config.services.sinex.session.stateDir
+    );
 
     sinnix.runtime.units = {
       sinexd = {
@@ -199,21 +207,19 @@ in
         notifyOnFailure = true;
         operatorRestart = false;
       };
-      sinex-dump = {
-        unit = "sinex-dump.service";
+      sinex-backup = {
+        unit = "sinex-backup.service";
         resourceClass = "backup";
         notifyOnFailure = true;
-        # The nightly dump is replaced atomically; a day plus 2h grace.
-        captures = [
-          {
-            name = "sinex-dump";
-            path = "${dumpRoot}/sinex/sinex.dump";
-            eventDriven = true;
-            staleAfterSeconds = 26 * 60 * 60;
-          }
-        ];
+        operatorRestart = false;
       };
-    };
+    }
+    // lib.genAttrs backupArchiveUnits (name: {
+      unit = "${name}.service";
+      resourceClass = "backup";
+      notifyOnFailure = true;
+      operatorRestart = false;
+    });
 
     # The session producer exits when a frame goes unacknowledged; under build
     # I/O load on the /realm NVMe that happens, and three failures in ten
@@ -270,22 +276,16 @@ in
         unitConfig.RequiresMountsFor = [ root ];
         serviceConfig = runtimeServiceConfig "sinex-capture-journald.service";
       };
-      sinex-dump = {
+      sinex-backup = {
         unitConfig.RequiresMountsFor = [
           root
-          dumpRoot
+          backupRoot
         ];
-        serviceConfig = runtimeServiceConfig "sinex-dump.service" // {
-          # /realm is the operator's (0700). The dump runs as sinex without
-          # sinexd's read capability, so it sees only its two output
-          # directories, bound into an otherwise empty /realm.
-          TemporaryFileSystem = [ "/realm:ro" ];
-          BindPaths = [
-            config.services.sinex.backup.dumpDir
-            config.services.sinex.backup.keysDir
-          ];
-        };
+        serviceConfig = runtimeServiceConfig "sinex-backup.service";
       };
-    };
+    }
+    // lib.genAttrs backupArchiveUnits (name: {
+      serviceConfig = runtimeServiceConfig "${name}.service";
+    });
   };
 }

@@ -19,7 +19,6 @@ SYSTEM_UNITS=(
   "btrbk.service"
   "btrbk.timer"
   # A Sinex import; sinexd starts again when it stops. Live capture is not shed.
-  "sinex-backfill-*.service"
 )
 
 

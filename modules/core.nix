@@ -101,7 +101,7 @@ in
         # service accounts (transmission's primary group), so the boundary is
         # the owner bit, not the group. A system service that needs a subtree
         # gets it through its own mount namespace (TemporaryFileSystem=/realm
-        # plus a bind of that subtree), as llama-cpp, ollama and sinex-dump
+        # plus a bind of that subtree), as llama-cpp and ollama
         # do; sinexd reads through CAP_DAC_READ_SEARCH; root daemons ignore
         # the mode. Modes below this one stay as they are: nothing but the
         # operator reaches them through /realm.

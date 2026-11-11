@@ -87,6 +87,7 @@ mkFeatureModule {
           pkgs
           scriptPkgs
           config
+          inputs
           ;
       };
       clientProfiles = import ./client-profiles.nix {
@@ -269,6 +270,7 @@ mkFeatureModule {
         mcpFirecrawlBin
         mcpLynchpinText
         mcpPolylogueText
+        mcpSinexText
         ;
       inherit (clientProfiles)
         codexSystemConfigFile
@@ -604,7 +606,8 @@ mkFeatureModule {
                 text = mcpPolylogueText;
               };
               ".local/bin/mcp-sinex" = {
-                source = "${scriptPkgs.sinnix-mcp-sinex}/bin/sinnix-mcp-sinex";
+                executable = true;
+                text = mcpSinexText;
                 force = true;
               };
             };
