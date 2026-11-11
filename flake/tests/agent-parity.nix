@@ -36,8 +36,11 @@ in
         name = "polylogue-agent-hook-parity";
         service = "polylogue";
         extraModules = [
-          (_: {
+          ({ config, lib, ... }: {
             sinnix.services.polylogue.liveRoot = sentinelDataDir;
+            users.users.${config.sinnix.user.name}.home = lib.mkForce "${sentinelDataDir}/home";
+            home-manager.users.${config.sinnix.user.name}.home.homeDirectory =
+              lib.mkForce "${sentinelDataDir}/home";
           })
         ];
         assertions = _config: [ ];
@@ -168,9 +171,10 @@ in
             require_row $'Stop\tcodex' codex-writers codex-stop
             require_row $'UserPromptSubmit\tcodex' codex-writers codex-prompt
 
-            # The hook command resolves to the same wrapper the daemon runs.
+            # The archive follows liveRoot; synchronous hook spools follow the
+            # user's persisted state home independently of the archive disk.
             require_text "$sentinelDataDir/data" "$polylogueCli/bin/polylogue" live-data-home
-            require_text "$sentinelDataDir/state" "$polylogueCli/bin/polylogue" live-state-home
+            require_text "$sentinelDataDir/home/.local/state" "$polylogueCli/bin/polylogue" hook-state-home
 
             # No repository hook command may bake a sidecar path. Keep this
             # source census scoped to the actual hook declarations so this
