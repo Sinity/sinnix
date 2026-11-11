@@ -196,7 +196,17 @@ def _external_cache(path: Path) -> Path | None:
         candidate.is_symlink() for candidate in (root, parent.parent, parent, target)
     ):
         raise CleanupError(f"compiler cache is symlinked; inspect {target}")
-    if any(entry.name != "target" for entry in parent.iterdir()):
+    marker = parent / "checkout"
+    if _path_entry_exists(marker):
+        if marker.is_symlink() or not marker.is_file():
+            raise CleanupError(
+                f"compiler cache checkout marker is not a regular file; inspect {marker}"
+            )
+        if marker.read_text() != str(path.resolve()) + "\n":
+            raise CleanupError(
+                f"compiler cache checkout marker names another checkout; inspect {marker}"
+            )
+    if any(entry.name not in ("target", "checkout") for entry in parent.iterdir()):
         raise CleanupError(f"compiler cache contains other evidence; inspect {parent}")
     if _cargo_cache(parent, registered=False) != target:
         raise CleanupError(f"compiler cache is not tagged or empty; inspect {target}")
@@ -776,6 +786,7 @@ def _drop_branch(
             print(f"removing build output {output}", file=sys.stderr, flush=True)
             _remove_cache(output)
             if not local:
+                (output.parent / "checkout").unlink(missing_ok=True)
                 output.parent.rmdir()
         worktrunk.worktrunk_remove(
             project.root, removal_target, keep_branch=True, reap=False

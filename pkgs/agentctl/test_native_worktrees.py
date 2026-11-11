@@ -211,6 +211,7 @@ def test_exact_external_cache_is_removed_with_its_checkout(
     target.mkdir(parents=True)
     (target / "CACHEDIR.TAG").write_bytes(native.CACHE_TAG + b"\n")
     (target / "object").write_bytes(b"compiled")
+    (parent / "checkout").write_text(str(path.resolve()) + "\n")
     other = root / "untouched"
     other.mkdir()
     (other / "private").write_bytes(b"other cache")
@@ -582,3 +583,53 @@ def test_candidates_beyond_one_batch_are_deferred(owned, monkeypatch):
         {"branch": str(path), "reason": "deferred to the next cleanup batch"}
     ]
     assert path.exists()
+
+
+@pytest.mark.parametrize("marker", ["other checkout\n", "", "extra\nlines\n"])
+def test_external_cache_with_wrong_checkout_marker_is_kept(
+    owned, monkeypatch, tmp_path, marker
+):
+    import hashlib
+    import os
+
+    _, _, path = owned
+    root = tmp_path / "cache"
+    parent = (
+        root
+        / str(os.getuid())
+        / hashlib.sha256(str(path.resolve()).encode()).hexdigest()[:32]
+    )
+    target = parent / "target"
+    target.mkdir(parents=True)
+    (target / "CACHEDIR.TAG").write_bytes(native.CACHE_TAG + b"\n")
+    (parent / "checkout").write_text(marker)
+    monkeypatch.setenv("SINNIX_CARGO_CACHE_ROOT", str(root))
+    result = clean(owned)
+    assert result["kept"] and path.exists() and target.exists()
+    assert (parent / "checkout").read_text() == marker
+
+
+def test_external_cache_with_symlinked_checkout_marker_is_kept(
+    owned, monkeypatch, tmp_path
+):
+    import hashlib
+    import os
+
+    _, _, path = owned
+    root = tmp_path / "cache"
+    parent = (
+        root
+        / str(os.getuid())
+        / hashlib.sha256(str(path.resolve()).encode()).hexdigest()[:32]
+    )
+    target = parent / "target"
+    target.mkdir(parents=True)
+    (target / "CACHEDIR.TAG").write_bytes(native.CACHE_TAG + b"\n")
+    outside = tmp_path / "marker"
+    outside.write_text(str(path.resolve()) + "\n")
+    (parent / "checkout").symlink_to(outside)
+    monkeypatch.setenv("SINNIX_CARGO_CACHE_ROOT", str(root))
+    result = clean(owned)
+    assert result["kept"] and path.exists() and target.exists()
+    assert (parent / "checkout").is_symlink()
+    assert outside.read_text() == str(path.resolve()) + "\n"
