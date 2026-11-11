@@ -73,8 +73,9 @@ next, not on supervising progress.
 - A worker owns its change until it is merged: when the check it needs is
   queued, it blocks on that job (`agentctl job wait <task> --job-id <id>`) and
   merges on the exact tested head, instead of ending its turn with the merge
-  left to someone else. It reports useful progress while required hosted review
-  is pending, then completes publication under the repository's actual gates.
+  left to someone else. It hands completion directly to the next dependent
+  owner and reports new blockers, decisions or completed delivery. Publication
+  follows the repository's actual gates.
   The wait and the merge are one chained command, never a hand-written
   script: `agentctl job wait <task> --job-id <id> && gh pr merge <n>
   --squash --match-head-commit <sha>`; where the forge runs the check, `gh pr
