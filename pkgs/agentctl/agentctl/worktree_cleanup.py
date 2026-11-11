@@ -202,7 +202,7 @@ def _external_cache(path: Path) -> Path | None:
             raise CleanupError(
                 f"compiler cache checkout marker is not a regular file; inspect {marker}"
             )
-        if marker.read_text() != str(path.resolve()) + "\n":
+        if marker.read_bytes() != os.fsencode(path.resolve()) + b"\n":
             raise CleanupError(
                 f"compiler cache checkout marker names another checkout; inspect {marker}"
             )

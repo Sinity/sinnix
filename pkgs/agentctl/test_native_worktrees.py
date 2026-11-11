@@ -585,7 +585,7 @@ def test_candidates_beyond_one_batch_are_deferred(owned, monkeypatch):
     assert path.exists()
 
 
-@pytest.mark.parametrize("marker", ["other checkout\n", "", "extra\nlines\n"])
+@pytest.mark.parametrize("marker", [b"other checkout\n", b"", b"extra\nlines\n", b"\xff"])
 def test_external_cache_with_wrong_checkout_marker_is_kept(
     owned, monkeypatch, tmp_path, marker
 ):
@@ -602,11 +602,11 @@ def test_external_cache_with_wrong_checkout_marker_is_kept(
     target = parent / "target"
     target.mkdir(parents=True)
     (target / "CACHEDIR.TAG").write_bytes(native.CACHE_TAG + b"\n")
-    (parent / "checkout").write_text(marker)
+    (parent / "checkout").write_bytes(marker)
     monkeypatch.setenv("SINNIX_CARGO_CACHE_ROOT", str(root))
     result = clean(owned)
     assert result["kept"] and path.exists() and target.exists()
-    assert (parent / "checkout").read_text() == marker
+    assert (parent / "checkout").read_bytes() == marker
 
 
 def test_external_cache_with_symlinked_checkout_marker_is_kept(
