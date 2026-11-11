@@ -50,7 +50,6 @@
           "realm-scaffold.service"
           "user@1000.service"
           "var-cache-sinex.mount"
-          "realm-tmp-polylogue\\x2dpytest.mount"
         ];
         assert lib.hasInfix "--boot-only" service.serviceConfig.ExecStart;
         vm.runInLinuxVM (
