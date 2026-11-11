@@ -135,6 +135,9 @@ mkFeatureModule {
         # whole media tree, which is gigabytes of reads for a server used
         # only during a headset session.
         systemd.services.minidlna.wantedBy = lib.mkForce [ ];
+        # It serves the outer disk to the LAN; the operator's data root does
+        # not exist in its namespace.
+        systemd.services.minidlna.serviceConfig.InaccessiblePaths = [ "-/realm" ];
         systemd.user.services.sinnix-quest-player = {
           description = "Authenticated native Quest video playback session";
           path = [

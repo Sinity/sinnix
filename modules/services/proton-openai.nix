@@ -287,6 +287,9 @@ mkServiceModule {
           DynamicUser = true;
           RuntimeDirectory = "proton-openai-proxy";
           NoNewPrivileges = true;
+          # Network-facing; the operator's data root does not exist in its
+          # namespace.
+          InaccessiblePaths = [ "-/realm" ];
           ExecStart = "${proxyStart}/bin/proton-openai-proxy-start";
           Restart = "on-failure";
           RestartSec = "3s";

@@ -275,7 +275,16 @@ in
           root
           dumpRoot
         ];
-        serviceConfig = runtimeServiceConfig "sinex-dump.service";
+        serviceConfig = runtimeServiceConfig "sinex-dump.service" // {
+          # /realm is the operator's (0700). The dump runs as sinex without
+          # sinexd's read capability, so it sees only its two output
+          # directories, bound into an otherwise empty /realm.
+          TemporaryFileSystem = [ "/realm:ro" ];
+          BindPaths = [
+            config.services.sinex.backup.dumpDir
+            config.services.sinex.backup.keysDir
+          ];
+        };
       };
     };
   };

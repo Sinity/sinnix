@@ -96,7 +96,16 @@ in
         # rule whose parent chain steps from a user-owned directory into a
         # root-owned one, so a root-owned container silently disables every
         # rule beneath it.
-        "d ${paths.realmRoot} 0755 ${username} users -"
+        #
+        # The data root is the operator's alone. Group `users` also holds
+        # service accounts (transmission's primary group), so the boundary is
+        # the owner bit, not the group. A system service that needs a subtree
+        # gets it through its own mount namespace (TemporaryFileSystem=/realm
+        # plus a bind of that subtree), as llama-cpp, ollama and sinex-dump
+        # do; sinexd reads through CAP_DAC_READ_SEARCH; root daemons ignore
+        # the mode. Modes below this one stay as they are: nothing but the
+        # operator reaches them through /realm.
+        "d ${paths.realmRoot} 0700 ${username} users -"
         "f+ ${paths.realmRoot}/.hidden 0644 ${username} users - state\\ntmp\\nworktree\\n"
         "d ${paths.realmRoot}/.btrfs 0755 ${username} users -"
         "d /realm/state 0755 ${username} users -"
@@ -142,6 +151,11 @@ in
       ];
 
     };
+
+    # Files the operator's units, terminals and agents create are private to
+    # the operator. User units inherit the user manager's umask, and the
+    # manager takes it from this unit.
+    systemd.services."user@".serviceConfig.UMask = "0077";
 
     # nsncd opens its compatibility socket at /var/run/nscd/socket, but the
     # upstream unit bind-mounts only /run/nscd and leaves /var/run read-only

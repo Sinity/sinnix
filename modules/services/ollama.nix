@@ -196,6 +196,10 @@ mkServiceModule {
           # client's cgroup. Bound them here so downloads cannot saturate the
           # filesystem shared with the desktop and capture services.
           ollama.serviceConfig = {
+            # /realm is the operator's (0700); the daemon sees only its model
+            # store, bound into an otherwise empty /realm.
+            TemporaryFileSystem = [ "/realm:ro" ];
+            BindPaths = [ modelsDir ];
             IOWeight = 10;
             IOReadBandwidthMax = [ "${modelsDir} 40M" ];
             IOWriteBandwidthMax = [ "${modelsDir} 20M" ];

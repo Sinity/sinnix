@@ -101,6 +101,10 @@ mkServiceModule {
                 WorkingDirectory = "/var/lib/${name}";
                 Environment = [ "LLAMA_CACHE=/var/cache/${name}" ];
                 NoNewPrivileges = true;
+                # /realm is the operator's (0700); the service sees only the
+                # model directory, bound into an otherwise empty /realm.
+                TemporaryFileSystem = [ "/realm:ro" ];
+                BindReadOnlyPaths = [ "${modelRoot}/gguf" ];
               }
             else
               {
@@ -126,6 +130,11 @@ mkServiceModule {
     {
       sinnix.runtime.units = lib.mapAttrs mkSurface enabledProfiles;
       systemd.services = lib.mapAttrs mkService enabledProfiles;
-      systemd.tmpfiles.rules = [ "d ${modelRoot}/gguf 0755 ${user} users -" ];
+      systemd.tmpfiles.rules = [
+        "d ${modelRoot}/gguf 0755 ${user} users -"
+        # The operator's umask is 0077; a default ACL keeps models placed here
+        # readable by the dynamic service users, which cannot be named.
+        "a+ ${modelRoot}/gguf - - - - d:u::rwx,d:g::r-x,d:o::r-x"
+      ];
     };
 } args

@@ -103,6 +103,9 @@ mkServiceModule {
           LITELLM_CORS_ALLOW_CREDENTIALS = "false";
         };
         wantedBy = lib.mkIf (!cfg.autoStart) (lib.mkForce [ ]);
+        # Network-facing; the operator's data root does not exist in its
+        # namespace.
+        serviceConfig.InaccessiblePaths = [ "-/realm" ];
       };
     };
 } args

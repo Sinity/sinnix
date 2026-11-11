@@ -1,4 +1,5 @@
-# QEMU NixOS VM integration checks (below, polylogue-live daemon, transmission).
+# QEMU NixOS VM integration checks (below, polylogue-live daemon, transmission,
+# access to the /realm data root).
 # agentctl has no unit of its own to probe: the queue is pueued (the CLI
 # feature) and the package suite drives a private pueued end to end.
 { inputs, ... }:
@@ -121,6 +122,50 @@ in
 
             machine.wait_until_succeeds("curl -sS -D /tmp/transmission.headers -o /tmp/transmission.body http://127.0.0.1:9091/transmission/rpc || true; grep -q '409 Conflict' /tmp/transmission.headers")
             machine.succeed('session_id=$(awk -F": " \'/X-Transmission-Session-Id/ {print $2}\' /tmp/transmission.headers | tr -d "\\r"); test -n "$session_id"')
+          '';
+        };
+        # A service account reaches nothing under /realm, even a file the
+        # operator once created world-readable, and the operator's units
+        # create private files.
+        realm-not-readable-by-service-users = mkVmCheck system {
+          name = "realm-not-readable-by-service-users";
+          nodes.machine = {
+            sinnix.features.desktop = {
+              activitywatch.enable = false;
+              audio.enable = false;
+              base.enable = false;
+              browser.enable = false;
+              "common-apps".enable = false;
+              gaming.enable = false;
+              hyprland.enable = false;
+              hyprlandAnimations.enable = false;
+              media.enable = false;
+              mime.enable = false;
+              noctalia.enable = false;
+              storage.enable = false;
+              terminal.enable = false;
+              theming.enable = false;
+              ui.enable = false;
+            };
+            services.caddy.enable = true;
+          };
+          testScript = ''
+            start_all()
+            machine.wait_for_unit("multi-user.target")
+            machine.succeed("test \"$(stat -c '%a %U' /realm)\" = '700 sinity'")
+
+            machine.succeed("runuser -u sinity -- sh -c 'umask 022; mkdir -p /realm/device/probe; echo private > /realm/device/probe/file'")
+            machine.succeed("runuser -u sinity -- cat /realm/device/probe/file")
+            machine.fail("setpriv --reuid=caddy --regid=caddy --clear-groups cat /realm/device/probe/file")
+            machine.fail("setpriv --reuid=caddy --regid=caddy --clear-groups ls /realm")
+
+            uid = machine.succeed("id -u sinity").strip()
+            machine.succeed("loginctl enable-linger sinity")
+            machine.wait_for_unit(f"user@{uid}.service")
+            umask = machine.succeed(
+                f"XDG_RUNTIME_DIR=/run/user/{uid} runuser -u sinity -- systemd-run --user --wait --pipe --quiet sh -c umask"
+            ).strip()
+            assert umask == "0077", f"user unit umask is {umask}"
           '';
         };
       };

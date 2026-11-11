@@ -118,6 +118,9 @@ mkAiService {
         DynamicUser = lib.mkForce false;
         User = "open-webui";
         Group = "open-webui";
+        # Its state is /var/lib/open-webui; the operator's data root does not
+        # exist in its namespace.
+        InaccessiblePaths = [ "-/realm" ];
       };
       systemd.services.open-webui.wantedBy = lib.mkIf (!cfg.autoStart) (lib.mkForce [ ]);
 

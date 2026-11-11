@@ -134,6 +134,8 @@ let
           ExecStartPre = "${waitForBackend}/bin/${proxy}-wait-backend";
           ExecStart = "${systemdSocketProxyd} --exit-idle-time=${idleTimeout} ${backendEndpoint}";
           Restart = "no";
+          # Runs as root and only forwards bytes.
+          InaccessiblePaths = [ "-/realm" ];
         };
       };
     };
@@ -216,6 +218,9 @@ in
         serviceConfig = {
           RuntimeDirectory = "caddy";
           RuntimeDirectoryMode = "0700";
+          # Network-facing and serves no files: the operator's data root
+          # does not exist in its namespace.
+          InaccessiblePaths = [ "-/realm" ];
         };
       };
     }
