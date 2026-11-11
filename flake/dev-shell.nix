@@ -64,8 +64,8 @@
                 echo "update: fetching $_product $_new from sinity.cachix.org" >&2
                 if ! ${nix} build --max-jobs 0 --no-link "github:$_repo/$_new#default"; then
                   echo "update: $_repo $_new is not in sinity.cachix.org; flake.lock is unchanged." >&2
-                  echo "update: its package workflow publishes master commits; for another branch run" >&2
-                  echo "update:   gh workflow run package -R $_repo --ref <branch>" >&2
+                  echo "update: its package workflow publishes master commits; for another revision run" >&2
+                  echo "update:   gh workflow run package -R $_repo -f rev=$_new" >&2
                   exit 1
                 fi
               done
