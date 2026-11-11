@@ -84,8 +84,8 @@ next, not on supervising progress.
   every agent on the account shares one hourly GitHub API limit.
 - A review hold is recorded in the PR description with its open findings; the
   owner merges only the head that addresses them.
-- Before merging, rebase the branch onto the current default branch and let
-  the forge squash it. Never build a squash commit locally on a different base
+- Before merging, follow the repository's branch-update policy and let the
+  forge squash it. Never build a squash commit locally on a different base
   than the branch was written on: it silently reverts whatever landed between
   the two bases.
 
