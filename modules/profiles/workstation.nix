@@ -395,11 +395,15 @@ in
         systemd.units."user@${primaryUserUid}.service" = {
           overrideStrategy = "asDropin";
           # The service builder also injects environment settings. This native
-          # drop-in sets only resource policy and activation flags.
+          # drop-in sets only resource policy, activation flags and the umask.
+          # It is named overrides.conf like the template's drop-in and so
+          # shadows it for this instance; the umask from modules/core.nix is
+          # therefore restated here.
           text = ''
             [Service]
             MemoryMin=${interactiveMemoryMin}
             MemoryLow=${interactiveMemoryLow}
+            UMask=${config.systemd.services."user@".serviceConfig.UMask}
             X-RestartIfChanged=false
             X-StopIfChanged=false
           '';
