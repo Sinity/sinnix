@@ -78,9 +78,10 @@ next, not on supervising progress.
   The wait and the merge are one chained command, never a hand-written
   script: `agentctl job wait <task> --job-id <id> && gh pr merge <n>
   --squash --match-head-commit <sha>`; where the forge runs the check, `gh pr
-  checks <n> --required --watch && gh pr merge <n> --squash
+  checks <n> --required --watch --interval 60 && gh pr merge <n> --squash
   --match-head-commit <sha>`. GitHub auto-merge is not used: armed on clean,
-  green heads it sometimes never fires.
+  green heads it sometimes never fires. The watch polls once a minute because
+  every agent on the account shares one hourly GitHub API limit.
 - A review hold is recorded in the PR description with its open findings; the
   owner merges only the head that addresses them.
 - Before merging, rebase the branch onto the current default branch and let

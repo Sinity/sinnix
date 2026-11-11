@@ -173,7 +173,7 @@ running agents in parallel.
   findings with a fix or a concrete refutation. Follow the repository's actual
   required statuses and review-resolution rules. Where the forge enforces these,
   wait for the required check and merge the tested head:
-  `gh pr checks <n> --required --watch && gh pr merge <n> --squash
+  `gh pr checks <n> --required --watch --interval 60 && gh pr merge <n> --squash
   --match-head-commit <sha>`; branch protection still gates the merge.
   File substantial out-of-scope or post-merge findings as follow-up work.
 - A partial delivery leaves its unmet acceptance criteria open.
