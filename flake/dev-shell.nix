@@ -53,22 +53,34 @@
               trap 'rm -rf "$_lock_dir"' EXIT
               ${nix} flake update "$@" --output-lock-file "$_lock_dir/flake.lock"
               for _product in sinex polylogue-rewrite; do
-                _old=$(${pkgs.jq}/bin/jq -r --arg n "$_product" '.nodes[$n].locked.rev // empty' flake.lock)
+                _old_lock=$(${pkgs.jq}/bin/jq -cS --arg n "$_product" '.nodes[$n].locked' flake.lock)
+                _new_lock=$(${pkgs.jq}/bin/jq -cS --arg n "$_product" '.nodes[$n].locked' "$_lock_dir/flake.lock")
                 _new=$(${pkgs.jq}/bin/jq -r --arg n "$_product" '.nodes[$n].locked.rev // empty' "$_lock_dir/flake.lock")
-                if [ -z "$_new" ] || [ "$_old" = "$_new" ]; then
+                if [ -z "$_new" ] || [ "$_old_lock" = "$_new_lock" ]; then
                   continue
                 fi
                 _repo=$(${pkgs.jq}/bin/jq -er --arg n "$_product" '.nodes[$n].locked
                   | if .type == "github" then "\(.owner)/\(.repo)"
                     else .url | capture("^https://github.com/(?<r>[^/]+/[^/.]+)").r end' "$_lock_dir/flake.lock")
-                _nar_hash=$(${pkgs.jq}/bin/jq -er --arg n "$_product" '.nodes[$n].locked.narHash | @uri' "$_lock_dir/flake.lock")
+                # Preserve the locked fetcher and its source-export policy.
+                _package_source=$(PRODUCT_LOCK_JSON="$_new_lock" ${nix} eval --impure --raw \
+                  --expr 'builtins.flakeRefToString (builtins.fromJSON (builtins.getEnv "PRODUCT_LOCK_JSON"))')
+                _package_ref="$_package_source#default"
+                _package_path=$(${nix} eval --raw "$_package_ref.outPath")
+                # max-jobs=0 still downloads build inputs before refusing an
+                # uncached output. Check the product itself before realization.
+                if ! ${nix} path-info --store https://sinity.cachix.org \
+                  --option narinfo-cache-negative-ttl 0 "$_package_path" >/dev/null; then
+                  echo "update: evaluated product $_package_path is not published; flake.lock is unchanged." >&2
+                  exit 1
+                fi
                 echo "update: fetching $_product $_new from sinity.cachix.org" >&2
                 # symlinkJoin defaults to refusing substitutes even when its
                 # exact aggregate was published alongside the runtime packages.
-                # Bind the exported tree too: Git and GitHub archives can
-                # differ at export-ignore paths for the same commit.
+                # The exact locked fetcher binds the same exported source
+                # tree Sinnix evaluates, including export-ignore policy.
                 if ! ${nix} build --max-jobs 0 --option always-allow-substitutes true \
-                  --no-link "github:$_repo/$_new?narHash=$_nar_hash#default"; then
+                  --no-link "$_package_ref"; then
                   echo "update: $_repo $_new is not in sinity.cachix.org; flake.lock is unchanged." >&2
                   echo "update: its package workflow publishes master commits; for another revision run" >&2
                   echo "update:   gh workflow run package -R $_repo -f rev=$_new" >&2

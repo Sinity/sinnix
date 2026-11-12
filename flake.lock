@@ -1521,18 +1521,21 @@
         "rust-overlay": "rust-overlay_5"
       },
       "locked": {
-        "lastModified": 1794498792,
-        "narHash": "sha256-p7x96Tmov6ptPt9IUi/EbEsX092T0qw0EEnv8vdytlg=",
-        "owner": "Sinity",
-        "repo": "sinex",
-        "rev": "49e8572df1a1b525b70978b7323e17c9d845b632",
-        "type": "github"
+        "exportIgnore": true,
+        "lastModified": 1794501793,
+        "narHash": "sha256-ESr4rIPu0TZuEumksgZ1XQR+A0ZaJK6zvxFhbDSausA=",
+        "ref": "refs/heads/master",
+        "rev": "a30f18b69ef2b37494ab398d8d6f010486fbc2ae",
+        "shallow": true,
+        "type": "git",
+        "url": "https://github.com/Sinity/sinex"
       },
       "original": {
-        "owner": "Sinity",
+        "exportIgnore": true,
         "ref": "master",
-        "repo": "sinex",
-        "type": "github"
+        "shallow": true,
+        "type": "git",
+        "url": "https://github.com/Sinity/sinex"
       }
     },
     "stylix": {
