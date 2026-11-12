@@ -66,6 +66,13 @@
                 _package_source=$(PRODUCT_LOCK_JSON="$_new_lock" ${nix} eval --impure --raw \
                   --expr 'builtins.flakeRefToString (builtins.fromJSON (builtins.getEnv "PRODUCT_LOCK_JSON"))')
                 _package_ref="$_package_source#default"
+                # Git URLs omit locked narHash; verify their resolved content.
+                _package_hash=$(${nix} flake metadata --json "$_package_source" | ${pkgs.jq}/bin/jq -er '.locked.narHash')
+                _locked_hash=$(printf '%s' "$_new_lock" | ${pkgs.jq}/bin/jq -er '.narHash')
+                if [ "$_package_hash" != "$_locked_hash" ]; then
+                  echo "update: resolved source hash differs from the locked input; flake.lock is unchanged." >&2
+                  exit 1
+                fi
                 _package_path=$(${nix} eval --raw "$_package_ref.outPath")
                 # max-jobs=0 still downloads build inputs before refusing an
                 # uncached output. Check the product itself before realization.
