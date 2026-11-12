@@ -41,9 +41,11 @@ and [the command contract](../../../../docs/agentctl.md) for syntax.
   retrying. Diagnose a terminal failure first; an uncertain launch is not a
   reason to submit it again. Cancel by recorded identity, then confirm terminal
   state before retrying. `pressure tick` reconciles admission holds.
-- Leave a branch alone while its check runs; a result belongs to the commit
-  it ran on. Rerun a check only when the tree it covers changed. Report
-  failures and untested scope.
+- Keep a checkout fixed while a native job uses it; its result belongs to
+  that commit. After every native holder ends and working bytes are preserved,
+  reuse the owner's checkout for a fresh branch from current `origin/master`.
+  Hosted CI continues against the immutable pushed head. Rerun a check only
+  when its covered tree changed; report failures and untested scope.
 - In Codex, an exec session_id remains live after the outer tool call returns.
   Observe it through write_stdin; terminate owned supervision and confirm exit
   when it ends. At about twice an evidence-based expected duration, inspect

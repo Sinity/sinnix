@@ -14,8 +14,13 @@ next, not on supervising progress.
 ## Choose the route
 
 - **Native agents** for investigation, bounded help, and cohesive
-  implementation. Give each one its own worktree (under `/realm/worktree/`)
-  or a disjoint area of a shared checkout; the coordinator integrates.
+  implementation. Give each active owner an isolated worktree under
+  `/realm/worktree/`; the coordinator integrates. Reuse that checkout for the
+  owner's later branches: its stable path retains compiler artifacts and
+  runtime fixture paths. Before switching to a new branch from current
+  `origin/master`, all native jobs using it must be terminal and working bytes
+  preserved. Hosted CI checks the pushed commit, so it may continue on that
+  immutable head while the owner reuses the checkout for independent work.
   - In Claude Code, prefer forks (`subagent_type: "fork"`) for
     implementation: they inherit the conversation and the parent model. A
     fork that hits its 200-turn cap is resumed with a short continue message.
