@@ -34,11 +34,10 @@ next, not on supervising progress.
     inherit bias) or a different model is needed.
     Pass an explicit `model` on a non-fork dispatch when the role default
     is not what you want; a fork always inherits the parent model.
-  - In Codex, native spawn takes `model`, `reasoning_effort`, and `fork_turns`
-    (`'none'` by default; `'all'` for deliberate full-history inheritance,
-    with no model or effort override). Wait for a Codex worker with one
-    `wait_agent` call whose timeout covers the work's expected duration;
-    repeated short waits are polling.
+  - In Codex, inspect owner state before dispatch. `followup_task` starts or
+    resumes assigned work for an idle or completed owner; `send_message` only
+    informs an owner already working. Diagnose required-check failures before
+    unrelated work. Wait once with `wait_agent` for the expected duration.
 - AgentCTL batch records are read-only history. Use `agent-runtime` for
   retained records and native jobs; use native agents for new work.
 - Add workers only when independent work benefits from parallelism. Keep one
