@@ -90,7 +90,12 @@ in
       ];
       unitConfig.RequiresMountsFor = [ borgHourlyCacheDir ];
     };
-    serviceConfig = hourlyServiceConfig;
+    serviceConfig = hourlyServiceConfig // {
+      # The hourly cache commit writes to Realm even when the source is warm.
+      # Relative I/O priority alone does not bound this foreground contention.
+      IOReadBandwidthMax = [ "${realmRoot} 2M" ];
+      IOWriteBandwidthMax = [ "${realmRoot} 1M" ];
+    };
     path = with pkgs; [
       borgbackup
       btrfs-progs
