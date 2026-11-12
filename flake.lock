@@ -1458,11 +1458,11 @@
         "rust-overlay": "rust-overlay_4"
       },
       "locked": {
-        "lastModified": 1794435041,
-        "narHash": "sha256-f5b8q1kc4HQwd6gMGxDUHkTry6hrhD8aw7q8OouAgu8=",
+        "lastModified": 1794443436,
+        "narHash": "sha256-TRQiVnVnYIzONRofBAxmzZG3OObrnZMhfCTu3FmeBng=",
         "owner": "Sinity",
         "repo": "sinex",
-        "rev": "9331bbac1cb977474a5ea2a505729e9c9b68c8ff",
+        "rev": "b2f55158ec0b6f6076091d2e16b57deec363634b",
         "type": "github"
       },
       "original": {
