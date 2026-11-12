@@ -972,6 +972,7 @@ def test_a_retained_reference_remains_readable_after_the_queue_forgets_it(
     view = job_queries.get_job(started["task_id"], config, started["job_id"])
     assert view["queue_present"] is False
     assert view["job_id"] == started["job_id"]
+    assert view["priority"] is None  # Retained input does not record queue priority.
 
 
 def test_clean_removes_a_terminal_queue_task_and_retains_its_evidence(
@@ -2263,7 +2264,9 @@ def test_a_lane_branch_takes_its_pool_from_the_default_branch(
     descriptor.write_text(lane.replace('pool = "normal"', 'pool = "compile"', 1))
     subprocess.run([*git, "add", "-A"], check=True)
     subprocess.run([*git, "commit", "-qm", "master"], check=True)
-    subprocess.run([*git, "update-ref", "refs/remotes/origin/master", "HEAD"], check=True)
+    subprocess.run(
+        [*git, "update-ref", "refs/remotes/origin/master", "HEAD"], check=True
+    )
     descriptor.write_text(lane)
     fake_pueue.groups["compile"] = 1
     project = load_project_adapter(project_root)
@@ -2297,7 +2300,9 @@ def test_a_lane_descriptor_without_a_workspace_table_reads_origin_master(
     descriptor.write_text(lane.replace('pool = "normal"', 'pool = "compile"', 1))
     subprocess.run([*git, "add", "-A"], check=True)
     subprocess.run([*git, "commit", "-qm", "master"], check=True)
-    subprocess.run([*git, "update-ref", "refs/remotes/origin/master", "HEAD"], check=True)
+    subprocess.run(
+        [*git, "update-ref", "refs/remotes/origin/master", "HEAD"], check=True
+    )
     descriptor.write_text(lane)
     fake_pueue.groups["compile"] = 1
     project = load_project_adapter(project_root)

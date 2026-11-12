@@ -414,7 +414,7 @@ def job_view(task: Task) -> dict[str, Any]:
         "operation": operation,
         "group": task.group,
         "dependencies": list(task.dependencies),
-        "priority": task.priority,
+        "priority": task.priority if task.status != "Archived" else None,
         "phase": phase_of(task),
         "terminal": task.terminal,
         "result": task.result,
