@@ -18,7 +18,7 @@ from typing import Any, Mapping, Sequence
 
 from sinnix_lib.secrets import mask_secret_values, masked_window, secret_values
 
-from . import artifacts, cgroups, pueue
+from . import artifacts, cgroups, pools, pueue
 from .config import Config
 from .launch_input import secret_environment
 from .pueue import PueueError, PueueTimeout, Task
@@ -48,6 +48,8 @@ MAX_OUTCOME_BYTES = 2 * MAX_LAUNCH_INPUT_BYTES
 WAIT_SLICE_SECONDS = 5.0
 MAX_SNAPSHOT_ROWS = 100
 MAX_SNAPSHOT_TEXT = 256
+# The retained intent on a task stashed by cross-pool admission.
+HOLD_REASON = "pool-exclusivity"
 
 
 class JobError(RuntimeError):
@@ -108,6 +110,23 @@ def _age_seconds(stamp: str | None, now: datetime) -> float | None:
     return max(0.0, (now - moment).total_seconds())
 
 
+def admission_hold(config: Config, task: Task) -> dict[str, Any] | None:
+    """An exact retained AgentCTL hold, distinct from an operator's stash."""
+    if task.status != "Stashed":
+        return None
+    value = read_launch_input(config, task) or {}
+    hold = value.get("hold")
+    if (
+        not isinstance(hold, Mapping)
+        or hold.get("reason") != HOLD_REASON
+        or hold.get("pool") != task.group
+        or value.get("job_id") != job_id_of(task)
+        or value.get("pool") != task.group
+    ):
+        return None
+    return dict(hold)
+
+
 def queue_state(
     config: Config,
     groups: Sequence[str] | None = None,
@@ -139,6 +158,11 @@ def queue_state(
                 "task_id": task.task_id,
                 "label": task.label,
                 "job_id": job_id_of(task),
+                "project": task.label.partition(":")[0],
+                "project_root": document.get("project_root"),
+                "working_directory": document.get("working_directory") or task.path,
+                "priority": task.priority,
+                "phase": phase_of(task),
                 # What the slot is doing, from the launch input the job owns.
                 "argv": [str(word) for word in argv]
                 if isinstance(argv, list)
@@ -150,9 +174,14 @@ def queue_state(
         running = [
             row(task, task.started_at) for task in members if task.status == "Running"
         ]
+        # Native order is priority descending, then ID ascending.
         queued = [
-            {**row(task, task.enqueued_at), "dependencies": list(task.dependencies)}
-            for task in members
+            {
+                **row(task, task.enqueued_at),
+                "dependencies": list(task.dependencies),
+                "waiting_for": [dep for dep in task.dependencies if dep in live.tasks],
+            }
+            for task in sorted(members, key=lambda task: (-task.priority, task.task_id))
             if task.status == "Queued"
         ]
         waits = [entry["seconds"] for entry in queued if entry["seconds"] is not None]
@@ -163,6 +192,11 @@ def queue_state(
             "parallel": int(detail.get("parallel_tasks") or 0) or None,
             "running": running,
             "running_count": len(running),
+            "paused": [
+                row(task, task.started_at)
+                for task in members
+                if task.status == "Paused"
+            ],
             "queued": queued,
             "queued_count": len(queued),
             "held_count": sum(
@@ -185,24 +219,80 @@ def job_queue(
     group = job.get("group")
     if job.get("terminal") or not isinstance(group, str) or not group:
         return None
-    state = queue_state(config, [group], now=now)[group]
-    queued = job.get("phase") == "queued"
-    task_id = job.get("task_id")
-    ahead = (
-        [
-            entry["task_id"]
-            for entry in state["queued"]
-            if isinstance(task_id, int) and entry["task_id"] < task_id
-        ]
-        if queued
-        else []
+    live = pueue.live()
+    # IDs can move or be reused. Resolve the stable identity in this same
+    # unfinished snapshot before naming anyone as a blocker.
+    identity = job.get("job_id")
+    task = (
+        next(
+            (entry for entry in live.tasks.values() if job_id_of(entry) == identity),
+            None,
+        )
+        if identity
+        else live.tasks.get(job.get("task_id"))
+    )
+    group = task.group if task else group
+    state = queue_state(config, [group], now=now, live=live)[group]
+    result = {
+        **state,
+        "position": None,
+        "ahead": [],
+        "waiting_for": [],
+        "occupied_by": [],
+    }
+    if task is None:
+        return {**result, "reason": "not-in-live-queue"}
+    if task.status == "Running":
+        return {**result, "reason": "running"}
+    if task.status == "Paused":
+        return {**result, "reason": "task-paused"}
+    if task.status == "Stashed":
+        if admission_hold(config, task) is not None:
+            # Retained admission intent explains the stash, but only current
+            # unfinished native tasks can still hold it.
+            held = frozenset(
+                entry.task_id
+                for entry in live.tasks.values()
+                if admission_hold(config, entry) is not None
+            )
+            blockers = pools.blocking_tasks(
+                config.pools, group, live.tasks, task_id=task.task_id, held=held
+            )
+            occupied = [job_view(live.tasks[dep]) for dep in blockers]
+            for entry in occupied:
+                owner = read_launch_input(config, live.tasks[entry["task_id"]]) or {}
+                entry.update(launch_selection(owner))
+                entry.setdefault("working_directory", entry["path"])
+            return {
+                **result,
+                "reason": "pool-exclusivity" if blockers else "admission-release",
+                "waiting_for": list(blockers),
+                "occupied_by": occupied,
+                "excluded_by": list(pools.exclusive_partners(config.pools, group)),
+            }
+        return {**result, "reason": "stashed"}
+    waiting = [dep for dep in task.dependencies if dep in live.tasks]
+    if state["status"] == "Paused":
+        return {**result, "reason": "group-paused", "waiting_for": waiting}
+    if waiting:
+        return {**result, "reason": "dependencies", "waiting_for": waiting}
+    eligible = [entry for entry in state["queued"] if not entry["waiting_for"]]
+    ids = [entry["task_id"] for entry in eligible]
+    if task.task_id not in ids:
+        return {**result, "reason": "not-queued"}
+    position = ids.index(task.task_id)
+    holders = [*state["running"], *state["paused"]]
+    width = state["parallel"]
+    free = max(0, width - len(holders)) if width else len(eligible)
+    reason = (
+        "ready" if position < free else "pool-full" if not free else "priority-order"
     )
     return {
-        **state,
-        "position": len(ahead) + 1 if queued else None,
-        "ahead": ahead,
-        "waiting_for": list(job.get("dependencies") or []) if queued else [],
-        "occupied_by": state["running"] if queued else [],
+        **result,
+        "reason": reason,
+        "position": position + 1,
+        "ahead": ids[:position],
+        "occupied_by": holders if reason != "ready" else [],
     }
 
 
@@ -324,6 +414,7 @@ def job_view(task: Task) -> dict[str, Any]:
         "operation": operation,
         "group": task.group,
         "dependencies": list(task.dependencies),
+        "priority": task.priority,
         "phase": phase_of(task),
         "terminal": task.terminal,
         "result": task.result,

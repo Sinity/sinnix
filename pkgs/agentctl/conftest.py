@@ -24,6 +24,7 @@ from agentctl import pueue as pueue_module
 from agentctl.config import Config
 from agentctl.pueue import PueueError, PueueGroupError, PueueTimeout, Status, Task
 
+
 @dataclass
 class FakePueue:
     """An in-memory pueue daemon: enough surface for the launch route."""
@@ -89,6 +90,7 @@ class FakePueue:
             path=str(working_directory),
             dependencies=tuple(after),
             command=" ".join(command),
+            priority=priority or 0,
             enqueued_at="2026-09-03T08:00:00+00:00",
             started_at="2026-09-03T08:00:01+00:00" if status == "Running" else None,
         )

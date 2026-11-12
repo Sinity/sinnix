@@ -49,7 +49,7 @@ def test_job_start_get_logs_and_wait_round_trip(
 
     assert cli.main(["job", "list", "--project", "fixture"]) == 0
     listed = capsys.readouterr().out
-    assert "fixture:check" in listed and "age" in listed
+    assert "fixture:check" in listed and "age" in listed and "normal" in listed
     assert cli.main(["job", "list", "--project", "fixture", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)[0]["label"] == "fixture:check"
 
@@ -677,7 +677,10 @@ def test_wait_reports_elapsed_age_after_blocking(
         }
 
     monkeypatch.setattr(cli.job_queries, "wait", wait)
-    assert cli.main(["job", "wait", "1", "--job-id", "fixture-job"]) == cli.EXIT_JOB_NOT_SUCCEEDED
+    assert (
+        cli.main(["job", "wait", "1", "--job-id", "fixture-job"])
+        == cli.EXIT_JOB_NOT_SUCCEEDED
+    )
     text = capsys.readouterr().out
     assert "(10m) (wait timed out)" in text
 
@@ -936,3 +939,73 @@ def test_unknown_timeout_is_not_reported_as_an_unlimited_deadline() -> None:
     base = {"task_id": 1, "label": "fixture:check", "phase": "queued"}
     assert "timeout unknown" in output.job_line({**base, **missing})
     assert "timeout no runtime deadline" in output.job_line({**base, **zero})
+
+
+def test_operation_inspection_matches_the_default_branch_pool_used_at_launch(
+    fake_pueue, cli_config, project_root, capsys
+):
+    git = [
+        "git",
+        "-C",
+        str(project_root),
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+    ]
+    descriptor = project_root / ".agentctl/project.toml"
+    local = descriptor.read_text()
+    subprocess.run([*git[:3], "init", "-q", "-b", "master"], check=True)
+    descriptor.write_text(local.replace('pool = "normal"', 'pool = "compile"', 1))
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "commit", "-qm", "fixture default"], check=True)
+    subprocess.run(
+        [*git, "update-ref", "refs/remotes/origin/master", "HEAD"], check=True
+    )
+    descriptor.write_text(local)
+    fake_pueue.groups["compile"] = 1
+    assert cli.main(["project", "operations", "fixture", "--json"]) == 0
+    row = next(r for r in json.loads(capsys.readouterr().out) if r["name"] == "check")
+    assert row["pool"] == "compile" and row["checkout_pool"] == "normal"
+    assert cli.main(["project", "get", "fixture", "--json"]) == 0
+    project = json.loads(capsys.readouterr().out)
+    assert (
+        next(r for r in project["operations"] if r["name"] == "check")["pool"]
+        == "compile"
+    )
+    assert cli.main(["job", "start", "fixture", "check"]) == 0
+    started = json.loads(capsys.readouterr().out)
+    assert started["group"] == row["pool"]
+
+
+def test_cli_queued_job_exposes_native_slot_owner_and_workspace(
+    fake_pueue, cli_config, capsys
+):
+    assert cli.main(["job", "start", "fixture", "check"]) == 0
+    holder = json.loads(capsys.readouterr().out)
+    assert cli.main(["job", "start", "fixture", "check", "--fresh"]) == 0
+    waiting = json.loads(capsys.readouterr().out)
+    fake_pueue.queue(waiting["task_id"])
+    assert (
+        cli.main(
+            [
+                "job",
+                "get",
+                str(waiting["task_id"]),
+                "--job-id",
+                waiting["job_id"],
+                "--json",
+            ]
+        )
+        == 0
+    )
+    queue = json.loads(capsys.readouterr().out)["queue"]
+    assert queue["reason"] == "pool-full"
+    assert queue["occupied_by"][0]["job_id"] == holder["job_id"]
+    assert queue["occupied_by"][0]["working_directory"] == holder["working_directory"]
+    assert (
+        cli.main(["job", "get", str(waiting["task_id"]), "--job-id", waiting["job_id"]])
+        == 0
+    )
+    text = capsys.readouterr().out
+    assert holder["job_id"] in text and holder["working_directory"] in text

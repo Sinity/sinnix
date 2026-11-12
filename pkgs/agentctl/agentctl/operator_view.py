@@ -386,7 +386,9 @@ class Output:
             budget = (
                 "no runtime deadline"
                 if timeout == 0
-                else f"{timeout}s" if timeout is not None else "unknown"
+                else f"{timeout}s"
+                if timeout is not None
+                else "unknown"
             )
             selection_text = (
                 f"; descriptor {job.get('descriptor_path', 'unknown')}"
@@ -394,20 +396,44 @@ class Output:
                 f"; workspace {job.get('working_directory', 'unknown')}"
                 f"; timeout {budget}"
             )
+        queue_text = ""
+        queue = job.get("queue")
+        if isinstance(queue, Mapping):
+            queue_text = (
+                f"; pool {queue['group']}: {queue.get('reason', queue.get('status'))}"
+            )
+            entries = list(queue.get("occupied_by") or [])
+            ahead = set(queue.get("ahead") or [])
+            entries.extend(
+                entry
+                for entry in queue.get("queued") or []
+                if entry["task_id"] in ahead
+            )
+            if entries:
+                queue_text += "; waiting behind " + ", ".join(
+                    f"job {entry['task_id']} {entry.get('job_id') or entry.get('label')} priority {entry.get('priority', 0)} "
+                    f"({entry.get('project', '')} {entry.get('working_directory', '')})"
+                    for entry in entries
+                )
+            if queue.get("waiting_for"):
+                queue_text += "; dependencies " + ", ".join(
+                    map(str, queue["waiting_for"])
+                )
         return (
             f"job {job['task_id']} {job['label']} {job['phase']}{exit_text} "
-            f"{when}{scratch_text}{selection_text}"
+            f"{when}{scratch_text}{selection_text}{queue_text}"
         )
 
     def jobs_table(self, rows: Sequence[Mapping[str, Any]]) -> str:
         if not rows:
             return "(no jobs)"
         return table(
-            ("id", "label", "phase", "started", "age", "exit", "cwd"),
+            ("id", "label", "pool", "phase", "started", "age", "exit", "cwd"),
             [
                 (
                     row["task_id"],
                     row["label"],
+                    row.get("group", ""),
                     row["phase"],
                     self.clock(row.get("started_at") or row.get("enqueued_at")),
                     age(

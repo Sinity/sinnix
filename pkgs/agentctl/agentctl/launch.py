@@ -14,7 +14,6 @@ import pwd
 import re
 import subprocess
 import time
-import tomllib
 import uuid
 from contextlib import contextmanager
 from dataclasses import replace
@@ -22,10 +21,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Sequence, TextIO
 
+import tomllib
+from sinnix_lib.atomic import atomic_publish
+
 from . import artifacts, cgroups, gitcmd, job_queries, pools, pueue
 from .config import Config
+from .job_queries import HOLD_REASON
 from .launch_input import scratch_path, write_input
-from sinnix_lib.atomic import atomic_publish
 from .limits import CALL_TIMEOUT_SECONDS, SHORT_ID, SYSTEMCTL_TIMEOUT_SECONDS
 from .projects import AdmissionEnvelope, ProjectAdapter, ProjectOperation
 from .pueue import PueueError, PueueGroupError, Task
@@ -36,8 +38,6 @@ from .run import (
     systemd_environment,
 )
 
-# A stashed task written by AgentCTL's admission policy carries this marker.
-HOLD_REASON = "pool-exclusivity"
 LAUNCHER_POOL_VARIABLE = "AGENTCTL_POOL"
 ADMISSION_LOCK_NAME = "admission.lock"
 ADMISSION_LOCK_SECONDS = 60.0
@@ -122,10 +122,9 @@ def _matching_task(
         launch_input = job_queries.read_launch_input(config, task)
         if launch_input is None:
             continue
-        if (
-            not _same_tree(launch_input.get("tree_receipt"), tree_receipt)
-            or launch_input.get("environment_receipt") != dict(environment_receipt)
-        ):
+        if not _same_tree(
+            launch_input.get("tree_receipt"), tree_receipt
+        ) or launch_input.get("environment_receipt") != dict(environment_receipt):
             continue
         if not task.terminal:
             return task
@@ -458,22 +457,6 @@ def _admission_hold(config: Config, group: str, *, label: str) -> dict[str, Any]
     }
 
 
-def _hold_of(config: Config, task: Task) -> dict[str, Any] | None:
-    if task.status != "Stashed":
-        return None
-    value = job_queries.read_launch_input(config, task)
-    hold = value.get("hold") if value else None
-    if (
-        not isinstance(hold, Mapping)
-        or hold.get("reason") != HOLD_REASON
-        or hold.get("pool") != task.group
-        or value.get("job_id") != job_queries.job_id_of(task)
-        or value.get("pool") != task.group
-    ):
-        return None
-    return dict(hold)
-
-
 def _consume_hold(config: Config, task: Task, expected: Mapping[str, Any]) -> bool:
     """Clear the exact admission intent after its queued task was released.
 
@@ -507,7 +490,7 @@ def release_holds(
             held = {
                 task.task_id: hold
                 for task in tasks.values()
-                if (hold := _hold_of(config, task)) is not None
+                if (hold := job_queries.admission_hold(config, task)) is not None
             }
             released: list[dict[str, Any]] = []
             waiting: list[dict[str, Any]] = []
@@ -760,12 +743,16 @@ def _start_operation(
             environment_receipt = _environment_receipt(
                 project, operation, environment, extra_argv
             )
-            existing = None if fresh else _matching_task(
-                config,
-                project,
-                operation,
-                tree_receipt,
-                environment_receipt,
+            existing = (
+                None
+                if fresh
+                else _matching_task(
+                    config,
+                    project,
+                    operation,
+                    tree_receipt,
+                    environment_receipt,
+                )
             )
             if existing is not None:
                 existing_input = job_queries.read_launch_input(config, existing) or {}

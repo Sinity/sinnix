@@ -130,7 +130,8 @@ def parser() -> argparse.ArgumentParser:
     )
     worktree_verbs = worktree.add_subparsers(dest="worktree_verb", required=True)
     clean = worktree_verbs.add_parser(
-        "clean", help="remove completed published checkouts, keeping any with unpublished work"
+        "clean",
+        help="remove completed published checkouts, keeping any with unpublished work",
     )
     clean.add_argument("selector", nargs="?", metavar="project", help=PROJECT_HELP)
     clean.add_argument(
@@ -404,6 +405,12 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             attempt_offset=arguments.attempt_offset,
             attempt_limit=arguments.attempt_limit,
         )
+        try:
+            queue = job_queries.job_queue(config, job)
+            if queue is not None:
+                job["queue"] = queue
+        except PueueError as error:
+            job["queue_unavailable"] = str(error)
         out.read(job, out.job_line(job))
         return EXIT_OK
     if verb == "logs":
@@ -733,10 +740,19 @@ def _project(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         out.read(document, "\n".join(lines) or "(no projects configured)")
         return EXIT_OK
     project = _select_project(config, arguments.project, arguments.selector)
+    rows = []
+    for operation in project.operations:
+        pool = launch.default_branch_pool(project, operation.name)
+        rows.append(
+            {
+                **operation.catalog_row(),
+                "pool": operation.pool if pool is None else pool,
+                "checkout_pool": operation.pool,
+            }
+        )
     if arguments.project_verb == "get":
-        out.read(project.catalog_row())
+        out.read({**project.catalog_row(), "operations": rows})
         return EXIT_OK
-    rows = [operation.catalog_row() for operation in project.operations]
     out.read(
         rows,
         table(

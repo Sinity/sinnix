@@ -112,6 +112,11 @@ class QueueEntry(GatewayModel):
     task_id: int
     job_id: str | None = None
     label: str | None = None
+    project: str | None = None
+    project_root: str | None = None
+    working_directory: str | None = None
+    priority: int = 0
+    phase: str | None = None
     command: str | None = Field(
         default=None, description="The job's argv as one redacted line."
     )
@@ -142,6 +147,9 @@ class QueueState(GatewayModel):
 class JobQueue(QueueState):
     """Where one unfinished job stands in its group."""
 
+    reason: str | None = None
+    excluded_by: list[str] = Field(default_factory=list)
+
     position: int | None = Field(
         default=None, description="1-based place among the group's queued jobs."
     )
@@ -171,6 +179,11 @@ def _entry(raw: Mapping[str, Any]) -> QueueEntry:
         task_id=task_id,
         job_id=raw.get("job_id"),
         label=raw.get("label"),
+        project=raw.get("project"),
+        project_root=raw.get("project_root"),
+        working_directory=raw.get("working_directory"),
+        priority=int(raw.get("priority") or 0),
+        phase=raw.get("phase"),
         command=_command(raw.get("argv")),
         since=raw.get("since"),
         seconds=raw.get("seconds"),
@@ -200,6 +213,8 @@ def _job_queue(payload: Mapping[str, Any]) -> JobQueue | None:
         return None
     return JobQueue(
         **_queue_fields(raw),
+        reason=raw.get("reason"),
+        excluded_by=[str(item) for item in raw.get("excluded_by") or []],
         position=raw.get("position"),
         ahead=[int(item) for item in raw.get("ahead") or []],
         waiting_for=[int(item) for item in raw.get("waiting_for") or []],

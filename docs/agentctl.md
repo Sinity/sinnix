@@ -24,19 +24,19 @@ never cancels a job, and a queue cleanup retains its historical artifacts.
 
 ## Verbs
 
-| Verb                                                                 | Does                                                                                                                                                 |
-| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `project list \| get [p] \| operations [p]`                          | the configured descriptors                                                                                                                           |
+| Verb                                                                                          | Does                                                                                                                                                                                                                                                                                                 |
+| --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `project list \| get [p] \| operations [p]`                                                   | the configured descriptors                                                                                                                                                                                                                                                                           |
 | `job start [p] <op> [--workspace P] [--wait] [--if-idle] [--fresh] [--priority N] [-- args…]` | queue an operation in its pool, label `<p>:<op>`; `--if-idle` skips it while the same label is queued or running; `--fresh` runs a cached operation even when a matching job exists; `--priority` (-100 to 100, default 0) sets this job's pueue priority: within its pool a higher one starts first |
-| `job list [--project p] [--active] [--all]`                          | job rows, newest first (40 unless `--all`)                                                                                                           |
-| `job snapshot [--limit N]`                                           | group state and counts plus bounded job rows, unfinished first                                                                                       |
-| `job get \| logs \| result \| cancel \| retry \| wait <id>`          | one job by pueue task id, plus `--job-id` to follow it across a reorder; `--attempt` selects a retry; `logs`/`result` page with `--offset`/`--limit` |
-| `job clean <id> \| --all-terminal`                                   | remove terminal queue entries; inputs, attempts, results and evidence are kept                                                                       |
-| `worktree clean [p] [--path P]`                                      | retire completed checkouts whose work is published, keeping any with unpublished or uncommitted work                                                 |
-| `view [p]`                                                           | queue groups, recent failures, active jobs and ready tasks                                                                                           |
-| `events tail [--lines N] [--follow] [--project p]`                   | the event log (`/realm/state/agentctl/events.jsonl`)                                                                                                 |
-| `pools apply`                                                        | write the declared pool widths into the running pueued                                                                                               |
-| `pressure tick`                                                      | one pass pausing or reopening groups against memory pressure                                                                                         |
+| `job list [--project p] [--active] [--all]`                                                   | job rows, newest first (40 unless `--all`)                                                                                                                                                                                                                                                           |
+| `job snapshot [--limit N]`                                                                    | group state and counts plus bounded job rows, unfinished first                                                                                                                                                                                                                                       |
+| `job get \| logs \| result \| cancel \| retry \| wait <id>`                                   | one job by pueue task id, plus `--job-id` to follow it across a reorder; `--attempt` selects a retry; `logs`/`result` page with `--offset`/`--limit`                                                                                                                                                 |
+| `job clean <id> \| --all-terminal`                                                            | remove terminal queue entries; inputs, attempts, results and evidence are kept                                                                                                                                                                                                                       |
+| `worktree clean [p] [--path P]`                                                               | retire completed checkouts whose work is published, keeping any with unpublished or uncommitted work                                                                                                                                                                                                 |
+| `view [p]`                                                                                    | queue groups, recent failures, active jobs and ready tasks                                                                                                                                                                                                                                           |
+| `events tail [--lines N] [--follow] [--project p]`                                            | the event log (`/realm/state/agentctl/events.jsonl`)                                                                                                                                                                                                                                                 |
+| `pools apply`                                                                                 | write the declared pool widths into the running pueued                                                                                                                                                                                                                                               |
+| `pressure tick`                                                                               | one pass pausing or reopening groups against memory pressure                                                                                                                                                                                                                                         |
 
 `job start --wait --wait-seconds N` and `job wait --timeout-seconds N` bound
 only the caller's wait; a job's runtime limit is always its operation's
@@ -67,6 +67,18 @@ Discovery retains its recycled evaluator workers; the explicit bounds apply to
 the subsequent Nix build.
 
 ## Jobs
+
+`project operations` and `project get` show the effective pool from the same
+default-branch descriptor that `job start` uses. `checkout_pool` also retains the
+selected checkout's declaration. Commands and arguments still
+come from that checkout.
+
+`job get` reports current native queue occupancy, with stable job identity,
+project and workspace for slot holders. Queued order follows Pueue's priority
+(highest first), then task ID, among jobs whose dependencies are satisfied.
+Paused groups, paused tasks, operator stashes and cross-pool admission holds
+have distinct reasons. Admission inspection recomputes unfinished blockers;
+a retained launch record does not make an ended job a current blocker.
 
 A job is a pueue task, and its pool is pueue's group. Each job has two ids:
 `task_id`, pueue's task number, which is only a queue position (`pueue switch`
@@ -327,17 +339,17 @@ generation; reboot remains a separate action.
 
 ### Operation fields
 
-| Field                 | Meaning                                                                                                  |
-| --------------------- | -------------------------------------------------------------------------------------------------------- |
-| `description`, `exec` | what it does; argv with no shell                                                                         |
-| `pool`                | the pueue group                                                                                          |
-| `result`              | `exit`, `json` or `pytest`                                                                               |
-| `timeout_seconds`     | 1 to 28,800, or 0 for no limit; default 3,600                                                            |
-| `arguments`           | `none`, or `required` when the caller must pass a selector after `--`                                    |
+| Field                 | Meaning                                                                                                                                                                                                                                                                                                                                 |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `description`, `exec` | what it does; argv with no shell                                                                                                                                                                                                                                                                                                        |
+| `pool`                | the pueue group                                                                                                                                                                                                                                                                                                                         |
+| `result`              | `exit`, `json` or `pytest`                                                                                                                                                                                                                                                                                                              |
+| `timeout_seconds`     | 1 to 28,800, or 0 for no limit; default 3,600                                                                                                                                                                                                                                                                                           |
+| `arguments`           | `none`, or `required` when the caller must pass a selector after `--`                                                                                                                                                                                                                                                                   |
 | `cache`               | `none`, or `tree+environment` to answer a request from an active or successful job with the same clean content tree, environment and arguments, in any checkout of the project and at any commit; after the queue entry is cleaned, its retained outcome still answers (`<state_dir>/results/` maps each request key to its newest job) |
-| `scratch`             | `none`, `tmpfs` or `nvme`                                                                                |
-| `admission`           | `{ memory_mib }`: the expected footprint, exported as `AGENTCTL_ADMISSION_MEMORY_MIB`. It is not a limit |
-| `unit_properties`     | resource limits for the unit, e.g. `["MemoryMax=3G", "IOReadBandwidthMax=/realm 20M"]`                   |
+| `scratch`             | `none`, `tmpfs` or `nvme`                                                                                                                                                                                                                                                                                                               |
+| `admission`           | `{ memory_mib }`: the expected footprint, exported as `AGENTCTL_ADMISSION_MEMORY_MIB`. It is not a limit                                                                                                                                                                                                                                |
+| `unit_properties`     | resource limits for the unit, e.g. `["MemoryMax=3G", "IOReadBandwidthMax=/realm 20M"]`                                                                                                                                                                                                                                                  |
 
 Unknown operation fields are ignored with a warning.
 

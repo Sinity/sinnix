@@ -87,6 +87,7 @@ class Task:
     enqueued_at: str | None = None
     started_at: str | None = None
     ended_at: str | None = None
+    priority: int = 0
 
     @property
     def terminal(self) -> bool:
@@ -117,6 +118,7 @@ class Task:
             enqueued_at=_stamp(detail.get("enqueued_at")),
             started_at=_stamp(detail.get("start")),
             ended_at=_stamp(detail.get("end")),
+            priority=int(entry.get("priority") or 0),
         )
 
 

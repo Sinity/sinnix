@@ -1028,7 +1028,9 @@ def test_add_passes_a_priority_before_the_command(
     assert not any(argument.startswith("--priority") for argument in second)
 
 
-def test_a_negative_priority_is_accepted_by_pueue(live_pueue: str, tmp_path: Path) -> None:
+def test_a_negative_priority_is_accepted_by_pueue(
+    live_pueue: str, tmp_path: Path
+) -> None:
     pueue.group_add("fixture", 1)
     task_id = pueue.add(
         group="fixture",
@@ -1041,3 +1043,10 @@ def test_a_negative_priority_is_accepted_by_pueue(live_pueue: str, tmp_path: Pat
     # Split as "--priority -100", pueue's parser rejected the value as a flag.
     status = json.loads(pueue._run(["status", "--json"]))
     assert status["tasks"][str(task_id)]["priority"] == -100
+
+
+def test_native_priority_is_retained_when_reading_a_task():
+    payload = {"id": 19, "status": "Queued", "priority": -5}
+    assert pueue.Task.from_entry(payload).priority == -5
+    payload["priority"] = 50
+    assert pueue.Task.from_entry(payload).priority == 50
