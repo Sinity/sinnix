@@ -236,6 +236,9 @@
           documents = [ "${realm}/document" ];
           downloads = [ "${realm}/inbox/download" ];
         };
+        inputs.journal-json = [
+          "${realm}/device/sinnix-prime/maintenance/sinex-deploy-20261111/journal-json"
+        ];
         environment.ZSH_HISTFILE = "${realm}/activity/terminal/shell/zsh/history";
       };
     };
