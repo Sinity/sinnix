@@ -1521,11 +1521,11 @@
         "rust-overlay": "rust-overlay_5"
       },
       "locked": {
-        "lastModified": 1794479105,
-        "narHash": "sha256-3Mg6vbUBMblW+IwmenX2DyRlOvH6nTqI6QKK4bHQaUE=",
+        "lastModified": 1794498792,
+        "narHash": "sha256-p7x96Tmov6ptPt9IUi/EbEsX092T0qw0EEnv8vdytlg=",
         "owner": "Sinity",
         "repo": "sinex",
-        "rev": "be7bfa16ff90daba8e6219cc6f3e31c82e674831",
+        "rev": "49e8572df1a1b525b70978b7323e17c9d845b632",
         "type": "github"
       },
       "original": {
