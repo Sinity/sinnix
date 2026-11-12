@@ -1306,11 +1306,11 @@
         "rust-overlay": "rust-overlay_4"
       },
       "locked": {
-        "lastModified": 1794485521,
-        "narHash": "sha256-IANWOiceFwjO8ErHpVKpPR33ZeOWLUpaTNHapEQvVBQ=",
+        "lastModified": 1794498085,
+        "narHash": "sha256-xDh1NgX7ExFMYKpPtaIdhS5wtq9Bc4Xs9ACHz4c2AO0=",
         "owner": "Sinity",
         "repo": "polylogue",
-        "rev": "1d8cf9b59e06486f9062c5f3ca73ec47c5269c04",
+        "rev": "bde4c3f5ae9a53f341162d1c3e1305e5ed411e5e",
         "type": "github"
       },
       "original": {
