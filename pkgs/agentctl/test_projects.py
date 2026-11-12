@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -487,3 +488,41 @@ def test_retired_packet_table_is_an_explicit_unknown_table(project_root):
     descriptor.write_text(descriptor.read_text() + "\n[packets]\nreview = false\n")
     with pytest.raises(ProjectConfigError, match="unknown tables: packets"):
         load_project_adapter(project_root)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["wrong", {"lower": "x"}, {"SINNIX_HOST": "x"}, {"UPPER": 1}, {"UPPER": "\0"}],
+)
+def test_operation_environment_rejects_invalid_values(project_root, value):
+    descriptor = project_root / ".agentctl/project.toml"
+    # JSON inline tables are not TOML, so exercise the same parser directly.
+    from agentctl.projects import _operation
+
+    with pytest.raises(ProjectConfigError, match="operations.check.environment"):
+        _operation(
+            "check",
+            {"description": "Check", "exec": ["check"], "environment": value},
+            descriptor,
+        )
+
+
+def test_operation_values_override_project_policy_and_satisfy_required_values():
+    from agentctl.projects import ProjectEnvironment
+
+    environment = ProjectEnvironment(
+        kind="plain",
+        command=("env",),
+        inherit=(),
+        unset=("TARGET",),
+        declared=(("OTHER", "project"),),
+        require=("TARGET",),
+    )
+    assert environment.values(
+        operation_values={"TARGET": "operation", "OTHER": "override"}
+    ) == {
+        "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
+        "TARGET": "operation",
+        "OTHER": "override",
+        "GIT_OPTIONAL_LOCKS": "0",
+    }

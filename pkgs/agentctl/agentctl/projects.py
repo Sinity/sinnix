@@ -78,6 +78,7 @@ _OPERATION_FIELDS = frozenset(
         "arguments",
         "admission",
         "unit_properties",
+        "environment",
     }
 )
 #: An operation's declared memory envelope, in MiB. One key today; the table
@@ -105,7 +106,12 @@ class ProjectEnvironment:
     # on them instead of re-evaluating (and re-copying a dirty tree) per job.
     cache_inputs: tuple[str, ...] = ()
 
-    def values(self, *, host_values: Mapping[str, str] | None = None) -> dict[str, str]:
+    def values(
+        self,
+        *,
+        host_values: Mapping[str, str] | None = None,
+        operation_values: Mapping[str, str] | None = None,
+    ) -> dict[str, str]:
         """Resolve the launch environment; a missing required variable fails loudly.
 
         Inherited names absent from the caller's environment are dropped
@@ -122,6 +128,7 @@ class ProjectEnvironment:
             values=dict(self.declared),
             source=source,
         )
+        environment.update(operation_values or {})
         missing = sorted(name for name in self.require if name not in environment)
         if missing:
             raise ProjectEnvironmentError(
@@ -204,6 +211,7 @@ class ProjectOperation:
     arguments: str = "none"
     admission: AdmissionEnvelope | None = None
     unit_properties: tuple[str, ...] = ()
+    environment: tuple[tuple[str, str], ...] = ()
 
     def catalog_row(self) -> dict[str, Any]:
         return {
@@ -273,6 +281,21 @@ def _optional_string_list(value: Any, field: str) -> tuple[str, ...]:
     return tuple(value)
 
 
+def _environment_values(value: Any, field: str) -> tuple[tuple[str, str], ...]:
+    if not isinstance(value, Mapping) or any(
+        not isinstance(name, str)
+        or _ENVIRONMENT_NAME.fullmatch(name) is None
+        or name.startswith("SINNIX")
+        or not isinstance(item, str)
+        or "\0" in item
+        for name, item in value.items()
+    ):
+        raise ProjectConfigError(
+            f"{field} must map uppercase non-SINNIX variable names to strings"
+        )
+    return tuple(sorted(value.items()))
+
+
 def _environment(raw: Mapping[str, Any], descriptor: Path) -> ProjectEnvironment:
     environment = raw.get("environment")
     if not isinstance(environment, Mapping):
@@ -281,18 +304,9 @@ def _environment(raw: Mapping[str, Any], descriptor: Path) -> ProjectEnvironment
     kind = environment.get("kind")
     if not isinstance(kind, str) or not kind:
         raise ProjectConfigError(f"{descriptor} environment.kind must be non-empty")
-    declared_values = environment.get("values", {})
-    if not isinstance(declared_values, Mapping) or any(
-        not isinstance(name, str)
-        or _ENVIRONMENT_NAME.fullmatch(name) is None
-        or name.startswith("SINNIX")
-        or not isinstance(value, str)
-        for name, value in declared_values.items()
-    ):
-        raise ProjectConfigError(
-            f"{descriptor} [environment.values] must map uppercase non-SINNIX"
-            " variable names to strings"
-        )
+    declared_values = _environment_values(
+        environment.get("values", {}), f"{descriptor} [environment.values]"
+    )
     required = _optional_string_list(environment.get("require"), "environment.require")
     if any(
         _ENVIRONMENT_NAME.fullmatch(name) is None or name.startswith("SINNIX")
@@ -321,7 +335,7 @@ def _environment(raw: Mapping[str, Any], descriptor: Path) -> ProjectEnvironment
             environment.get("inherit"), "environment.inherit"
         ),
         unset=_optional_string_list(environment.get("unset"), "environment.unset"),
-        declared=tuple(sorted(declared_values.items())),
+        declared=declared_values,
         require=required,
         cache_inputs=cache_inputs,
     )
@@ -390,7 +404,11 @@ def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation
     if not isinstance(description, str) or not description:
         raise ProjectConfigError(f"{descriptor} operation {name} requires description")
     command = _string_list(definition.get("exec"), f"operations.{name}.exec")
-    fields: dict[str, Any] = {}
+    fields: dict[str, Any] = {
+        "environment": _environment_values(
+            definition.get("environment", {}), f"operations.{name}.environment"
+        )
+    }
     if "pool" in definition:
         pool = definition["pool"]
         if not isinstance(pool, str) or not _POOL_NAME.fullmatch(pool):

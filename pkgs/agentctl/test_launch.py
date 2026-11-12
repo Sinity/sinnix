@@ -2311,3 +2311,64 @@ def test_a_lane_descriptor_without_a_workspace_table_reads_origin_master(
     started = launch.start_operation(config, project, project.operation("check"))
 
     assert fake_pueue.task(started["task_id"]).group == "compile"
+
+
+@pytest.mark.parametrize("cached", [False, True])
+def test_operation_environment_reaches_shell_entry_without_changing_other_operations(
+    fake_pueue, config, project_root, tmp_path, cached, monkeypatch
+):
+    from agentctl import devenv
+
+    hook = tmp_path / "enter"
+    hook.write_text(
+        '#!/bin/sh\nexport HOOK_TARGET="${CARGO_TARGET_DIR:-seeded}"\nexec "$@"\n'
+    )
+    hook.chmod(0o755)
+    descriptor = project_root / ".agentctl/project.toml"
+    text = descriptor.read_text().replace(
+        'command = ["env"]', "command = " + json.dumps([str(hook)])
+    )
+    text = text.replace(
+        "[operations.verify]",
+        '[operations.verify]\nenvironment = { CARGO_TARGET_DIR = "target" }',
+    )
+    # Execute the exact queued invocation. A post-entry exec-env still overrides
+    # the value for the payload, while the hook sees the selected launch value.
+    for old, expected in [
+        ('exec = ["fixture-verify"]', "target"),
+        ('exec = ["true"]', "seeded"),
+    ]:
+        payload = [
+            "env",
+            "CARGO_TARGET_DIR=later",
+            "sh",
+            "-c",
+            'test "$HOOK_TARGET" = "$1" && test "$CARGO_TARGET_DIR" = later',
+            "sh",
+            expected,
+        ]
+        text = text.replace(old, "exec = " + json.dumps(payload))
+    if cached:
+        text = text.replace(
+            'kind = "plain"', 'kind = "nix-develop"\ncache_inputs = ["marker"]'
+        )
+        script = tmp_path / "cached.sh"
+        script.write_text('export HOOK_TARGET="${CARGO_TARGET_DIR:-seeded}"\n')
+        monkeypatch.setattr(devenv, "realize", lambda *_args: script)
+    descriptor.write_text(text)
+    project = load_project_adapter(project_root)
+    for name in ("verify", "check"):
+        started = launch.start_operation(config, project, project.operation(name))
+        written = read_launch(config, fake_pueue.task(started["task_id"]))
+        if cached:
+            monkeypatch.setenv(
+                "CARGO_TARGET_DIR", written["environment"].get("CARGO_TARGET_DIR", "")
+            )
+            monkeypatch.chdir(project_root)
+            assert written["argv"][0] == "agentctl-devenv"
+            assert devenv.main(written["argv"][1:]) == 0
+        else:
+            result = subprocess.run(
+                written["argv"], env=written["environment"], check=False
+            )
+            assert result.returncode == 0
