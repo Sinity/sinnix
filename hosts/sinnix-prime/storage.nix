@@ -304,15 +304,13 @@ in
     services.sinnix-fstrim = fstrimJob.systemd.services.sinnix-fstrim;
 
     # Btrfs owns a filesystem BDI, separate from the block device's BDI.
-    # The 2026-10-28 interactive IO sample found the raw NVMe at 25/1 but
-    # /realm's btrfs BDI at 100/0 (max_ratio/strict_limit). The old block udev
-    # rule therefore never bounded /realm's buffered writes. Resolve the BDI
-    # through the mounted filesystem UUID; btrfs-N changes between boots.
-    # This restores the intended 256 MiB share of the global 1 GiB dirty
-    # budget, reserving headroom for writers on the desktop's other SSD.
-    # It does not remove shared Btrfs transaction or synchronous IO waits.
+    # Resolve it through the mounted filesystem UUID; btrfs-N changes at boot.
+    # Keep a soft 25% share of the global dirty budget for this filesystem.
+    # Strict enforcement also shrinks each writeback cgroup's share and can
+    # pause writers while the global budget remains mostly unused. The global
+    # 1 GiB dirty limit bounds the combined backlog; IO-cost paces device work.
     services.sinnix-realm-writeback = {
-      description = "Bound Realm Btrfs dirty writeback independently of the desktop SSD";
+      description = "Set Realm Btrfs buffered-write share";
       wantedBy = [ "multi-user.target" ];
       requires = [ "realm.mount" ];
       after = [
@@ -326,7 +324,7 @@ in
       script = ''
         bdi=/sys/fs/btrfs/${realmFsUuid}/bdi
         printf '25\n' > "$bdi/max_ratio"
-        printf '1\n' > "$bdi/strict_limit"
+        printf '0\n' > "$bdi/strict_limit"
       '';
     };
 
