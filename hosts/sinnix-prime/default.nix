@@ -142,6 +142,10 @@
     };
     polylogue = {
       enable = true;
+      dataHome = "/realm/state/polylogue-live/data-20261111";
+      retainedArchives = [
+        "/realm/state/polylogue-live/data/polylogue"
+      ];
       # The Python archive lives on the realm NVMe volume, not in the
       # impermanent home-directory default.
       dataDir = "/realm/state/polylogue";
