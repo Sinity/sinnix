@@ -6,7 +6,7 @@
 # entries of its units. The sources a host reads are host facts and are set in
 # the host's canonical roots under `services.sinex.discovery`.
 #
-# State is on /var/lib/sinex, the /state/sinex subvolume on the /realm NVMe
+# State is on /var/lib/sinex, the /realm/state/sinex subvolume on the NVMe
 # (hosts/sinnix-prime/storage.nix), outside the realm snapshots:
 #   daemon/      API tokens, NATS JetStream, capture spools, and the content
 #                store (daemon/store)

@@ -205,8 +205,8 @@ in
     # Dedicated /state/sinex subvolume on /realm NVMe, not the ephemeral @ root, so
     # Postgres data survives rollback. Per-file chattr +C (inherited, not a
     # whole-mount nodatacow) keeps database writes in place. Excluded from
-    # btrbk (unsafe to block-snapshot a live database); recovery is the daily
-    # dump and the content-store Borg job (modules/services/sinex/bridge.nix).
+    # btrbk (unsafe to block-snapshot a live database); recovery uses Sinex's
+    # immutable core artifact and paired content/key Borg archives.
     "/var/lib/sinex" = {
       device = "/dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a";
       fsType = "btrfs";
