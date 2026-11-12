@@ -201,7 +201,7 @@
     {
       # Keep the predecessor's inline-confirmed history intact while native
       # descriptor publication replays into its own streams.
-      nats.subjectRoot = "sinex-v3";
+      nats.subjectRoot = "sinex-v4";
       nats.producers.${config.services.sinex.session.producer} = {
         writeFamily = "sinex";
         attestedHost = config.services.sinex.host;

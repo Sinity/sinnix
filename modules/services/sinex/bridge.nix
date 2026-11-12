@@ -22,6 +22,7 @@
 # deploy and check the running binary.
 {
   config,
+  inputs,
   lib,
   options,
   pkgs,
@@ -100,6 +101,8 @@ in
     services.sinex = {
       enable = true;
       stateDir = "${root}/daemon";
+      # Use the same PostgreSQL/extensions that qualify Sinex's package.
+      database.package = inputs.sinex.packages.${pkgs.stdenv.hostPlatform.system}.postgresql;
       database.dataDir = "${root}/postgresql";
       # Shell histories, browser and ActivityWatch databases and the capture
       # lanes are private to the operator; sinexd reads them, never writes.
