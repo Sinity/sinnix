@@ -41,6 +41,8 @@ UID from Package Manager at each start. Tailscale keeps the Android VPN slot,
 and other applications keep their existing routes. Interface-scoped IPv4
 masquerading handles source addresses retained by Android's network service.
 App IPv6 is terminal because the phone kernel does not provide IPv6 NAT.
+The app's queries to Tailscale's DNS resolver stay on Tailscale's route;
+internet destinations use the Proton tunnel.
 
 The phone needs root, kernel WireGuard support, and `wireguard-tools` in the
 existing Sinnix Debian chroot. Use a separate Proton-generated profile from
