@@ -12,7 +12,7 @@ uid_file="$state/uid"
 remove_rules() {
   if [ -r "$uid_file" ]; then
     previous_uid=$(cat "$uid_file")
-    ip -4 rule del priority 99 to 100.100.100.100/32 uidrange "$previous_uid-$previous_uid" table tun0 2>/dev/null || true
+    ip -4 rule del priority 99 to 100.100.100.100/32 uidrange "$previous_uid-$previous_uid" 2>/dev/null || true
     ip -4 rule del priority 100 uidrange "$previous_uid-$previous_uid" table "$table" 2>/dev/null || true
     ip -6 rule del priority 100 uidrange "$previous_uid-$previous_uid" table "$table" 2>/dev/null || true
   fi
@@ -66,9 +66,6 @@ printf '%s\n' "$app_uid" >"$uid_file"
 # Keep a terminal route even if the interface later disappears.
 ip -4 route replace unreachable default metric 32767 table "$table"
 ip -6 route replace unreachable default metric 32767 table "$table"
-# Android sends this app's DNS queries to Tailscale's resolver under its UID.
-# Keep that resolver on Tailscale; internet destinations use the Proton table.
-ip -4 rule add priority 99 to 100.100.100.100/32 uidrange "$app_uid-$app_uid" table tun0
 ip -4 rule add priority 100 uidrange "$app_uid-$app_uid" table "$table"
 ip -6 rule add priority 100 uidrange "$app_uid-$app_uid" table "$table"
 ip link del "$iface" 2>/dev/null || true
@@ -103,4 +100,16 @@ ip -4 route replace default dev "$iface" metric 10 table "$table"
 # This kernel has no IPv6 NAT. Keep app IPv6 terminal so it uses IPv4.
 # Bound-interface diagnostic sockets follow the same lane as the app.
 ip -4 rule add priority 101 from "$bind_ip" table "$table"
+# Android sends this app's DNS queries to Tailscale's resolver under its UID.
+# Magisk can start before Android's always-on VPN has installed that route.
+attempt=0
+until [ -n "$(ip -4 route show table tun0 exact 100.100.100.100/32 2>/dev/null)" ]; do
+  attempt=$((attempt + 1))
+  [ "$attempt" -lt 60 ] || {
+    echo 'Tailscale DNS route unavailable' >&2
+    exit 1
+  }
+  sleep 2
+done
+ip -4 rule add priority 99 to 100.100.100.100/32 uidrange "$app_uid-$app_uid" table tun0
 echo 'ChatGPT UID routed through Proton; other app routing unchanged'
