@@ -83,9 +83,9 @@ let
       failPct = 90;
     }
     {
-      # /neo-outer-realm is a bulk media archive, not a service write path:
-      # nothing on it is a live database, a snapshot queue, or a backup
-      # destination, so "nearly full" is its normal working state rather than
+      # /neo-outer-realm holds bulk media and temporary Sinex backup artifacts.
+      # It holds no live database or snapshot queue, so "nearly full" is its
+      # normal working state rather than
       # an incident. The /realm thresholds exist because a full /realm stalls
       # capture lanes and Postgres; neither failure mode exists here, and an
       # 80/90 pair on a 13T drive pages at 1.3T free. Give it a band that
