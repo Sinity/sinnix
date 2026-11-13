@@ -43,8 +43,10 @@ masquerading handles source addresses retained by Android's network service.
 App IPv6 is terminal because the phone kernel does not provide IPv6 NAT.
 The app's queries to Tailscale's DNS resolver stay on Tailscale's route;
 internet destinations use the Proton tunnel.
-Startup waits up to two minutes for the Tailscale DNS route. If it remains
-unavailable, startup fails with the app's fail-closed routing left in place.
+Startup discovers the current Tailscale DNS routing table, since Android can
+change its tunnel number after a reboot, and waits up to two minutes for it.
+If it remains unavailable, startup fails with the app's fail-closed routing
+left in place.
 
 The phone needs root, kernel WireGuard support, and `wireguard-tools` in the
 existing Sinnix Debian chroot. Use a separate Proton-generated profile from

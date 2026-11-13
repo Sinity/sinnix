@@ -103,7 +103,10 @@ ip -4 rule add priority 101 from "$bind_ip" table "$table"
 # Android sends this app's DNS queries to Tailscale's resolver under its UID.
 # Magisk can start before Android's always-on VPN has installed that route.
 attempt=0
-until [ -n "$(ip -4 route show table tun0 exact 100.100.100.100/32 2>/dev/null)" ]; do
+while :; do
+  dns_table=$(ip -4 route show table all exact 100.100.100.100/32 2>/dev/null |
+    sed -n 's/.* dev tun[0-9][0-9]* table \([^ ]*\).*/\1/p' | head -n 1)
+  [ -n "$dns_table" ] && break
   attempt=$((attempt + 1))
   [ "$attempt" -lt 60 ] || {
     echo 'Tailscale DNS route unavailable' >&2
@@ -111,5 +114,5 @@ until [ -n "$(ip -4 route show table tun0 exact 100.100.100.100/32 2>/dev/null)"
   }
   sleep 2
 done
-ip -4 rule add priority 99 to 100.100.100.100/32 uidrange "$app_uid-$app_uid" table tun0
+ip -4 rule add priority 99 to 100.100.100.100/32 uidrange "$app_uid-$app_uid" table "$dns_table"
 echo 'ChatGPT UID routed through Proton; other app routing unchanged'
