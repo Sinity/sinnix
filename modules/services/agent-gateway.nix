@@ -35,7 +35,7 @@ let
   mcpBrokerCommands = {
     lynchpin = "${mcpTools.mcpLynchpinBin}/bin/mcp-lynchpin";
     polylogue = "${mcpTools.mcpPolylogueBin}/bin/mcp-polylogue";
-    sinex = "${scriptPkgs.sinnix-mcp-sinex}/bin/sinnix-mcp-sinex";
+    sinex = "${pkgs.writeScript "mcp-sinex" mcpTools.mcpSinexText}";
   };
   mcpBrokerServers = lib.mapAttrs (
     name: server:
