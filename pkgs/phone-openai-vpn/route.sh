@@ -11,9 +11,9 @@ uid_file="$state/uid"
 
 remove_rules() {
   if [ -r "$uid_file" ]; then
-    app_uid=$(cat "$uid_file")
-    ip -4 rule del priority 100 uidrange "$app_uid-$app_uid" table "$table" 2>/dev/null || true
-    ip -6 rule del priority 100 uidrange "$app_uid-$app_uid" table "$table" 2>/dev/null || true
+    previous_uid=$(cat "$uid_file")
+    ip -4 rule del priority 100 uidrange "$previous_uid-$previous_uid" table "$table" 2>/dev/null || true
+    ip -6 rule del priority 100 uidrange "$previous_uid-$previous_uid" table "$table" 2>/dev/null || true
   fi
   ip -4 rule del priority 101 table "$table" 2>/dev/null || true
   ip -6 rule del priority 101 table "$table" 2>/dev/null || true
