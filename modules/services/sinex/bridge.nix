@@ -283,9 +283,6 @@ in
         serviceConfig = runtimeServiceConfig "sinex-capture-journald.service";
       };
       sinex-backup = {
-        # Producer snapshots must be complete before the nightly archive runs.
-        # Re-enable this unit with the qualified snapshot lifecycle repair.
-        enable = false;
         unitConfig.RequiresMountsFor = [
           root
           backupRoot
