@@ -233,7 +233,7 @@ mkServiceModule {
           # ~900 finished tasks a day pile up (349 MB on 2026-10-27, 1.2 GB
           # over 3.7 days before any cleaning), and freed tasks do not return
           # the allocator's high-water mark, so clean often enough that the
-          # queue never grows large. Worktree retirement stays daily below.
+          # queue never grows large. Checkout retirement is an explicit owner action.
           execStart = "${scriptPkgs.agentctl}/bin/agentctl job clean --all-terminal";
           serviceConfig = {
             TimeoutStartSec = "5min";
@@ -242,37 +242,6 @@ mkServiceModule {
             onCalendar = "hourly";
             persistent = true;
             description = "Hourly cleanup of finished queue tasks";
-          };
-        }
-      )
-      (lib.sinnix.mkScheduledJob
-        {
-          inherit config;
-          unitName = "agentctl-clean";
-          description = "Remove finished queue tasks and completed worktrees";
-        }
-        {
-          manager = "user";
-          resourceClass = "background";
-          # pueued keeps every finished task in memory until it is cleaned;
-          # nothing cleaned them, and the daemon grew to 1.2 GB over 3.7 days.
-          # Results and receipts stay readable through agentctl afterwards.
-          # Each pass retires at most one batch per project and stops admitting
-          # removals after 45 minutes, inside the start timeout; deferred
-          # checkouts go in the next pass.
-          execStart = "${scriptPkgs.agentctl}/bin/agentctl job clean --all-terminal --worktrees --budget-seconds 2700";
-          # The worktree holder census reads hidden process working
-          # directories through the host's noninteractive sudo wrapper.
-          path = [ "/run/wrappers" ];
-          serviceConfig = {
-            # With a working census each candidate's holder scan and removal
-            # take real time on a loaded host; 5 minutes cut the first run off.
-            TimeoutStartSec = "1h";
-          };
-          timer = {
-            onCalendar = "*-*-* 05:10:00";
-            persistent = true;
-            description = "Daily cleanup of finished jobs and completed worktrees";
           };
         }
       )

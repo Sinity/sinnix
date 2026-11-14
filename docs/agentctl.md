@@ -287,12 +287,10 @@ Keep a functional checkout reserved between jobs with Git's existing lock:
 Release it with `git worktree unlock` when ownership ends. Cleanup also preserves
 pre-rewrite branches and active target aliases.
 
-The existing daily maintenance runs `job clean --all-terminal --worktrees --budget-seconds 2700`:
-each pass admits at most 40 candidate checkouts per project and stops admitting
-removals when the budget is spent; deferred checkouts are reported and retried
-on the next pass.
-Queue results and worktree outcomes are reported separately, including kept
-paths and failures. Without `--worktrees`, job-clean JSON remains unchanged.
+Hourly maintenance runs `job clean --all-terminal` to release finished queue
+entries while retaining their artifacts. Worktree retirement runs only when
+its owner explicitly requests `agentctl worktree clean` or `job clean --worktrees`
+after releasing the checkout.
 
 agentctl's own index-writing Git calls are refused in a main checkout. A timed-out Git call
 gets SIGTERM, then SIGKILL after ten seconds. An `index.lock` stranded by a

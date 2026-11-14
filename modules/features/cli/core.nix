@@ -19,29 +19,6 @@ mkFeatureModule {
       userRuntimeDirectory = "/run/user/${toString config.users.users.${user}.uid}";
     in
     lib.mkMerge [
-      # Worktrunk identifies integrated worktrees, including squash merges.
-      # The reaper retains dirty (including ignored files), locked and active
-      # checkouts. Unknown directories are reported, never inferred disposable.
-      (lib.sinnix.mkScheduledJob
-        {
-          inherit config;
-          unitName = "sinnix-worktree-reap";
-          description = "Remove inactive integrated worktrees";
-        }
-        {
-          manager = "user";
-          resourceClass = "background";
-          serviceConfig.TimeoutStartSec = "1h";
-          script = "${scriptPkgs.sinnix-worktree-reap}/bin/sinnix-worktree-reap";
-          timer = {
-            onCalendar = "*-*-* 04:00:00";
-            persistent = true;
-            randomizedDelaySec = "20min";
-            accuracySec = "5min";
-            description = "Daily inactive integrated worktree removal";
-          };
-        }
-      )
       {
         environment.systemPackages =
           (with pkgs; [

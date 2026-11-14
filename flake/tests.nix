@@ -48,7 +48,6 @@ in
     ./tests/agent-parity.nix
     ./tests/observability.nix
     ./tests/cli.nix
-    ./tests/worktree-reap.nix
     ./tests/git-languages.nix
     ./tests/polylogue.nix
     ./tests/vm.nix
