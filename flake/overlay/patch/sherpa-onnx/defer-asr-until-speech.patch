@@ -1,0 +1,32 @@
+--- a/sherpa-onnx/csrc/sherpa-onnx-vad-with-offline-asr.cc
++++ b/sherpa-onnx/csrc/sherpa-onnx-vad-with-offline-asr.cc
+@@ -171,9 +171,8 @@
+     return -1;
+   }
+ 
+-  fprintf(stderr, "Creating recognizer ...\n");
+-  sherpa_onnx::OfflineRecognizer recognizer(asr_config);
+-  fprintf(stderr, "Recognizer created!\n");
++  // Silent input needs VAD, not an ASR model and its inference sessions.
++  std::unique_ptr<sherpa_onnx::OfflineRecognizer> recognizer;
+ 
+   auto vad = std::make_unique<sherpa_onnx::VoiceActivityDetector>(vad_config);
+ 
+@@ -226,9 +225,15 @@
+         continue;
+       }
+ 
+-      auto s = recognizer.CreateStream();
++      if (!recognizer) {
++        fprintf(stderr, "Creating recognizer ...\n");
++        recognizer =
++            std::make_unique<sherpa_onnx::OfflineRecognizer>(asr_config);
++        fprintf(stderr, "Recognizer created!\n");
++      }
++      auto s = recognizer->CreateStream();
+       s->AcceptWaveform(16000, segment.samples.data(), segment.samples.size());
+-      recognizer.DecodeStream(s.get());
++      recognizer->DecodeStream(s.get());
+       const auto &result = s->GetResult();
+       if (!result.text.empty()) {
+         fprintf(stdout, "%.3f -- %.3f: ", start_time, end_time);

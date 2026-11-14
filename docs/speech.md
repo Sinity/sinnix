@@ -25,9 +25,10 @@ curl -F file=@clip.wav -F model=parakeet-tdt-0.6b-v3 \
      http://127.0.0.1:8090/v1/audio/transcriptions
 ```
 
-It starts on the first connection and exits after 300 s idle, so the 650 MB
-encoder is not held by an idle service. Browser requests (an `Origin` or
-Fetch-Metadata header) are refused.
+The HTTP frontend starts on the first connection and exits after 300 s idle.
+Recognition workers are created per recording window. A worker initializes
+its ASR model only after VAD emits speech; silent windows never load the large
+encoder. Browser requests (an `Origin` or Fetch-Metadata header) are refused.
 
 The VAD passes only speech to the recogniser, and every record carries
 `speech_seconds` next to `audio_seconds`, so silence is measured, not

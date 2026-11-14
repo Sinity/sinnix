@@ -16,10 +16,9 @@
 # available rather than queued behind the model tier, which matters most for
 # exactly the always-on lane this exists to serve.
 #
-# It is still socket-activated. Not for VRAM -- there is none to release --
-# but because the encoder is 650 MB of resident RSS that a mostly-idle service
-# has no business holding. The proxy keeps the port always
-# answerable while the backend comes and goes.
+# The HTTP frontend is socket-activated. Recognition runs in short-lived
+# workers; a silent window loads only VAD, and speech initializes its ASR model.
+# The proxy keeps the port answerable while the frontend comes and goes.
 {
   mkAiService,
   lib,
@@ -41,11 +40,8 @@ mkAiService {
     mode = "socket-proxy";
     publicEndpoint = "127.0.0.1:${toString helpers.data.ports.stt.public}";
     backendEndpoint = "127.0.0.1:${toString helpers.data.ports.stt.backend}";
-    # Longer than the GPU services' 30s: there is no scarce resource being
-    # held, and re-loading a 650 MB encoder for every voice note in a
-    # conversation is worse than keeping it warm through the gaps.
+    # Keep the HTTP frontend through gaps between interactive voice notes.
     idleTimeout = "300s";
-    # Cold start loads that 650 MB encoder in ~2s.
     readinessTimeout = 60;
   };
   configFn =
