@@ -209,15 +209,5 @@ mkServiceModule {
         }
       ];
 
-      sinnix.runtime.units.polylogue-live = {
-        unit = "polylogue-live.service";
-        manager = "user";
-        resourceClass = "live";
-        # Its indexes and caches stay resident beside the session producer
-        # within the user live slice's protection (runtime-defaults.nix).
-        resources.MemoryLow = "2500M";
-        notifyOnFailure = true;
-        operatorRestart = true;
-      };
     };
 } args
