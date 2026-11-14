@@ -165,6 +165,21 @@ in
         "x-systemd.mount-timeout=60s"
       ];
     };
+    # Historical evidence keeps its canonical paths on the archive disk.
+    # The automount fails access when that disk is unavailable.
+    "${realmRoot}/archive/backup/polylogue/2026-08-16-live" = {
+      device = "${neoOuterRealm}/archive/polylogue/2026-08-16-live";
+      fsType = "none";
+      depends = [ neoOuterRealm ];
+      options = [
+        "bind"
+        "ro"
+        "nofail"
+        "x-systemd.automount"
+        "x-systemd.idle-timeout=10min"
+        "x-systemd.mount-timeout=60s"
+      ];
+    };
     "/" = {
       device = "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02";
       fsType = "btrfs";
