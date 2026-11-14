@@ -282,6 +282,14 @@ selector's exact per-checkout external cache retire together with the checkout.
 The cache tag is removed last, so interrupted removal can be retried. Unknown
 nonempty directories stay; empty directory leftovers do not block retirement.
 
+Each real checkout keeps its own writable Cargo target. Sequential whole-target
+sharing is unsafe too: relative Cargo dep-info paths and source mtimes can accept
+another checkout's stale path-package artifacts. Use the compiler selector's
+dependency-only seed and independent target, or an explicit `CARGO_TARGET_DIR`
+for a deliberate distinct target. The hourly cache cleanup preserves targets
+while their marked checkout path exists; only removed checkouts become eligible
+after the use grace and Cargo-holder checks. See [compiler targets](worktree-cleanup.md#compiler-targets).
+
 Keep a functional checkout reserved between jobs with Git's existing lock:
 `git worktree lock --reason "owner and purpose" /realm/worktree/retained-checkout`.
 Release it with `git worktree unlock` when ownership ends. Cleanup also preserves

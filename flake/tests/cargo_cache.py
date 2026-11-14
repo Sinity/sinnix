@@ -252,7 +252,11 @@ class CargoCache(unittest.TestCase):
 
         target = select_in(worktree("lane"))
         self.assertNotEqual(target, seed)
-        for path in [*outputs, *cross, Path("debug/build/dep-2222222222222222/out/generated.rs")]:
+        for path in [
+            *outputs,
+            *cross,
+            Path("debug/build/dep-2222222222222222/out/generated.rs"),
+        ]:
             self.assertEqual((target / path).read_bytes(), (seed / path).read_bytes())
         for unit in (dep, "dep-2222222222222222"):
             self.assertTrue((target / "debug" / ".fingerprint" / unit).is_dir())
@@ -363,11 +367,11 @@ class CargoCache(unittest.TestCase):
                 env = dict(self.env, CARGO_TARGET_DIR=str(self.root / "leased"))
                 if explicit is not None:
                     env["CARGO_INCREMENTAL"] = explicit
-                script = f'''
+                script = f"""
                     source "{self.direnv}"
                     _sinnix_project_environment_setup
                     printf '%s' "${{CARGO_INCREMENTAL-unset}}"
-                '''
+                """
                 expected = explicit or ("0" if cargo else "unset")
                 self.assertEqual(self.run_bash(script, env=env).stdout, expected)
 
@@ -379,7 +383,7 @@ class CargoCache(unittest.TestCase):
         )
         (self.bin / "sinnix-cargo-target").chmod(0o755)
         # Exercise the real use_flake wrapper before and after a product shell.
-        script = f'''
+        script = f"""
             use_flake() {{
                 export DATABASE_URL="postgresql:///fixture"
                 export PGHOST="$PWD/socket"
@@ -387,7 +391,7 @@ class CargoCache(unittest.TestCase):
             source "{self.direnv}"
             use_flake
             printf '%s\\n' "$CARGO_TARGET_DIR" "$DATABASE_URL" "$PGHOST"
-        '''
+        """
         out = self.run_bash(script).stdout.splitlines()
         self.assertTrue(Path(out[0]).is_relative_to(self.cache))
         self.assertEqual(
@@ -400,11 +404,11 @@ class CargoCache(unittest.TestCase):
         )
 
     def test_direnv_leaves_non_cargo_checkouts_alone(self):
-        script = f'''
+        script = f"""
             source "{self.direnv}"
             _sinnix_project_environment_setup
             test -z "$CARGO_TARGET_DIR"
-        '''
+        """
         self.run_bash(script)
         self.assertFalse(self.cache.exists())
 
@@ -426,72 +430,98 @@ class CargoCache(unittest.TestCase):
             os.utime(path, (stamp, stamp))
         return entry
 
-    def evict(self, *, use_percent_per_target=0, max_use_percent=90):
-        # Filesystem use is ten points per remaining target, so eviction under
-        # pressure can be observed stopping once usage falls to the budget.
-        (self.bin / "df").write_text(
-            f"#!{shutil.which('bash')}\nset -eu\n"
-            f'n=$(find "{self.cache}/{os.getuid()}" -mindepth 1 -maxdepth 1 -name "????????????????????????????????" | wc -l)\n'
-            f'printf "Use%%\\n%s%%\\n" "$((n * {use_percent_per_target}))"\n'
-        )
-        (self.bin / "df").chmod(0o755)
-        env = dict(
-            self.env,
-            SINNIX_CARGO_MAX_IDLE_SECONDS=str(72 * 3600),
-            SINNIX_CARGO_MIN_IDLE_SECONDS=str(2 * 3600),
-            SINNIX_CARGO_MAX_FILESYSTEM_USE_PERCENT=str(max_use_percent),
-        )
+    def evict(self):
+        env = dict(self.env, SINNIX_CARGO_MIN_IDLE_SECONDS=str(2 * 3600))
         return self.run_bash(f'bash "{EVICT}"', env=env)
 
-    def test_eviction_removes_targets_of_removed_and_long_idle_checkouts(self):
+    def test_eviction_keeps_existing_checkouts_regardless_of_age_or_pressure(self):
         self.provision()
-        live = self.checkout.resolve()
-        removed = self.root / "removed"
-        kept = self.make_target(live, idle_hours=24)
-        orphan = self.make_target(removed, idle_hours=3)
-        recent_orphan = self.make_target(self.root / "just-removed", idle_hours=1)
-        stale = self.make_target(live / "stale", idle_hours=100, marked=False)
+        # Both the old age rule and pressure rule must keep existing source.
+        old = self.make_target(self.checkout.resolve(), idle_hours=1000)
+        another = self.root / "another"
+        subprocess.run(["git", "init", "-q", str(another)], check=True)
+        idle = self.make_target(another, idle_hours=24)
+        no_git = self.root / "source-without-git"
+        no_git.mkdir()
+        source = self.make_target(no_git, idle_hours=1000)
+        link = self.root / "retained-link"
+        link.symlink_to(self.root / "unavailable-source", target_is_directory=True)
+        linked = self.make_target(link, idle_hours=1000)
+        (self.bin / "df").write_text(
+            f"#!{shutil.which('bash')}\nprintf 'Use%%\\n99%%\\n'\n"
+        )
+        (self.bin / "df").chmod(0o755)
+        self.evict()
+        for entry in (old, idle, source, linked):
+            self.assertTrue((entry / "target" / "debug" / ".cargo-lock").exists())
+
+    def test_eviction_preserves_unknown_checkout_markers(self):
+        self.provision()
+        unmarked = self.make_target(
+            self.root / "unmarked", idle_hours=1000, marked=False
+        )
+        mismatched = self.make_target(self.root / "mismatched", idle_hours=1000)
+        (mismatched / "checkout").write_text(str(self.root / "other") + "\n")
+        blank = self.make_target(self.root / "blank", idle_hours=1000)
+        (blank / "checkout").write_text("")
+        relative = self.make_target(Path("relative"), idle_hours=1000)
+        linked = self.make_target(self.root / "linked-marker", idle_hours=1000)
+        marker = linked / "checkout"
+        contents = marker.read_text()
+        marker.unlink()
+        external = self.root / "external-marker"
+        external.write_text(contents)
+        marker.symlink_to(external)
+        # Marker edits must not make these unknown entries merely recent.
+        entries = (unmarked, mismatched, blank, relative, linked)
+        stamp = time.time() - 1000 * 3600
+        for entry in entries:
+            for path in [entry, *entry.rglob("*")]:
+                os.utime(path, (stamp, stamp), follow_symlinks=False)
+        self.evict()
+        for entry in entries:
+            self.assertTrue(entry.exists())
+
+    def test_eviction_removes_only_old_removed_unlocked_targets(self):
+        self.provision()
+        orphan = self.make_target(self.root / "removed", idle_hours=3)
+        recent = self.make_target(self.root / "just-removed", idle_hours=1)
+        built = self.make_target(self.root / "recent-build", idle_hours=3)
+        os.utime(built / "target" / "debug" / "deps", None)
         busy = self.make_target(self.root / "busy", idle_hours=3)
         lock = (busy / "target" / "debug" / ".cargo-lock").open()
         self.addCleanup(lock.close)
         fcntl.flock(lock, fcntl.LOCK_EX)
-        # A new entry whose target is not yet marked is recent by its own mtime.
-        fresh = self.cache / str(os.getuid()) / ("f" * 32)
-        (fresh / "target").mkdir(parents=True)
         output = self.evict().stdout
-        self.assertTrue(fresh.exists())
-        self.assertTrue(kept.exists())
         self.assertFalse(orphan.exists())
-        self.assertTrue(recent_orphan.exists())
-        self.assertFalse(stale.exists())
-        self.assertTrue(busy.exists())
+        for entry in (recent, built, busy):
+            self.assertTrue(entry.exists())
         self.assertIn("checkout removed", output)
-        self.assertEqual(
-            [
-                p.name
-                for p in (self.cache / str(os.getuid())).iterdir()
-                if p.name.startswith(".")
-            ],
-            [],
+        self.assertFalse(
+            any(p.name.startswith(".evicting.") for p in orphan.parent.iterdir())
         )
 
-    def test_pressure_evicts_least_recently_used_idle_targets_first(self):
+    def test_interrupted_eviction_uses_the_same_checkout_and_holder_checks(self):
         self.provision()
-        live = self.checkout.resolve()
-        oldest = self.make_target(live / "a", idle_hours=50)
-        older = self.make_target(live / "b", idle_hours=40)
-        newer = self.make_target(live / "c", idle_hours=30)
-        active = self.make_target(live / "d", idle_hours=1)
-        for path in (oldest, older, newer):
-            subprocess.run(
-                ["git", "init", "-q", (path / "checkout").read_text().strip()],
-                check=True,
-            )
-        self.evict(use_percent_per_target=10, max_use_percent=20)
-        self.assertFalse(oldest.exists())
-        self.assertFalse(older.exists())
-        self.assertTrue(newer.exists())
-        self.assertTrue(active.exists())
+        entries = [
+            self.make_target(self.checkout.resolve(), idle_hours=1000),
+            self.make_target(self.root / "unknown", idle_hours=1000, marked=False),
+            self.make_target(self.root / "removed", idle_hours=3),
+            self.make_target(self.root / "recent", idle_hours=1),
+            self.make_target(self.root / "locked", idle_hours=3),
+        ]
+        renamed = []
+        for entry in entries:
+            trash = entry.with_name(".evicting." + entry.name)
+            entry.rename(trash)
+            renamed.append(trash)
+        lock = (renamed[-1] / "target" / "debug" / ".cargo-lock").open()
+        self.addCleanup(lock.close)
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        self.evict()
+        self.assertFalse(renamed[2].exists())
+        for index in (0, 1, 3, 4):
+            self.assertTrue(renamed[index].exists())
 
 
 if __name__ == "__main__":

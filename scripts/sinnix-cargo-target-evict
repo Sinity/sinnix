@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
 # @sinnix-package
-# description: Evict Cargo targets whose checkout is gone, idle beyond the age budget, or least recently used under filesystem pressure
-# runtimeInputs: bash coreutils findutils gawk git util-linux
+# description: Evict unused Cargo targets after their checkout is removed
+# runtimeInputs: bash coreutils findutils util-linux
 set -euo pipefail
 
-# Budgets come from deployment config (sinnix.features.dev.languages.cargoCache).
+# The use grace comes from sinnix.features.dev.languages.cargoCache.
 cache_root="${SINNIX_CARGO_CACHE_ROOT:-/realm/state/cache/cargo}"
-max_idle_seconds="${SINNIX_CARGO_MAX_IDLE_SECONDS:?}"
 min_idle_seconds="${SINNIX_CARGO_MIN_IDLE_SECONDS:?}"
-max_use_percent="${SINNIX_CARGO_MAX_FILESYSTEM_USE_PERCENT:?}"
 
 dir="$cache_root/$(id -u)"
 [ -d "$dir" ] || exit 0
@@ -30,67 +28,48 @@ last_used() {
   printf '%s\n' "$newest"
 }
 
-use_percent() {
-  df --output=pcent "$cache_root" | awk 'NR == 2 { sub("%", ""); print $1 }'
-}
-
 # A target is removed only while none of its Cargo build locks is held. The
 # entry is renamed under the primary lock, so a build that starts afterwards
 # selects a fresh target instead of writing into one being deleted.
 evict() {
-  local entry="$1" reason="$2" lock trash
+  local entry="$1" lock trash name
   while IFS= read -r lock; do
     if ! flock --nonblock "$lock" true; then
       echo "busy, kept: $entry" >&2
       return 1
     fi
   done < <(find "$entry/target" -maxdepth 3 -name .cargo-lock 2>/dev/null)
-  trash="$dir/.evicting.$(basename "$entry")"
+  name="$(basename "$entry")"
+  name="${name#.evicting.}"
+  trash="$dir/.evicting.$name"
   lock="$entry/target/debug/.cargo-lock"
-  if [ -e "$lock" ]; then
-    flock --nonblock "$lock" mv -T -- "$entry" "$trash" || return 1
-  else
-    mv -T -- "$entry" "$trash"
+  if [ "$entry" != "$trash" ]; then
+    if [ -e "$lock" ]; then
+      flock --nonblock "$lock" mv -T -- "$entry" "$trash" || return 1
+    else
+      mv -T -- "$entry" "$trash"
+    fi
   fi
   rm -rf -- "$trash"
-  echo "evicted ($reason): $(basename "$entry")"
+  echo "evicted (checkout removed): $name"
 }
 
-# An interrupted run leaves only renamed entries, which nothing selects.
-for trash in "$dir"/.evicting.*; do
-  [ -e "$trash" ] && rm -rf -- "$trash"
-done
-
 now="$(date +%s)"
-lru=()
-for entry in "$dir"/*/; do
+# Interrupted removals meet the same checks as entries still at their normal
+# names: an earlier policy may have renamed a live checkout's target.
+for entry in "$dir"/*/ "$dir"/.evicting.*/; do
+  [ -d "$entry" ] || continue
   entry="${entry%/}"
   name="$(basename "$entry")"
+  name="${name#.evicting.}"
   [[ "$name" =~ ^[0-9a-f]{32}$ ]] || continue
+  [ -f "$entry/checkout" ] && [ ! -L "$entry/checkout" ] || continue
+  checkout="$(head -n 1 "$entry/checkout")"
+  [[ "$checkout" = /* ]] || continue
+  [ "$(hash_of "$checkout")" = "$name" ] || continue
+  # Source can remain without Git metadata, or as a dangling symlink. Neither
+  # means the owner has removed the checkout and released its build outputs.
+  [ ! -e "$checkout" ] && [ ! -L "$checkout" ] || continue
   idle=$((now - $(last_used "$entry")))
-  checkout=""
-  [ -f "$entry/checkout" ] && checkout="$(head -n 1 "$entry/checkout")"
-  if [ -n "$checkout" ] && [ "$(hash_of "$checkout")" = "$name" ] \
-    && [ ! -e "$checkout/.git" ]; then
-    # The checkout is gone; a later checkout at the same path selects the
-    # same hash and rewrites the marker first, so a recent selection wins.
-    [ "$idle" -ge "$min_idle_seconds" ] && evict "$entry" "checkout removed" || true
-    continue
-  fi
-  if [ "$idle" -ge "$max_idle_seconds" ]; then
-    evict "$entry" "idle $((idle / 86400))d" || true
-    continue
-  fi
-  [ "$idle" -ge "$min_idle_seconds" ] && lru+=("$idle $entry")
+  [ "$idle" -ge "$min_idle_seconds" ] && evict "$entry" || true
 done
-
-# Under filesystem pressure, the least recently used idle targets go first.
-# Reflinked targets share extents, so the filesystem's own usage, read after
-# each committed removal, is the measure; per-target sizes would overstate it.
-if [ "$(use_percent)" -gt "$max_use_percent" ] && [ "${#lru[@]}" -gt 0 ]; then
-  while IFS= read -r line; do
-    [ "$(use_percent)" -gt "$max_use_percent" ] || break
-    evict "${line#* }" "filesystem above ${max_use_percent}%" || continue
-    sync -f "$cache_root"
-  done < <(printf '%s\n' "${lru[@]}" | sort -rn)
-fi
