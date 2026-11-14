@@ -105,7 +105,13 @@ instead of resubmitting.
 `agentctl-<group>-<stem>-<digest>.service` in `agent-ctl-<group>.slice`
 (`ExitType=cgroup`, `KillMode=control-group`, `RuntimeMaxSec=<timeout>`). The
 job ends when the unit's cgroup is empty, so a surviving descendant still holds
-the pool slot. The unit environment carries `AGENTCTL_JOB_ID`, the project,
+the pool slot. Systemd owns the queued execution deadline; the wrapper waits
+for an actual terminal or missing-unit observation rather than caching a second
+runtime timer. It follows native pending and stop-grace states. Temporary
+property-query failures retain ownership and do not end the
+command; cancellation remains available outside the allocation lock. Bare
+foreground commands still enforce their own declared execution timeout.
+The unit environment carries `AGENTCTL_JOB_ID`, the project,
 operation, `AGENTCTL_CHECKOUT_ID` and `AGENTCTL_CHECKOUT_HEAD`.
 The same authoritative job identity is exported through the runner-neutral
 `DEVKIT_JOB_RUNNER=agentctl` and `DEVKIT_JOB_ID` interfaces for product tooling.

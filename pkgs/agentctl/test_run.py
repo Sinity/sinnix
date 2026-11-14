@@ -821,8 +821,80 @@ def test_the_declared_timeout_is_the_unit_runtime_limit(
     assert main([str(launch)]) == TIMEOUT_EXIT_CODE
 
     assert "RuntimeMaxSec=7" in fake_systemd.run_argv()
-    assert "timed out after 7 seconds" in log_of(tmp_path)
+    assert "unit runtime deadline expired" in log_of(tmp_path)
     assert outcome_of(tmp_path)["outcome"] == "timeout"
+
+
+@pytest.mark.parametrize("lost_ack", [False, True])
+def test_native_deadline_extension_does_not_stop_an_active_unit(
+    tmp_path: Path,
+    fake_systemd: FakeSystemd,
+    fake_pueue: FakePueue,
+    monkeypatch: pytest.MonkeyPatch,
+    lost_ack: bool,
+) -> None:
+    launch = write_launch(tmp_path, pool="pytest", timeout_seconds=1)
+    original_start = run_module._start_service
+    original_snapshot = run_module._unit_snapshot
+    original_control = run_module._systemctl
+    state = {"admitted": False, "active": False, "observations": 0, "clock": 0.0}
+    early_stops: list[str] = []
+
+    def started(*args: Any, **kwargs: Any):
+        client = original_start(*args, **kwargs)
+        assert client is not None and client.returncode == 0
+        state.update(admitted=True, active=True)
+        # The native owner has extended its execution deadline. Only its
+        # eventual terminal observation decides when cleanup can stop it.
+        return subprocess.CompletedProcess(client.args, 1 if lost_ack else 0)
+
+    def snapshot(unit: str):
+        if not state["admitted"]:
+            return original_snapshot(unit)
+        state["observations"] += 1
+        state["clock"] += 60
+        if lost_ack and state["observations"] == 1:
+            return None  # The acknowledgement and first property read were lost.
+        if state["observations"] < 4:
+            return {
+                "LoadState": "loaded",
+                "ActiveState": "active",
+                "SubState": "running",
+            }
+        state["active"] = False
+        return {
+            "LoadState": "loaded",
+            "ActiveState": "active",
+            "SubState": "exited",
+            "Result": "success",
+            "ExecMainStatus": "0",
+            "ExecMainCode": "exited",
+        }
+
+    def control(*args: str):
+        if args[0] == "stop" and state["active"]:
+            early_stops.append(args[-1])
+        return original_control(*args)
+
+    monkeypatch.setattr(run_module, "_start_service", started)
+    monkeypatch.setattr(run_module, "_unit_snapshot", snapshot)
+    monkeypatch.setattr(run_module, "_systemctl", control)
+    monkeypatch.setattr(
+        run_module,
+        "time",
+        SimpleNamespace(
+            monotonic=lambda: state["clock"],
+            sleep=lambda delay: None,
+            time_ns=time.time_ns,
+            strftime=time.strftime,
+            gmtime=time.gmtime,
+        ),
+    )
+    status = main([str(launch)])
+    assert (status, early_stops) == (0, [])
+    assert state["observations"] >= 4
+    assert outcome_of(tmp_path)["outcome"] == "success"
+    assert "RuntimeMaxSec=1" in fake_systemd.run_argv()
 
 
 def test_outside_the_queue_the_timeout_is_enforced_by_the_wrapper(
@@ -964,7 +1036,7 @@ def test_property_failures_do_not_hold_the_cancellation_lock(
     def run_and_observe() -> None:
         client = run_module._start_service(["systemd-run", "--quiet"], marker, 1, None)
         assert client is not None
-        properties = run_module._wait_for_unit("fixture.service", 30)
+        properties = run_module._wait_for_unit("fixture.service")
         outcome.append(
             run_module._classify(run_module._marker_targets(marker, 1), properties)
         )
@@ -990,27 +1062,33 @@ def test_property_failures_do_not_hold_the_cancellation_lock(
     assert json.loads(marker.read_text()) == {"attempt": 1}
 
 
-def test_persistent_unit_observation_failure_is_bounded_and_unresolved(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("missing", [False, True])
+def test_observation_outage_retains_ownership_until_authoritative_state(
+    monkeypatch: pytest.MonkeyPatch, missing: bool
 ) -> None:
-    """A lost systemd connection cannot hold the wrapper or imply success."""
-    clock = [0.0]
-
-    def monotonic() -> float:
-        value = clock[0]
-        clock[0] += 1
-        return value
-
-    monkeypatch.setattr(run_module, "_unit_snapshot", lambda _unit: None)
-    monkeypatch.setattr(run_module.time, "monotonic", monotonic)
-    monkeypatch.setattr(run_module.time, "sleep", lambda _delay: None)
-
-    properties = run_module._wait_for_unit("fixture.service", timeout_seconds=2)
-
-    assert properties is None
+    terminal = {
+        "LoadState": "loaded",
+        "ActiveState": "inactive",
+        "Result": "timeout",
+        "ExecMainStatus": "15",
+        "ExecMainCode": "killed",
+    }
+    observations = iter(
+        [
+            None,
+            None,
+            {"LoadState": "loaded", "ActiveState": "inactive", "Job": "7"},
+            {"LoadState": "not-found"} if missing else terminal,
+        ]
+    )
+    monkeypatch.setattr(run_module, "_unit_snapshot", lambda unit: next(observations))
+    monkeypatch.setattr(run_module.time, "sleep", lambda delay: None)
+    properties = run_module._wait_for_unit("fixture.service")
+    assert properties == ({} if missing else terminal)
     assert run_module._classify(False, properties) == (
-        run_module.Outcome.VANISHED,
-        run_module.VANISHED_EXIT_CODE,
+        (run_module.Outcome.VANISHED, VANISHED_EXIT_CODE)
+        if missing
+        else (run_module.Outcome.TIMEOUT, TIMEOUT_EXIT_CODE)
     )
 
 
@@ -1033,10 +1111,9 @@ def test_unit_wait_backs_off_to_a_bounded_poll_rate(
         return {"LoadState": "loaded", "ActiveState": state}
 
     monkeypatch.setattr(run_module, "_unit_snapshot", snapshot)
-    monkeypatch.setattr(run_module.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(run_module.time, "sleep", sleep)
 
-    properties = run_module._wait_for_unit("fixture.service", timeout_seconds=3600)
+    properties = run_module._wait_for_unit("fixture.service")
 
     assert properties == {"LoadState": "loaded", "ActiveState": "inactive"}
     assert delays[0] == run_module.UNIT_POLL_INITIAL_SECONDS
@@ -1091,31 +1168,61 @@ def test_a_unit_that_cannot_be_observed_after_the_wait_is_vanished(
     assert "vanished" in log_of(tmp_path)
 
 
-def test_run_publishes_vanished_when_unit_state_remains_unobservable(
+def test_run_retains_unit_and_scratch_until_observation_recovers(
     tmp_path: Path,
     fake_systemd: FakeSystemd,
     fake_pueue: FakePueue,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The wrapper publishes a typed unresolved outcome if show keeps failing."""
-    clock = [0.0]
+    original_start, original_snapshot = (
+        run_module._start_service,
+        run_module._unit_snapshot,
+    )
+    state = {"admitted": False, "clock": 0.0, "outages": 0}
+    scratch_root = tmp_path / "scratch"
+    monkeypatch.setenv("AGENTCTL_TMPFS_SCRATCH_ROOT", str(scratch_root))
+    scratch = scratch_root / "job-a"
+    launch = write_launch(
+        tmp_path,
+        pool="pytest",
+        timeout_seconds=1,
+        scratch={"kind": "tmpfs", "path": str(scratch)},
+    )
 
-    def monotonic() -> float:
-        value = clock[0]
-        clock[0] += 100
-        return value
+    def start(*args, **kwargs):
+        client = original_start(*args, **kwargs)
+        state["admitted"] = True
+        return client
 
-    monkeypatch.setattr(run_module, "_unit_snapshot", lambda _unit: None)
-    monkeypatch.setattr(run_module.time, "monotonic", monotonic)
-    monkeypatch.setattr(run_module.time, "sleep", lambda _delay: None)
-    launch = write_launch(tmp_path, pool="pytest", timeout_seconds=1)
+    def snapshot(unit):
+        if state["admitted"] and state["outages"] < 2:
+            state["clock"] += 60
+            state["outages"] += 1
+            # Observation failure after the launch budget is not completion:
+            # neither native custody nor scratch may be released here.
+            assert scratch.exists()
+            assert not outcome_path_for(tmp_path / "job-a.log").exists()
+            assert "stop " not in (tmp_path / "systemctl-calls").read_text()
+            return None
+        return original_snapshot(unit)
 
-    assert main([str(launch)]) == VANISHED_EXIT_CODE
-
-    record = outcome_of(tmp_path)
-    assert record["outcome"] == "vanished"
-    assert record["exit_code"] == VANISHED_EXIT_CODE
-    assert record["systemd_result"] is None
+    monkeypatch.setattr(run_module, "_start_service", start)
+    monkeypatch.setattr(run_module, "_unit_snapshot", snapshot)
+    monkeypatch.setattr(
+        run_module,
+        "time",
+        SimpleNamespace(
+            monotonic=lambda: state["clock"],
+            sleep=time.sleep,
+            time_ns=time.time_ns,
+            strftime=time.strftime,
+            gmtime=time.gmtime,
+        ),
+    )
+    assert main([str(launch)]) == 0
+    assert state["outages"] == 2
+    assert not scratch.exists()
+    assert outcome_of(tmp_path)["outcome"] == "success"
 
 
 def test_a_single_slot_pool_held_by_a_running_task_refuses_the_run(
@@ -1797,7 +1904,7 @@ def test_retained_exited_unit_is_a_terminal_observation(
         )
 
     monkeypatch.setattr(run_module.time, "sleep", unexpected_wait)
-    assert run_module._wait_for_unit("fixture.service", 0) == properties
+    assert run_module._wait_for_unit("fixture.service") == properties
 
 
 def test_real_cancellation_after_startup_keeps_its_outcome_and_releases_unit(

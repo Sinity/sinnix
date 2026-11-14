@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import json
+import sys
+import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from agentctl import run
 from agentctl.limits import valid_timeout_seconds
 from agentctl.projects import load_project_adapter
 from conftest import write_project
-from test_run import write_launch
+from test_run import outcome_of, user_manager, write_launch
 
 
 def test_declared_no_deadline_reaches_foreground_runner(tmp_path: Path) -> None:
@@ -52,9 +55,7 @@ def test_no_deadline_wait_requires_actual_terminal_unit(
     )
     monkeypatch.setattr(run, "_unit_snapshot", lambda unit: next(observations))
     monkeypatch.setattr(run.time, "sleep", lambda delay: None)
-    clock = iter([0.0, 10000.0, 20000.0, 30000.0])
-    monkeypatch.setattr(run.time, "monotonic", lambda: next(clock))
-    assert run._wait_for_unit("fixture.service", 0) == {
+    assert run._wait_for_unit("fixture.service") == {
         "LoadState": "loaded",
         "ActiveState": "inactive",
         "Result": "success",
@@ -98,3 +99,68 @@ def test_foreground_no_deadline_cancellation_settles_original_group(
         )
     assert waits == [None, None]
     assert killed == [42]
+
+
+def test_actual_native_timeout_keeps_its_stop_grace_and_terminal_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_pueue
+) -> None:
+    user_manager()
+    monkeypatch.setenv("PUEUE_GROUP", "fixture")
+    done, release, stopping = (
+        tmp_path / "done",
+        tmp_path / "release",
+        tmp_path / "stopping",
+    )
+    code = (
+        "import signal,time;from pathlib import Path;"
+        f"release=Path({str(release)!r});done=Path({str(done)!r});stopping=Path({str(stopping)!r});"
+        "signal.signal(signal.SIGTERM,lambda *_:stopping.write_text('native timeout'));"
+        "exec('while not release.exists(): time.sleep(0.01)');"
+        "done.write_text('completed during native stop grace')"
+    )
+    launch = write_launch(
+        tmp_path, timeout_seconds=1, argv=[sys.executable, "-c", code]
+    )
+    unit = run.unit_for(launch, "fixture")
+    original_snapshot, original_control = run._unit_snapshot, run._systemctl
+    original_command = run._service_command
+    state = {"offset": 0.0, "stopping": 0}
+
+    def service_command(*args, **kwargs):
+        command = original_command(*args, **kwargs)
+        at = command.index("--")
+        # Bound only this test's native grace so a regression still settles
+        # its own child promptly. The systemd runtime limit remains one second.
+        return command[:at] + ["-p", "TimeoutStopSec=2"] + command[at:]
+
+    def snapshot(name):
+        properties = original_snapshot(name)
+        if properties and properties.get("ActiveState") == "deactivating":
+            state["offset"] += 60
+            state["stopping"] += 1
+            if state["stopping"] == 2:
+                release.write_text("continue")
+        return properties
+
+    monkeypatch.setattr(run, "_service_command", service_command)
+    monkeypatch.setattr(run, "_unit_snapshot", snapshot)
+    monkeypatch.setattr(
+        run,
+        "time",
+        SimpleNamespace(
+            monotonic=lambda: time.monotonic() + state["offset"],
+            sleep=lambda delay: time.sleep(min(delay, 0.02)),
+            time_ns=time.time_ns,
+            strftime=time.strftime,
+            gmtime=time.gmtime,
+        ),
+    )
+    try:
+        assert run.main([str(launch)]) == run.TIMEOUT_EXIT_CODE
+        assert stopping.read_text() == "native timeout"
+        assert done.read_text() == "completed during native stop grace"
+        assert state["stopping"] >= 2
+        assert outcome_of(tmp_path)["systemd_result"] == "timeout"
+    finally:
+        original_control("stop", unit)
+        original_control("reset-failed", unit)

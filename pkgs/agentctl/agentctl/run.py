@@ -52,7 +52,6 @@ from sinnix_lib.ledger import append_jsonl
 from sinnix_lib.secrets import mask_secret_values, secret_values
 
 from . import artifacts, gitcmd, pueue
-from .config import ConfigError, load_config
 from .launch_input import QueueInputError, read_input, secret_environment
 from .limits import SYSTEMCTL_TIMEOUT_SECONDS
 from .pueue import PueueError
@@ -73,7 +72,6 @@ BUS_CONNECT_RETRY_SECONDS = 10
 USER_BUS_CONNECTION_REFUSED = (
     b"Failed to connect to user scope bus via local transport: Connection refused"
 )
-UNIT_OBSERVATION_GRACE_SECONDS = 10
 # Every running job's wrapper polls its unit through the user manager. A fixed
 # 50 ms poll is 20 `systemctl show` calls a second per job; with two dozen jobs
 # that saturates the manager, which then never dispatches queued unit starts.
@@ -631,20 +629,14 @@ def _unit_is_terminal(properties: Mapping[str, str]) -> bool:
     )
 
 
-def _wait_for_unit(unit: str, timeout_seconds: int) -> dict[str, str] | None:
-    """Wait outside the allocation lock until completion or its observation deadline.
+def _wait_for_unit(unit: str) -> dict[str, str]:
+    """Observe completion; systemd alone owns the queued command's deadline.
 
-    Failed property queries are not evidence that the service completed. Bound
-    the wait by the declared service runtime plus a short reporting grace so a
-    broken systemd connection cannot strand a bounded operation indefinitely.
-    Explicit no-deadline operations retain unresolved ownership until an actual
-    terminal unit observation, including after transient property-query failures.
+    The launch budget cannot prove an active or stopping unit completed.
+    Failed property reads retain ownership until the manager recovers or
+    cancellation settles it. Neither elapsed wrapper time nor a query failure
+    proves command completion.
     """
-    deadline = (
-        time.monotonic() + timeout_seconds + UNIT_OBSERVATION_GRACE_SECONDS
-        if timeout_seconds
-        else None
-    )
     delay = UNIT_POLL_INITIAL_SECONDS
     while True:
         properties = _unit_snapshot(unit)
@@ -654,8 +646,6 @@ def _wait_for_unit(unit: str, timeout_seconds: int) -> dict[str, str] | None:
                 return {}
             if _unit_is_terminal(properties):
                 return properties
-        if deadline is not None and time.monotonic() >= deadline:
-            return None
         time.sleep(delay)
         delay = min(delay * 2, UNIT_POLL_MAX_SECONDS)
 
@@ -1067,9 +1057,7 @@ def _run(
                             description=unit_description(
                                 daemon,
                                 pool,
-                                str(own.task_id)
-                                if own is not None
-                                else launch_input,
+                                str(own.task_id) if own is not None else launch_input,
                             ),
                             argv=argv,
                             environment=environment,
@@ -1092,21 +1080,20 @@ def _run(
                         else:
                             return_code = client.returncode
                             if return_code == 0:
-                                properties = _wait_for_unit(
-                                    unit, launch["timeout_seconds"]
-                                )
+                                properties = _wait_for_unit(unit)
                             else:
                                 properties = _unit_snapshot(unit)
                                 if (
-                                    properties
-                                    and properties.get("LoadState") == "loaded"
-                                    and not _unit_is_terminal(properties)
+                                    properties is None
+                                    or not properties.get("LoadState")
+                                    or (
+                                        properties.get("LoadState") == "loaded"
+                                        and not _unit_is_terminal(properties)
+                                    )
                                 ):
                                     # An acknowledgement can be lost after acceptance.
                                     # Observe that unit; never resubmit its payload.
-                                    properties = _wait_for_unit(
-                                        unit, launch["timeout_seconds"]
-                                    )
+                                    properties = _wait_for_unit(unit)
                             outcome, status = _classify(
                                 _marker_targets(marker, launch["attempt"]),
                                 properties,
@@ -1129,9 +1116,12 @@ def _run(
                 log.write(f"could not {action} the command: {error}\n".encode())
                 return refused(scratch_error=scratch_owner.cleanup())
             if outcome is Outcome.TIMEOUT:
-                log.write(
-                    f"timed out after {launch['timeout_seconds']} seconds\n".encode()
+                message = (
+                    f"timed out after {launch['timeout_seconds']} seconds\n"
+                    if unit is None or pool is None
+                    else "unit runtime deadline expired\n"
                 )
+                log.write(message.encode())
     with (_attempt_root_for_marker(marker) / ".allocation.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if _marker_targets(marker, launch["attempt"]):
