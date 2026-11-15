@@ -44,6 +44,14 @@ in
               }
               {
                 assertion =
+                  config.systemd.slices.live.sliceConfig.IOWeight
+                  == config.systemd.slices.user.sliceConfig.IOWeight
+                  && config.systemd.user.slices.live.sliceConfig.IOWeight
+                  == config.systemd.user.slices.app.sliceConfig.IOWeight;
+                message = "The live record and the desktop carry equal IO weight at each level";
+              }
+              {
+                assertion =
                   config.systemd.user.slices.agent.sliceConfig.IOWeight == 25
                   && config.systemd.user.slices.agent-tool.sliceConfig.IOWeight == 90
                   && config.systemd.user.slices.agent-ctl.sliceConfig.IOWeight == 100;

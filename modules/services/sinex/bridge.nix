@@ -162,7 +162,11 @@ in
         unit = "sinexd.service";
         resourceClass = "live";
         resources = {
-          MemoryHigh = "6G";
+          # A ceiling without a throttling band below it. Between memory.high
+          # and memory.max the kernel throttles the daemon and reclaims its
+          # own page cache first, so a daemon held there rereads its segment
+          # and spool files from disk at the live weight for as long as it
+          # stays; at the ceiling it is killed and restarted instead.
           MemoryMax = "8G";
           # Its working set stays resident under host reclaim: on 2026-11-01
           # 726 MB of it sat in swap, on the acknowledgment path of every
