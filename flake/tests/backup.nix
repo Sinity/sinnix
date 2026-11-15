@@ -99,13 +99,13 @@ assert lib.assertMsg (
                   "borgbackup-job-sinex.service"
                   "borgbackup-job-sinex-keys.service"
                 ]
-              && lib.hasInfix "sinex-backup.service" config.systemd.services.borgbackup-drain-coordinator.script
+              && !(lib.hasInfix "sinex-backup.service" config.systemd.services.borgbackup-drain-coordinator.script)
               && lib.all (name: config.systemd.services.${name}.serviceConfig.Slice == "background.slice") [
                 "sinex-backup"
                 "borgbackup-job-sinex"
                 "borgbackup-job-sinex-keys"
               ];
-            message = "The nightly drain must run the native paired Sinex backup in its declared background slice.";
+            message = "The paired Sinex backup runs only by hand, in its declared background slice, until the backup disk has room for its first archive.";
           }
           {
             # Every backup job's freshness marker is watched by the sentinel
@@ -758,7 +758,6 @@ assert lib.assertMsg (
               "polylogue-sqlite-backup.service"
               "btrbk.service"
               "borgbackup-job-polylogue-state.service"
-              "sinex-backup.service"
               "borgbackup-job-sinex-blobs.service"
               "borgbackup-job-realm.service"
               "borgbackup-job-genome.service"

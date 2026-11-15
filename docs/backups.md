@@ -1,12 +1,17 @@
 # Backups
 
-Everything is backed up locally to Borg repositories on the HDD at
-`/outer-realm/backup/`. Nothing is stored off-site.
+Backups are Borg repositories on the HDD at `/outer-realm/backup/`. Nothing
+is stored off-site. The running Sinex store is the exception (see "Sinex").
 
 ## Sinex
 
-The nightly coordinator runs `sinex-backup.service`. It asks the running
-Sinex to prepare one backup under
+The running Sinex store (`/var/lib/sinex`, the `state/sinex` subvolume on
+`/realm`, which the `/realm` snapshots do not include) has no nightly Borg
+archive. `sinex-backup.service` is started by hand: its first archive needs
+about 400 GB free on the backup disk, because the segment log does not
+compress and the database dump is large, and running it with less would leave
+the other repositories no room. When started, it asks the running Sinex to
+prepare one backup under
 `/neo-outer-realm/state/sinex/backup/<run>`: its database and key dumps,
 content segments and producer state, taken at one held boundary. Two Borg jobs
 archive that copy into `borg-sinex-core-v1` and its keys into
@@ -79,7 +84,7 @@ paths. Neither measurement establishes that a directory is disposable.
 | `/persist`                                    | btrbk read-only snapshot, archived by the Borg job                                                                                                                                       | same as `/realm`                                 | `borg-persist-v1`                           |
 | HDD genome workspace                          | dedicated btrbk cut, archived independently of `/realm`                                                                                                                                  | six-hour cuts only when changed, drained nightly | `borg-realm-v2`, `genome-*` series          |
 | The ephemeral root                            | snapshot the initrd takes before each wipe                                                                                                                                               | nightly coordinator                              | `borg-root-snapshots-v1`                    |
-| Running Sinex                                 | `sinex-backup`: a backup Sinex prepares at one held boundary (database, keys, segments, producer state), archived by two Borg jobs (see "Sinex" above)                                   | nightly coordinator                              | `borg-sinex-core-v1`, `borg-sinex-keys-v1`  |
+| Running Sinex                                 | `sinex-backup`: a backup Sinex prepares at one held boundary (database, keys, segments, producer state), archived by two Borg jobs (see "Sinex" above)                                   | by hand only, until the backup disk has room     | `borg-sinex-core-v1`, `borg-sinex-keys-v1`  |
 | Retained Sinex deployments                    | the whole stopped deployment read in place, its PostgreSQL cluster included                                                                                                              | nightly coordinator                              | `borg-sinex-blobs-v1`                       |
 | Polylogue state                               | hooks archived directly from a read-only snapshot of its subvolume                                                                                                                       | nightly coordinator                              | `borg-polylogue-state-v1`                   |
 | Purchased embedding vectors                   | the 2026-07-10 stores on `/neo-outer-realm/archive/polylogue/embeddings`, in the same archive as Polylogue state; they never change, so Borg stores them once                            | nightly coordinator                              | `borg-polylogue-state-v1`                   |
@@ -124,8 +129,8 @@ Direct Polylogue/Sinex archive calls and local dump expiry likewise reuse their
 existing success markers only within 20 hours and with matching input policy.
 Starting a unit by hand skips these checks.
 
-The sequence first archives daily Polylogue state, the running Sinex
-(`sinex-backup`) and the retained Sinex deployments, then runs Realm, optional
+The sequence first archives daily Polylogue state and the retained Sinex
+deployments, then runs Realm, optional
 genome, Persist and root snapshot archival, followed by retention maintenance,
 the due Realm coverage audit and verified local dump expiry. These jobs have
 no independent timers on backup hosts. Telemetry-only hosts retain their dump

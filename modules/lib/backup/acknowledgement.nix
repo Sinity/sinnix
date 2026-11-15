@@ -45,8 +45,12 @@ let
     # Daily direct-path coverage must not wait behind a multi-day historical
     # snapshot backlog. Native drain queues themselves remain lossless.
     lib.optional config.sinnix.services.polylogue.enable "borgbackup-job-polylogue-state"
+    # sinex-backup is not in this sequence: its first archive needs about
+    # 400 GB free on the backup disk (incompressible segments plus the
+    # database dump), and running it with less would leave the realm,
+    # persist and hourly repositories no room. Start it by hand once the
+    # space exists.
     ++ [
-      "sinex-backup"
       "borgbackup-job-sinex-blobs"
       "borgbackup-job-realm"
       "borgbackup-job-genome"

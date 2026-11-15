@@ -2195,8 +2195,6 @@ if command=='borg':
     os.execv(REAL_BORG, [REAL_BORG,*args])
 if command=='systemctl':
     if args[0]=='stop': sys.exit(0)
-    if args==['start','sinex-backup.service']:
-        sys.exit(1 if (root/'fail-sinex-backup-unit').exists() else 0)
     lane={'borgbackup-job-persist.service':'persist', 'borgbackup-job-realm.service':'realm', 'borgbackup-job-genome.service':'genome'}.get(args[-1])
     if lane is None: sys.exit(0)
     if lane=='persist' and (root/'fail-persist-unit').exists(): sys.exit(1)
@@ -3283,7 +3281,6 @@ else: sys.exit(1)
                 "polylogue-sqlite-backup.service",
                 "btrbk.service",
                 "borgbackup-job-polylogue-state.service",
-                "sinex-backup.service",
                 "borgbackup-job-sinex-blobs.service",
                 "borgbackup-job-realm.service",
                 "borgbackup-job-genome.service",
@@ -3317,9 +3314,7 @@ else: sys.exit(1)
             )
             (root / "fail-genome-unit").touch()
             (root / "fail-persist-unit").touch()
-            (root / "fail-sinex-backup-unit").touch()
             result = run("coordinator", ok=False)
-            self.assertIn("unit=sinex-backup.service status=failed", result.stderr)
             self.assertTrue(queued_persist.exists())
             self.assertTrue(queued_realm.exists())
             self.assertTrue(queued_genome.exists())
@@ -3342,7 +3337,6 @@ else: sys.exit(1)
             )
             (root / "fail-persist-unit").unlink()
             (root / "fail-genome-unit").unlink()
-            (root / "fail-sinex-backup-unit").unlink()
             previous_calls = len(calls)
             run("coordinator")
             self.assertTrue(queued_persist.exists())
@@ -3493,7 +3487,6 @@ else: sys.exit(1)
             self.assertNotIn(["start", "btrbk.service"], calls)
             for unit in (
                 "borgbackup-job-polylogue-state.service",
-                "sinex-backup.service",
                 "borgbackup-job-sinex-blobs.service",
             ):
                 self.assertIn(["start", unit], calls)

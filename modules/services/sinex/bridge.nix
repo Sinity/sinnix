@@ -15,8 +15,8 @@
 # State of earlier deployments stays beside them under dated names.
 #
 # Sinex's own sinex-backup.service prepares its backup and archives it into
-# two Borg repositories (content, keys); the nightly backup coordinator starts
-# it. Stopped earlier deployments are archived separately, whole, until their
+# two Borg repositories (content, keys); it runs only when started by hand
+# (see the coordinator sequence in modules/lib/backup/acknowledgement.nix). Stopped earlier deployments are archived separately, whole, until their
 # import has been compared.
 #
 # Activation never restarts sinexd or its NATS; restart them by hand after a
@@ -124,8 +124,8 @@ in
         repo = "${backupRoot}/borg-sinex-core-v1";
         keysRepo = "${backupRoot}/borg-sinex-keys-v1";
         passCommand = "${pkgs.coreutils}/bin/cat ${secrets.borg-passphrase}";
-        # No timer of its own: the nightly backup coordinator starts
-        # sinex-backup.service (modules/lib/backup/acknowledgement.nix).
+        # No timer: sinex-backup.service is started by hand until the backup
+        # disk has room for its first archive (modules/lib/backup/acknowledgement.nix).
         startAt = [ ];
       };
     };
