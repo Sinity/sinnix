@@ -78,6 +78,16 @@ mkServiceModule {
       '';
     };
 
+    readSources = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Whether the daemon reads the session sources (agent transcripts,
+        hooks, browser capture) into the archive. Off, it serves and keeps
+        deriving what the archive already stores, and new sessions wait.
+      '';
+    };
+
     retainedArchives = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
@@ -135,6 +145,23 @@ mkServiceModule {
           lib.stringToCharacters (builtins.substring 0 32 (builtins.hashString "sha256" extensionDir))
         );
 
+      # The live class places the daemon in the user manager's live.slice,
+      # ahead of the desktop and agent work for the disk. Memory bounds are
+      # its own: start-up peaked at 15.6 GB on
+      # 2026-10-27, and at 16:09 that day host OOM pressure killed it.
+      # 6G high / 9G max / 2G swap trades slower start-up under reclaim for a
+      # host that stays up, until Polylogue's ingest bounds memory by work in
+      # flight (its owner's redesign).
+      liveServiceClass = lib.sinnix.mkRuntimeServiceConfig {
+        runtimeInventory = config.sinnix.runtime.inventory;
+        unit = "polylogue-live.service";
+        manager = "user";
+        overrides = {
+          MemoryHigh = "6G";
+          MemoryMax = "9G";
+          MemorySwapMax = "2G";
+        };
+      };
     in
     {
       sinnix.features.cli.polylogue.enable = true;
@@ -199,7 +226,20 @@ mkServiceModule {
             ''
           );
 
-          systemd.user.services.polylogue-live = lib.mkForce { };
+          systemd.user.services.polylogue-live = {
+            Unit.Description = "Polylogue daemon over the live archive";
+            Service = liveServiceClass // {
+              ExecStart = "${cli}/bin/polylogue daemon" + lib.optionalString (!cfg.readSources) " --no-sources";
+              # always, not on-failure: a SIGTERM from the OOM response counts
+              # as a clean stop, and on 2026-10-27 that left the daemon down.
+              Restart = "always";
+              RestartSec = "5s";
+              # The daemon exits 78 when it refuses the archive (a schema it
+              # cannot migrate); restarting cannot change that.
+              RestartPreventExitStatus = 78;
+            };
+            Install.WantedBy = [ "default.target" ];
+          };
         };
 
       assertions = [
@@ -209,5 +249,15 @@ mkServiceModule {
         }
       ];
 
+      sinnix.runtime.units.polylogue-live = {
+        unit = "polylogue-live.service";
+        manager = "user";
+        resourceClass = "live";
+        # Its indexes and caches stay resident beside the session producer
+        # within the user live slice's protection (runtime-defaults.nix).
+        resources.MemoryLow = "2500M";
+        notifyOnFailure = true;
+        operatorRestart = true;
+      };
     };
 } args

@@ -135,6 +135,10 @@
     polylogue = {
       enable = true;
       dataHome = "/realm/state/polylogue-live/data-20261111";
+      # The pinned Polylogue build is still parsing and deriving inputs this
+      # archive already stores. A source crawl on top of that saturates
+      # /realm, so sources stay off until that catch-up ends.
+      readSources = false;
       retainedArchives = [
         "/realm/state/polylogue-live/data/polylogue"
       ];
