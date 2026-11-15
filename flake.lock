@@ -1522,10 +1522,10 @@
       },
       "locked": {
         "exportIgnore": true,
-        "lastModified": 1794699507,
-        "narHash": "sha256-9PKeOz/VpFIdY+s24sp2jKlekt8Gv1Yj3Nxmc/53toQ=",
+        "lastModified": 1794709719,
+        "narHash": "sha256-hLDxcYoTJqrB7xBDMtbocChLl73PKmFl3pqU/TkfFZI=",
         "ref": "master",
-        "rev": "faf50d4b0af8c3d32106ec6c49884e590b15a514",
+        "rev": "26db484c0c7aeef19940cc5d190b35934bcee2d4",
         "shallow": true,
         "type": "git",
         "url": "https://github.com/Sinity/sinex"
