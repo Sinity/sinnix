@@ -239,7 +239,7 @@ def acknowledgement_directory(marker):
 
 
 def verified_acknowledgement(directory, glob, marker, prefix, replacement_suffix):
-    """Qualify only the snapshot actually named by this archive receipt."""
+    """Accept only the snapshot actually named by this archive receipt."""
     fields = read_marker_fields(marker)
     if fields is None:
         raise ValueError("no verified archive acknowledgement")
@@ -277,7 +277,7 @@ def verified_acknowledgement(directory, glob, marker, prefix, replacement_suffix
 
 
 def should_advance_marker(directory, marker, snapshot):
-    """Keep data freshness ordered by native creation identity, not the clock."""
+    """Keep data freshness ordered by Btrfs creation generation, not the clock."""
     fields = read_marker_fields(marker)
     order = marker_order(fields)
     if order is None or fields.get("filesystem_uuid") != filesystem_identity(directory):
@@ -330,9 +330,9 @@ def queued_snapshots(directory, glob, marker, prefix, replacement_suffix):
 
 
 def pending_snapshot_hint(directory, glob, marker):
-    """Route check preemption from local receipts, never qualify an archive.
+    """Decide check preemption from local receipts; never accept an archive.
 
-    Native children always validate under the Borg lock. The coordinator must
+    The drains always check archives themselves under the Borg lock. The coordinator must
     not open repositories or require their credentials before taking that gate.
     """
     receipts = acknowledgement_directory(marker)
@@ -351,33 +351,61 @@ def pending_snapshot_hint(directory, glob, marker):
     return False
 
 
-def verified_prune_plan(directory, glob, marker, prefix, replacement_suffix):
+def _releasable(directory, glob, receipts, latest, name, prefix, replacement_suffix):
+    """The verified row for one snapshot that may be deleted, or None."""
+    if name == latest[0]:
+        return None  # The independent full audit needs this immutable source.
+    receipt = receipts / name
+    if receipt.is_symlink():
+        raise ValueError("snapshot acknowledgement is a symlink")
+    if not receipt.exists():
+        return None  # A different snapshot's proof never covers this snapshot.
+    acknowledged = verified_acknowledgement(
+        directory, glob, receipt, prefix, replacement_suffix
+    )
+    if acknowledged is None or acknowledged[0] != name:
+        raise ValueError("unqualified snapshot acknowledgement")
+    if acknowledged[2:] > latest[2:]:
+        raise ValueError("latest marker lags a newer acknowledged snapshot")
+    return acknowledged
+
+
+def _latest_and_receipts(directory, glob, marker, prefix, replacement_suffix):
     latest = verified_acknowledgement(
+        directory, glob, marker, prefix, replacement_suffix
+    )
+    receipts = acknowledgement_directory(marker)
+    if receipts.is_symlink():
+        raise ValueError("snapshot acknowledgement directory is a symlink")
+    return latest, receipts
+
+
+def verified_prune_plan(directory, glob, marker, prefix, replacement_suffix):
+    latest, receipts = _latest_and_receipts(
         directory, glob, marker, prefix, replacement_suffix
     )
     if latest is None:
         return []
-    receipts = acknowledgement_directory(marker)
-    if receipts.is_symlink():
-        raise ValueError("snapshot acknowledgement directory is a symlink")
     releasable = []
     for name in snapshot_names(directory, glob):
-        if name == latest[0]:
-            continue  # The independent full audit needs this immutable source.
-        receipt = receipts / name
-        if receipt.is_symlink():
-            raise ValueError("snapshot acknowledgement is a symlink")
-        if not receipt.exists():
-            continue  # A different snapshot's proof never covers this snapshot.
-        acknowledged = verified_acknowledgement(
-            directory, glob, receipt, prefix, replacement_suffix
+        row = _releasable(
+            directory, glob, receipts, latest, name, prefix, replacement_suffix
         )
-        if acknowledged is None or acknowledged[0] != name:
-            raise ValueError("unqualified snapshot acknowledgement")
-        if acknowledged[2:] > latest[2:]:
-            raise ValueError("latest marker lags a newer acknowledged snapshot")
-        releasable.append(acknowledged)
+        if row is not None:
+            releasable.append(row)
     return sorted(releasable, key=lambda row: row[2:])
+
+
+def verified_prune_candidate(directory, glob, marker, prefix, replacement_suffix, name):
+    """Recheck one planned deletion: its archive and source as they are now."""
+    latest, receipts = _latest_and_receipts(
+        directory, glob, marker, prefix, replacement_suffix
+    )
+    if latest is None or name not in snapshot_names(directory, glob):
+        return None
+    return _releasable(
+        directory, glob, receipts, latest, name, prefix, replacement_suffix
+    )
 
 
 def run(*args):
@@ -936,7 +964,7 @@ def command_items(command, parser):
         ):
             # Filesystem metadata validation can be much slower than reading
             # archive headers. Drain and reap Borg first so parser backpressure
-            # cannot monopolize its native repository lock. The private spool
+            # cannot hold its repository lock for longer than needed. The private spool
             # is unlinked and bounded in memory, not an archive or a receipt.
             with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as spool:
                 shutil.copyfileobj(process.stdout, spool, length=65536)
@@ -1712,6 +1740,13 @@ def main():
     prune.add_argument("marker")
     prune.add_argument("prefix")
     prune.add_argument("replacement_suffix")
+    candidate = sub.add_parser("prune-candidate")
+    candidate.add_argument("directory")
+    candidate.add_argument("glob")
+    candidate.add_argument("marker")
+    candidate.add_argument("prefix")
+    candidate.add_argument("replacement_suffix")
+    candidate.add_argument("snapshot")
     observation = sub.add_parser("observe-acquisitions")
     observation.add_argument("directory")
     observation.add_argument("glob")
@@ -1789,6 +1824,17 @@ def main():
             args.replacement_suffix,
         ):
             print(f"{name}\t{uuid}\t{generation}\t{subvolume_id}")
+    elif args.command == "prune-candidate":
+        row = verified_prune_candidate(
+            args.directory,
+            args.glob,
+            args.marker,
+            args.prefix,
+            args.replacement_suffix,
+            args.snapshot,
+        )
+        if row is not None:
+            print("\t".join(map(str, row)))
     elif args.command == "pending-hint":
         print(
             "yes"

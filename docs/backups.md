@@ -5,23 +5,25 @@ Everything is backed up locally to Borg repositories on the HDD at
 
 ## Sinex
 
-The nightly drain runs Sinex's native `sinex-backup.service`. Sinex prepares
-one immutable core artifact with its database, content and producer state,
-then archives its main material and key table into distinct repositories,
-`borg-sinex-core-v1` and `borg-sinex-keys-v1`. Both repositories must be
-initialized explicitly before the first run. Sinex releases the artifact's
-hold only after it verifies both exact archive identities; a failed run keeps
-its artifact and hold for diagnosis.
+The nightly coordinator runs `sinex-backup.service`. It asks the running
+Sinex to prepare one backup under
+`/neo-outer-realm/state/sinex/backup/<run>`: its database and key dumps,
+content segments and producer state, taken at one held boundary. Two Borg jobs
+archive that copy into `borg-sinex-core-v1` and its keys into
+`borg-sinex-keys-v1`; both repositories must be initialized by hand before the
+first run. The service releases the boundary only after reading back both
+archives by name. A failed run keeps its copy and the open boundary for
+diagnosis, and fails the unit. `latest-complete.json` in that directory, owned
+by the `sinex` user, names the last complete run.
 
-The session health reports the service outcome. Complete backup evidence is
-Sinex's private `latest-complete.json` artifact, inspected with its owning
-identity. Historical stores stay under the existing `sinex-blobs` archive
-route until their import comparisons are complete. Existing database dumps
-and Borg archives remain preserved; activation does not delete them.
+Stopped Sinex deployments listed in `sinnix.services.sinex.retainedStores`
+(today `/var/lib/sinex/old-2026-10-26`) are archived whole by the
+`borgbackup-job-sinex-blobs` job until their import into the running Sinex has
+been compared.
 
 ## Retention
 
-`borgbackup-maintenance` runs after the native archive jobs in the nightly
+`borgbackup-maintenance` runs after the archive jobs in the nightly
 coordinator. A completed pass is due again after 20 hours. Lock contention
 leaves it due for the next coordinator attempt. A completion older than 48
 hours is unhealthy.
@@ -39,7 +41,7 @@ unreferenced chunks, runs on the first pass at least 6.5 days after the last
 one: at every pass it rewrote hundreds of gigabytes of segments a week to
 return space. Shared chunks remain until their last reference is removed. `agentctl job start sinnix backup_retention_plan` previews the
 installed policy; `agentctl job start sinnix backup_maintenance` runs it when due.
-Both execute the native systemd service, so inspect its journal for archive
+Both run the systemd service, so inspect its journal for archive
 selection and statistics. A deferred run does not mean pruning completed.
 
 `borgbackup-capacity` runs every six hours at :45, recording allocated repository
@@ -57,9 +59,9 @@ exit still records the measurement; the unit's failure notification carries it.
 For archive-level size diagnosis, `agentctl job start sinnix
 backup_archive_inventory -- --repository <repository> --archive <archive>` reads
 one archive's metadata and reports logical bytes by path prefix. Shared chunks
-make these different from reclaimable physical bytes. Native verification can
-request a new cut with `backup_snapshot`, then archive it with `backup_drain`;
-inspect both native units and their admitted snapshot markers afterwards.
+make these different from reclaimable physical bytes. To check the path end to
+end, take a new cut with `backup_snapshot`, then archive it with
+`backup_drain`; inspect both units and their snapshot markers afterwards.
 
 For local cleanup candidates, `agentctl job start sinnix filesystem_usage --
 <absolute-path> ...` measures allocated directory bytes to depth two, without
@@ -77,8 +79,8 @@ paths. Neither measurement establishes that a directory is disposable.
 | `/persist`                                    | btrbk read-only snapshot, archived by the Borg job                                                                                                                                       | same as `/realm`                                 | `borg-persist-v1`                           |
 | HDD genome workspace                          | dedicated btrbk cut, archived independently of `/realm`                                                                                                                                  | six-hour cuts only when changed, drained nightly | `borg-realm-v2`, `genome-*` series          |
 | The ephemeral root                            | snapshot the initrd takes before each wipe                                                                                                                                               | nightly coordinator                              | `borg-root-snapshots-v1`                    |
-| Sinex content stores                          | read in place: the running store, its producer spools, and the whole dated earlier deployment (stopped PostgreSQL cluster included)                                                      | nightly coordinator                              | `borg-sinex-blobs-v1`                       |
-| Sinex database dump                           | `pg_dump` into `state/db-dumps/sinex`, archived with `/realm`                                                                                                                            | dump daily at midnight                           | `borg-realm-v2`                             |
+| Running Sinex                                 | `sinex-backup`: a backup Sinex prepares at one held boundary (database, keys, segments, producer state), archived by two Borg jobs (see "Sinex" above)                                   | nightly coordinator                              | `borg-sinex-core-v1`, `borg-sinex-keys-v1`  |
+| Retained Sinex deployments                    | the whole stopped deployment read in place, its PostgreSQL cluster included                                                                                                              | nightly coordinator                              | `borg-sinex-blobs-v1`                       |
 | Polylogue state                               | hooks archived directly from a read-only snapshot of its subvolume                                                                                                                       | nightly coordinator                              | `borg-polylogue-state-v1`                   |
 | Purchased embedding vectors                   | the 2026-07-10 stores on `/neo-outer-realm/archive/polylogue/embeddings`, in the same archive as Polylogue state; they never change, so Borg stores them once                            | nightly coordinator                              | `borg-polylogue-state-v1`                   |
 | Polylogue live archive                        | `state/polylogue-live` (except `index.db`) inside the `/realm` btrbk snapshot; an atomic snapshot is consistent for Polylogue                                                            | same as `/realm`                                 | `borg-realm-v2`                             |
@@ -101,10 +103,10 @@ filesystem (`rootSnapshotExcludes` in `modules/lib/backup/acknowledgement.nix`).
 The coordinator runs nightly at 03:05 and once 45 minutes after boot. The
 persistent calendar catches a missed nightly window; the independent boot
 trigger also catches a night interrupted after its calendar event fired. Both
-triggers target the same native service, which cannot overlap itself. Resume
+triggers start the same service, which cannot overlap itself. Resume
 an interrupted or failed pass manually with
-`agentctl job start sinnix backup_drain` after checking its native units and
-shared-lock holder.
+`agentctl job start sinnix backup_drain` after checking its units and which
+process holds the Borg lock.
 
 It starts the configured telemetry and Polylogue SQLite dump units, then asks
 `btrbk.service` for a normal acquisition containing those new dumps. If a dump
@@ -112,29 +114,29 @@ fails, it skips that additional cut and still attempts the independent archive
 and maintenance jobs, returning failure at the end. The existing six-hour
 btrbk schedule remains; no queued restore point is dropped or coalesced.
 
-A durable acquisition receipt records only successful dumps plus a completed
-native btrbk acquisition. Its 20-hour freshness and dump/snapshot-policy hash
+An acquisition receipt, written to disk before it counts, records only
+successful dumps plus a completed btrbk acquisition. Its 20-hour freshness and dump/snapshot-policy hash
 avoid repeating dumps and extra cuts when the boot and calendar wakes follow
 each other. An interrupted archive phase reuses that acquisition while the
-native per-snapshot receipts govern its remaining queue. Changed policy,
+per-snapshot receipts decide its remaining queue. Changed policy,
 missing/invalid receipts or a stale acquisition make dumps and acquisition due.
 Direct Polylogue/Sinex archive calls and local dump expiry likewise reuse their
 existing success markers only within 20 hours and with matching input policy.
-Manual native unit calls retain their original behavior.
+Starting a unit by hand skips these checks.
 
-The sequence first archives daily Polylogue state and optional Sinex blobs,
-then runs Realm, optional genome, Persist and root snapshot archival, followed
-by retention maintenance,
+The sequence first archives daily Polylogue state, the running Sinex
+(`sinex-backup`) and the retained Sinex deployments, then runs Realm, optional
+genome, Persist and root snapshot archival, followed by retention maintenance,
 the due Realm coverage audit and verified local dump expiry. These jobs have
 no independent timers on backup hosts. Telemetry-only hosts retain their dump
-timer. Each native job keeps its own resources, proof, due checks and deadline.
+timer. Each job keeps its own resources, proof, due checks and deadline.
 The coordinator owns no Borg lock while waiting for children; the children
 acquire and release it themselves. Stopping the coordinator propagates to its
 children, preserving their existing failed-cut and unacknowledged-source rules.
 Adding or re-enabling the boot timer on a machine already past 45 minutes
 can start this full sequence immediately during activation. With a retained
 persistent trigger timestamp, systemd can instead suppress that already-past
-boot expression; inspect the actual next trigger and native service state.
+boot expression; inspect the actual next trigger and service state.
 The normal boot trigger is scheduled when the timer starts before 45 minutes.
 Use the declared `backup_drain` operation for deployment recovery when no
 automatic start is pending. Sequence activation and recovery with other
@@ -146,7 +148,7 @@ and failed hook cuts for recovery. Its overall deadline is 56h15m, or
 80h15m with genome, so a large retained
 backlog can extend beyond one night. The declared `backup_drain` caller uses `timeout_seconds = 0` (no outer
 AgentCTL deadline), because supported positive caller timeouts stop at eight
-hours. The native systemd coordinator retains its finite 80h15m maximum;
+hours. The systemd coordinator keeps its finite 80h15m maximum;
 systemd remains the owner of child deadlines and cancellation.
 This maximum is not a nightly SLA or
 a waiver of the 36-hour source alert: a large retained backlog can fail that
@@ -156,25 +158,23 @@ proof every source has an accepted archive; inspect the per-source receipts.
 Daily direct-path archives run before complete historical snapshot queues so
 a multi-day Realm/genome backlog cannot consume their daily start window.
 That trades their runtime before Realm's space-sensitive drain; no historical
-cut is dropped, and each native drain still processes its finite lossless queue.
+cut is dropped, and each drain still processes its whole finite queue.
 
-Realm, Persist and genome snapshot drains hold the global Borg mutex for one cut's creation,
-verification and durable acknowledgement, then release it before the next
-cut. Snapshot retirement reacquires the mutex and rechecks current archive
-coverage and source identity before deletion. Btrfs cleaner completion and
-I/O-pressure settling run without the Borg mutex, so normal metadata readers
-can proceed during those waits. A plan made before a wait never authorizes a
-later deletion by itself. Marker publication fsyncs the temporary file,
-renames it into place, then fsyncs its parent directory. Acquisition markers
-use the same file and directory durability boundary. These writes do not
-request a filesystem-wide flush of unrelated application or backup data.
+The Realm, Persist and genome drains take the global Borg lock once per
+snapshot: for one cut's create, verification and acknowledgement, and again
+for each snapshot deletion, which first rechecks that snapshot's archive and
+identity because maintenance may have changed archives in between. Other Borg
+jobs waiting for the lock run between those steps, including while the drain
+waits for the Btrfs cleaner and for I/O pressure to settle after a deletion.
+Markers are written to a temporary file, fsynced, renamed into place, and the
+parent directory is fsynced; nothing else on the filesystem is flushed.
 
 The drain keeps the newest archived snapshot for the independent audit.
 When no cuts are queued it validates existing acknowledgements and leaves a
-running repository integrity check alone. Pending or unavailable local
-handoff evidence can preempt the resumable weekly check; the independent
-coverage audit is never preempted. The coordinator uses local receipts for
-this scheduling hint; children qualify archives under the Borg lock.
+running repository integrity check alone. A pending snapshot, or a receipt it
+cannot read, can preempt the resumable weekly check; the independent coverage
+audit is never preempted. The coordinator decides this from local receipts
+only; the drains check archives themselves under the Borg lock.
 
 ### Snapshots are kept until their archive is checked
 
@@ -185,9 +185,9 @@ as missing data. If the check fails, the snapshot stays and the job fails,
 which keeps local snapshots piling up rather than losing data. Backup failures
 are therefore also disk-space problems on `/realm`.
 
-The newest admitted source cut remains until a successor is admitted, so an
-independent audit has an immutable source. The Borg drain owns releases from
-these handoff queues.
+The newest archived cut stays until a newer one is archived, so the
+independent audit always has an unchanging source. Only the Borg drain deletes
+these snapshots.
 
 The genome workspace can live at `sinnix.backup.genomeRoot` on the HDD while a
 declared mount preserves `/realm/health/genome` for its callers. A Realm
@@ -195,7 +195,7 @@ snapshot does not cross that mount. The genome subvolume therefore has its
 own immutable cuts, archive receipts and freshness check. Its `genome-*`
 archives (`genome-genome.*`) share the Realm repository for deduplication and have independent
 retention, so a Realm recovery point cannot displace a genome recovery point
-from the same day. Genome uses native `BORG_FILES_CACHE_SUFFIX=genome` to
+from the same day. Genome uses Borg's `BORG_FILES_CACHE_SUFFIX=genome` to
 keep its files metadata cache independent of Realm create-count aging. The
 repository and chunk index stay shared, and `ctime,size,inode` validation
 remains unchanged. This namespace starts cold; its first create can reread
@@ -221,13 +221,13 @@ The coordinator's final `borgbackup-local-dumps` job keeps at least the seven ne
 dumps in each telemetry or PostgreSQL environment stream. Additional dumps
 must be older than seven days by both filename timestamp and modification time.
 Before deleting each local file, the job restores its entire archived copy and
-compares SHA-256 and length, checking the admitted archive ID and source UUID
+compares SHA-256 and length, checking the accepted archive ID and source UUID
 before and after. A missing, changed or unreadable archive leaves the local file.
 Partial files, unknown names and sealed legacy artifacts are retained. The job
-shares Borg's global lock and skips contention; it does not delay admission or
-make a new dump depend on the backup disk. Run it through the declared
-`backup_local_dumps` operation. Released bytes can remain pinned by the latest
-source snapshot until its normal successor is admitted.
+shares Borg's global lock and skips a night when it is held; it never delays
+or makes a new dump depend on the backup disk. Run it through the declared
+`backup_local_dumps` operation. Released bytes can stay pinned by the latest
+source snapshot until the next one is archived.
 
 The collector writes `/realm/state/machine-telemetry/telemetry.sqlite`. Every
 Sunday `machine-telemetry-seal` closes that file, makes it immutable under a
@@ -254,7 +254,7 @@ The broader coordinator timeout does not extend this alert budget or establish
 an eight-hour recovery-point objective.
 
 Genome acquisition is `onchange`, so an old accepted cut can remain current.
-On every successful native btrbk acquisition, including an unchanged source,
+On every successful btrbk acquisition, including an unchanged source,
 the root producer atomically publishes a metadata-only inventory under the
 receipt directory. It records the observed UTC time, current policy and source
 identity, plus immutable snapshot UUIDs, generations, IDs and cut times. This
@@ -263,7 +263,7 @@ there is no extra observer timer. Private snapshot access stays with root.
 
 The operator's probe reads that projection and the matching current-policy
 accepted receipt. It opens neither private snapshots nor Borg credentials.
-A failed native producer, missing/corrupt/future observation or observation
+A failed btrbk producer, missing/corrupt/future observation or observation
 older than 18 hours (three acquisition periods) fails the probe. With no newer
 observed acquired generation it is healthy regardless of the old accepted
 cut's age; otherwise the oldest pending newer cut has the 36-hour archival
@@ -277,7 +277,7 @@ check or a claim that every write between acquisitions is already archived.
 
 For a preserved filesystem tree, run
 `agentctl job start sinnix compare_preserved_tree -- -- /absolute/source/ /absolute/copy/`.
-This runs native rsync with checksums, metadata comparison and dry-run deletion
+This runs rsync with checksums, metadata comparison and dry-run deletion
 reporting. It writes neither tree. Keep the trailing slashes and capture the
 job's complete output and exit status. Exit zero means the comparison ran;
 equality also requires no itemized changes or deletion entries. Record source
@@ -318,7 +318,7 @@ IOWeight 20; it sets no device bandwidth cap. A full-pass horizon therefore
 needs measured throughput; 40 MB/s is not an enforced limit.
 
 Snapshot archives use the source cut time for Borg retention, including delayed
-backfills. The drain and acknowledgement marker still order snapshots by native
+backfills. The drain and acknowledgement marker still order snapshots by Btrfs
 generation, so clock skew can make retention time differ from freshness order.
 Existing archives keep their recorded timestamps. Retention counts are unchanged.
 
@@ -348,7 +348,7 @@ agentctl job start sinnix verify_snapshot_restore -- --scope realm --target <pri
 For a Persist archive, select `--scope persist`. The scope binds the archive name and
 installed backup owner together. The private receipt supplies the exact archive ID,
 snapshot UUID, relative path, byte count and complete SHA-256 digest. Extraction
-stays in memory and shares the backup mutex. For a compressed telemetry dump, `agentctl job start sinnix verify_telemetry_restore
+stays in memory and shares the Borg lock. For a compressed telemetry dump, `agentctl job start sinnix verify_telemetry_restore
 -- <file.sqlite.zst>`.
 
 ## Known gaps

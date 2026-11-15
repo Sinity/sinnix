@@ -2165,9 +2165,9 @@ def check_global_lock(held):
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            assert held, (command, args, 'reader blocked outside custody section')
+            assert held, (command, args, 'reader blocked outside the locked section')
         else:
-            assert not held, (command, args, 'reader entered custody section')
+            assert not held, (command, args, 'reader entered the locked section')
 with (root/'logs/commands').open('a') as log: log.write(json.dumps([command,*args])+'\\n')
 if command=='sleep':
     assert args==['5'], args
@@ -2526,7 +2526,7 @@ else: sys.exit(1)
             self.assertEqual(deleted, [str(old)])
             self.assertEqual(commands.count(["sleep", "5"]), 1)
 
-            # A normal maintenance reader can change archive custody during
+            # A normal maintenance reader can change which archives exist during
             # cleaner settling. The next source must be checked again under
             # the lock, rather than trusting the earlier retirement plan.
             first = snapshot("realm.20260301T000000+0000", {"first": "retained"})

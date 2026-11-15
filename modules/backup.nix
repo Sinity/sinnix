@@ -21,9 +21,9 @@
 }:
 let
   inherit (config.sinnix.paths) realmRoot;
-  # Closed predecessor stores remain direct-path Borg inputs until their
-  # import comparison is complete. The active store's native paired backup
-  # holds an immutable boundary including SQL and producer spools.
+  # Stopped earlier Sinex deployments are archived whole, read in place,
+  # until their import into the running Sinex has been compared. The running
+  # Sinex is backed up by sinex-backup.service from a copy it prepares.
   sinexStorePaths = lib.optionals (
     options.services ? sinex && config.services.sinex.enable
   ) config.sinnix.services.sinex.retainedStores;
@@ -196,7 +196,8 @@ let
   # registered surface, which mkScheduledJob resolves by unit lookup. A
   # module-local serviceConfig helper used to recompute exactly that lookup
   # per unit; the class was never declared twice, only applied twice.
-  # Fingerprints qualify the existing daily markers after an input/policy move.
+  # A daily marker counts only while its fingerprint matches the current inputs
+  # and policy, so a change to either makes the job due again.
   coordinatorPolicies = {
     polylogue = builtins.hashString "sha256" (
       builtins.toJSON {
@@ -369,7 +370,7 @@ let
     export BORG_PASSCOMMAND=${lib.escapeShellArg "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}"}
     export BORG_CACHE_DIR=${lib.escapeShellArg borgCacheDir}
     # Borg's uuid.getnode() fallback can change between invocations. A stable
-    # local identity lets its native reaper recognize its own abandoned locks.
+    # local identity lets Borg's own reaper recognize its abandoned locks.
     if [ -z "''${BORG_HOST_ID:-}" ]; then
       borg_machine_id="$(cat /etc/machine-id)"
       if [[ ! "$borg_machine_id" =~ ^[0-9a-f]{32}$ ]]; then
@@ -569,18 +570,17 @@ let
       # Admit one finite queue. Later acquisitions wait for the next wake.
       snapshots="$(${snapshotCoverage} queue -- ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} "$latest_marker" ${lib.escapeShellArg archivePrefix} ${lib.escapeShellArg replacementSuffix})"
       release_borg_global_lock
-      while IFS= read -r snapshot; do
-        [ -n "$snapshot" ] || continue
-        # Keep one cut's create, verification and durable acknowledgement
-        # together; queued readers can run before the next cut.
-        acquire_borg_global_lock
+
+      # Archive one snapshot ($snapshot): create, verify and acknowledge it.
+      # The caller holds the Borg lock for the whole call. A failure exits
+      # the script, which releases the lock with the process.
+      drain_cut() {
         acknowledgement="$acknowledgement_root/$snapshot"
         if [ -f "$acknowledgement" ]; then
           acknowledged="$(${snapshotCoverage} acknowledged -- ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} "$acknowledgement" ${lib.escapeShellArg archivePrefix} ${lib.escapeShellArg replacementSuffix})"
           [ "$acknowledged" = "$snapshot" ] || exit 1
           publish_acknowledgement
-          release_borg_global_lock
-          continue
+          return
         fi
         snapshot_path=${lib.escapeShellArg snapshotDir}/"$snapshot"
         archive_name=${lib.escapeShellArg archivePrefix}-"$snapshot"
@@ -754,50 +754,64 @@ let
           printf 'epoch=%s\n' "$(date +%s)"
         } | publish_backup_marker "$acknowledgement"
         publish_acknowledgement
+      }
+
+      # Delete one acknowledged snapshot ($old, with its expected identity).
+      # The caller holds the Borg lock. Maintenance may have changed archives
+      # since the plan was made, so this snapshot's archive and source are
+      # checked again first. Sets retired=1 when it deleted the snapshot.
+      retire_snapshot() {
+        current="$(${snapshotCoverage} prune-candidate -- ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} "$latest_marker" ${lib.escapeShellArg archivePrefix} ${lib.escapeShellArg replacementSuffix} "$old")"
+        [ "$current" = "$(printf '%s\t%s\t%s\t%s' "$old" "$expected_uuid" "$expected_generation" "$expected_id")" ] || return 0
+        old_path=${lib.escapeShellArg snapshotDir}/"$old"
+        # Independent audits pin only their selected snapshot, not the Borg
+        # lock. Never wait on that pin while draining.
+        exec 8<"$old_path"
+        if ! flock -n -x 8; then
+          echo "Retaining snapshot held by an independent audit: $old"
+          exec 8<&-
+          return 0
+        fi
+        actual_details="$(${snapshotCoverage} details "$old_path")"
+        cutoff_filesystem="$(${pkgs.gnused}/bin/sed -n 's/^filesystem_uuid=//p' "$latest_marker")"
+        if [ "$(${snapshotCoverage} filesystem-identity "$old_path")" != "$cutoff_filesystem" ]; then
+          echo "Snapshot filesystem changed; retaining $old_path" >&2
+          exit 1
+        fi
+        if [ "$actual_details" != "$(printf '%s\t%s\t%s' "$expected_uuid" "$expected_generation" "$expected_id")" ]; then
+          echo "Snapshot identity changed; retaining $old_path" >&2
+          exit 1
+        fi
+        btrfs subvolume delete "$old_path"
+        exec 8<&-
+        retired=1
+      }
+
+      # The Borg lock is taken once per snapshot, so maintenance and checks
+      # queued behind it run between cuts and between deletions.
+      while IFS= read -r snapshot; do
+        [ -n "$snapshot" ] || continue
+        acquire_borg_global_lock
+        drain_cut
         release_borg_global_lock
       done <<< "$snapshots"
-      # Each candidate needs its own durable proof. Keep the newest admitted
-      # source for independent auditing; interrupted release resumes next wake.
-      acquire_borg_global_lock
+
+      # Every acknowledged snapshot except the newest is deleted; the newest
+      # stays for the independent audit. An interrupted run resumes next wake.
       if [ -f "$latest_marker" ]; then
+        acquire_borg_global_lock
         prune_plan="$(${snapshotCoverage} prune-plan -- ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} "$latest_marker" ${lib.escapeShellArg archivePrefix} ${lib.escapeShellArg replacementSuffix})"
+        release_borg_global_lock
         while IFS=$'\t' read -r old expected_uuid expected_generation expected_id; do
           [ -n "$old" ] || continue
+          retired=0
           acquire_borg_global_lock
-          # Maintenance may have changed archives while the lock was released.
-          # Revalidate this exact candidate before touching its source.
-          current_prune_plan="$(${snapshotCoverage} prune-plan -- ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} "$latest_marker" ${lib.escapeShellArg archivePrefix} ${lib.escapeShellArg replacementSuffix})"
-          if ! printf '%s\n' "$current_prune_plan" | grep -Fxq "$(printf '%s\t%s\t%s\t%s' "$old" "$expected_uuid" "$expected_generation" "$expected_id")"; then
-            release_borg_global_lock
-            continue
-          fi
-          old_path=${lib.escapeShellArg snapshotDir}/"$old"
-          # Independent audits pin only their selected immutable source, not
-          # the global create/drain gate. Never wait on that pin while draining.
-          exec 8<"$old_path"
-          if ! flock -n -x 8; then
-            echo "Retaining snapshot held by an independent audit: $old"
-            exec 8<&-
-            release_borg_global_lock
-            continue
-          fi
-          actual_details="$(${snapshotCoverage} details "$old_path")"
-          cutoff_filesystem="$(${pkgs.gnused}/bin/sed -n 's/^filesystem_uuid=//p' "$latest_marker")"
-          if [ "$(${snapshotCoverage} filesystem-identity "$old_path")" != "$cutoff_filesystem" ]; then
-            echo "Snapshot filesystem changed; retaining $old_path" >&2
-            exit 1
-          fi
-          if [ "$actual_details" != "$(printf '%s\t%s\t%s' "$expected_uuid" "$expected_generation" "$expected_id")" ]; then
-            echo "Snapshot identity changed; retaining $old_path" >&2
-            exit 1
-          fi
-          btrfs subvolume delete "$old_path"
-          exec 8<&-
-          # Deletion is admitted. Cleaner completion and pressure settling do
-          # not use Borg; let normal readers acquire its mutex during them.
+          retire_snapshot
           release_borg_global_lock
-          # Await cleaner completion and let pressure settle before admitting
-          # another deletion, so their I/O does not accumulate.
+          [ "$retired" = 1 ] || continue
+          # Cleaner completion and pressure settling do not use Borg, so they
+          # run without the lock. Waiting for both before the next deletion
+          # keeps the cleaners' I/O from piling up.
           btrfs subvolume sync ${lib.escapeShellArg snapshotDir} "$expected_id"
           for _ in $(seq 60); do
             io_full="$(${pkgs.gawk}/bin/awk '/^full/ { sub("avg10=", "", $2); print int($2) }' /proc/pressure/io)"
@@ -806,7 +820,6 @@ let
           done
         done <<< "$prune_plan"
       fi
-      release_borg_global_lock
     '';
 
   chromeCacheRoot = "home/sinity/.config/chrome-ws";
@@ -903,7 +916,7 @@ let
     "library/model/photoprism"
     "library/model/sd-checkpoints"
     "library/model/tts"
-    # Historical snapshots retain these native addresses.
+    # Older snapshots still hold these paths.
     "library/games/steam/steamapps"
     "library/models"
     # Regenerable-cache root (sinex cargo/dev caches via the
@@ -1035,7 +1048,7 @@ let
       "library/model/photoprism"
       "library/model/sd-checkpoints"
       "library/model/tts"
-      # Historical snapshots retain these native addresses.
+      # Older snapshots still hold these paths.
       "library/games/steam/steamapps"
       "library/models"
       "state/cache"
