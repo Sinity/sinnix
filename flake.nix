@@ -95,8 +95,8 @@
 
     # Sinex: its package and NixOS module (modules/services/sinex/bridge.nix).
     # The URL names the deployed branch; flake.lock alone holds the revision,
-    # and the commit that moves it says what changed. A bump is a deploy, and
-    # sinexd is restarted by hand afterwards.
+    # and the commit that moves it says what changed. A bump is a deploy: the
+    # switch restarts sinexd, whose start script changes with the package.
     #
     # nixpkgs is deliberately NOT `follows`: Sinex builds against its own
     # locked nixpkgs and Rust toolchain, so a Sinnix nixpkgs bump does not
@@ -104,7 +104,7 @@
     # sinity.cachix.org, and `update sinex` moves the pin only after fetching
     # that package, so a switch downloads Sinex instead of compiling it.
     # Export-ignore is explicit so the source tree matches the package build.
-    sinex.url = "git+https://github.com/Sinity/sinex?ref=master&shallow=1&exportIgnore=1";
+    sinex.url = "git+https://github.com/Sinity/sinex?ref=deploy/daemon-memory-on-51c5e9aa9&shallow=1&exportIgnore=1";
 
     # BTRFS rollback impermanence (see modules/persistence.nix)
     impermanence = {

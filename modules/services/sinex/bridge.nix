@@ -19,8 +19,10 @@
 # (see the coordinator sequence in modules/lib/backup/acknowledgement.nix). Stopped earlier deployments are archived separately, whole, until their
 # import has been compared.
 #
-# Activation never restarts sinexd or its NATS; restart them by hand after a
-# deploy and check the running binary.
+# Sinex's module sets restartIfChanged on sinexd and sinex-nats, so an
+# activation that changes either unit (a Sinex bump changes sinexd's start
+# script; a resource change here changes its unit) restarts it. Check the
+# running binary after a deploy.
 {
   config,
   inputs,

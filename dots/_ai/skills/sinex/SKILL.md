@@ -52,6 +52,6 @@ Type-check and run focused tests while iterating, and the full check on the
 head that lands (repository `AGENTS.md`).
 
 Production deployment is owned by Sinnix. Pin the Sinex revision and run the
-Sinnix `switch` wrapper. Workstation activation does not restart `sinexd`;
-restart it explicitly when immediate rollout is intended, then verify the
-active binary, unit generation, and schema convergence.
+Sinnix `switch` wrapper. Activation restarts `sinexd` whenever its unit
+changes (a package bump changes its start script); verify the active
+binary, unit generation, and schema convergence afterwards.
