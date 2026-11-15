@@ -1,6 +1,6 @@
 ---
 name: orchestrate
-description: "Coordinate several agents on one goal: task groups, model choice, native agents, isolated worktrees, integration, verification, and publication."
+description: "Coordinate several agents on one goal: task groups, model choice, harness agents, isolated worktrees, integration, verification, and publication."
 ---
 
 # Orchestrate
@@ -13,14 +13,12 @@ next, not on supervising progress.
 
 ## Choose the route
 
-- **Native agents** for investigation, bounded help, and cohesive
-  implementation. Give each active owner an isolated worktree under
-  `/realm/worktree/`; the coordinator integrates. Reuse that checkout for the
-  owner's later branches: its stable path retains compiler artifacts and
-  runtime fixture paths. Before switching to a new branch from current
-  `origin/master`, all native jobs using it must be terminal and working bytes
-  preserved. Hosted CI checks the pushed commit, so it may continue on that
-  immutable head while the owner reuses the checkout for independent work.
+- **Harness agents** (Claude Code or Codex subagents) for investigation,
+  bounded help, and cohesive implementation. Give each active owner an
+  isolated worktree under `/realm/worktree/`; the coordinator integrates.
+  Reuse that checkout for the owner's later branches: its stable path keeps
+  compiler artifacts and runtime fixture paths. When it may switch branches
+  is in `agent-runtime`.
   - In Claude Code, prefer forks (`subagent_type: "fork"`) for
     implementation: they inherit the conversation and the parent model. A
     fork that hits its 200-turn cap is resumed with a short continue message.
@@ -39,7 +37,7 @@ next, not on supervising progress.
     informs an owner already working. Diagnose required-check failures before
     unrelated work. Wait once with `wait_agent` for the expected duration.
 - AgentCTL batch records are read-only history. Use `agent-runtime` for
-  retained records and native jobs; use native agents for new work.
+  retained records and AgentCTL jobs; use harness agents for new work.
 - Add workers only when independent work benefits from parallelism. Keep one
   owner for a small connected change; available slots are not a dispatch target.
 - Concurrent agents are one shared budget (20 in Claude Code). An audit or
@@ -137,7 +135,7 @@ exact commit to review; required hosted review stays with the forge.
 
 ## Land
 
-- Native work lands through the repository's normal route: one PR per coherent change whose title is the
+- Agent work lands through the repository's normal route: one PR per coherent change whose title is the
   permanent squash subject and whose body explains the problem, behavior,
   verification, and residuals; use the repository's template when present.
   Repositories that publish to `master` directly fast-forward instead.
@@ -159,6 +157,6 @@ exact commit to review; required hosted review stays with the forge.
   merge into any other branch has not landed. Report the
   commit or PR, useful check results, and residuals without a ceremonial list.
   Preserve WIP and clean only worktrees and watches you own.
-- After landing, record the native verification and publication references in
+- After landing, record the verification and publication references in
   Beads, close the tasks whose criteria they meet, carry remaining work into
   named successors, and remove the worktrees you created.

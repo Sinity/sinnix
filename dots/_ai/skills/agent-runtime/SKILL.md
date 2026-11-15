@@ -1,6 +1,6 @@
 ---
 name: agent-runtime
-description: "Run, watch, recover, or clean AgentCTL jobs and retained history: native queue state, exact identities, artifacts, pressure pauses, and preservation-aware worktree cleanup."
+description: "Run, watch, recover, or clean AgentCTL jobs and retained history: queue state, exact identities, artifacts, pressure pauses, and preservation-aware worktree cleanup."
 ---
 
 # Agent runtime
@@ -9,7 +9,7 @@ AgentCTL runs declared operations over pueue and systemd. Git owns checkouts
 and publication; Beads owns tasks and decisions. Use `agentctl <verb> --help`
 and [the command contract](../../../../docs/agentctl.md) for syntax.
 
-## Native jobs
+## Jobs
 
 - Discover operations with `agentctl project operations <project>`. Short
   foreground probes run directly; queued, heavy, detached or shared checks use
@@ -41,10 +41,11 @@ and [the command contract](../../../../docs/agentctl.md) for syntax.
   retrying. Diagnose a terminal failure first; an uncertain launch is not a
   reason to submit it again. Cancel by recorded identity, then confirm terminal
   state before retrying. `pressure tick` reconciles admission holds.
-- Keep a checkout fixed while a native job uses it; its result belongs to
-  that commit. After every native holder ends and working bytes are preserved,
-  reuse the owner's checkout for a fresh branch from current `origin/master`.
-  Hosted CI continues against the immutable pushed head. Rerun a check only
+- Keep a checkout on its commit while a job uses it; the job's result belongs
+  to that commit. Once every job and process using it has ended and its
+  uncommitted work is preserved, the owner reuses the checkout for a fresh
+  branch from current `origin/master`. Hosted CI keeps checking the pushed
+  commit meanwhile. Rerun a check only
   when its covered tree changed; report failures and untested scope.
 - In Codex, an exec session_id remains live after the outer tool call returns.
   Observe it through write_stdin; terminate owned supervision and confirm exit
@@ -56,13 +57,13 @@ and [the command contract](../../../../docs/agentctl.md) for syntax.
 Record verification and publication references with Beads and Git.
 
 `agentctl worktree clean <project> [--path <checkout>]` retires a completed
-checkout only once its work is published and process and queue holders,
-working bytes, ignored files and retained job output permit it. It retains recovery refs and reports every checkout it keeps.
+checkout only once its work is published and no process or queued job uses
+it, and its uncommitted and ignored files and retained job output allow it. It retains recovery refs and reports every checkout it keeps.
 `job clean` releases terminal queue entries while retaining their inputs,
 attempts and original output. Use these owners rather than deleting state files.
 
 ## Finish
 
 Report the actual outcome, exact verification and unresolved criteria. Preserve
-recoverable WIP and name the owning worktree or job. Native agents land through
+recoverable WIP and name the owning worktree or job. Harness agents land through
 the repository's publication policy; use `orchestrate` when coordinating agents.
