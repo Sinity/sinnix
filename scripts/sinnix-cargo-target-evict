@@ -55,8 +55,8 @@ evict() {
 }
 
 now="$(date +%s)"
-# Interrupted removals meet the same checks as entries still at their normal
-# names: an earlier policy may have renamed a live checkout's target.
+# Entries left as .evicting.<hash> by an interrupted run get the same checks as
+# entries at their normal names, so a target whose checkout exists is kept.
 for entry in "$dir"/*/ "$dir"/.evicting.*/; do
   [ -d "$entry" ] || continue
   entry="${entry%/}"

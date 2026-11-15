@@ -14,9 +14,10 @@
 #                sets the attribute so every file the cluster creates inherits it)
 # State of earlier deployments stays beside them under dated names.
 #
-# Sinex owns the immutable core artifact and paired content/key Borg archives.
-# Sinnix runs that native service in its nightly drain; dated predecessor
-# stores remain covered separately until their import comparison is complete.
+# Sinex's own sinex-backup.service prepares its backup and archives it into
+# two Borg repositories (content, keys); the nightly backup coordinator starts
+# it. Stopped earlier deployments are archived separately, whole, until their
+# import has been compared.
 #
 # Activation never restarts sinexd or its NATS; restart them by hand after a
 # deploy and check the running binary.
@@ -101,7 +102,7 @@ in
     services.sinex = {
       enable = true;
       stateDir = "${root}/daemon";
-      # Use the same PostgreSQL/extensions that qualify Sinex's package.
+      # The PostgreSQL build and extensions Sinex's package is tested with.
       database.package = inputs.sinex.packages.${pkgs.stdenv.hostPlatform.system}.postgresql;
       database.dataDir = "${root}/postgresql";
       # Shell histories, browser and ActivityWatch databases and the capture
@@ -123,6 +124,8 @@ in
         repo = "${backupRoot}/borg-sinex-core-v1";
         keysRepo = "${backupRoot}/borg-sinex-keys-v1";
         passCommand = "${pkgs.coreutils}/bin/cat ${secrets.borg-passphrase}";
+        # No timer of its own: the nightly backup coordinator starts
+        # sinex-backup.service (modules/lib/backup/acknowledgement.nix).
         startAt = [ ];
       };
     };

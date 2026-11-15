@@ -199,8 +199,9 @@
       sessionDeclarations = map (name: sourceCatalog.${name}) sessionSources;
     in
     {
-      # Keep the predecessor's inline-confirmed history intact while native
-      # descriptor publication replays into its own streams.
+      # The running Sinex and its producers publish under this root. Streams
+      # under earlier roots (sinex-v3 and before) are left as they were;
+      # changing the value moves every producer to new, empty streams.
       nats.subjectRoot = "sinex-v4";
       nats.producers.${config.services.sinex.session.producer} = {
         writeFamily = "sinex";
