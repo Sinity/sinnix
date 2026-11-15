@@ -88,7 +88,14 @@ in
             export EXPECTED_DATA_HOME='/fixture/live archive/sinex-data'
             ${wrapper "primary"}/bin/polylogue mcp 'one argument'
             ${(mcp (wrapper "primary"))}/bin/mcp-polylogue 'one argument'
-            ${pkgs.python3}/bin/python ${./polylogue-mcp.py} ${(mcp liveEvaluated.config.system.build.polylogueCli)}/bin/mcp-polylogue
+            # Polylogue reads /etc/machine-id at start-up and the build sandbox
+            # has none: run the MCP check with a copy of /etc that has one.
+            mkdir etc
+            cp -r /etc/. etc/
+            echo 00000000000000000000000000000001 > etc/machine-id
+            ${pkgs.util-linux}/bin/unshare --user --map-root-user --mount ${pkgs.bash}/bin/sh -c \
+              '${pkgs.util-linux}/bin/mount --bind "$PWD/etc" /etc && exec "$0" "$@"' \
+              ${pkgs.python3}/bin/python ${./polylogue-mcp.py} ${(mcp liveEvaluated.config.system.build.polylogueCli)}/bin/mcp-polylogue
             touch "$out"
           '';
         polylogue-live =

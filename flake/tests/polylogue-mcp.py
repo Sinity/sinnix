@@ -43,16 +43,19 @@ def main():
         send(process, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         tools = {tool["name"]: tool for tool in response(process, 2)["tools"]}
         assert {
-            "query",
-            "read",
-            "status",
-            "brief",
-            "recall",
-            "takeover",
+            "polylogue_read",
+            "polylogue_context",
+            "polylogue_note",
+            "polylogue_chat",
+            "polylogue_act",
         } <= tools.keys()
-        assert tools["query"]["inputSchema"]["properties"]["query"]["type"] == "string"
-        assert tools["read"]["inputSchema"]["properties"]["session"]["type"] == "string"
-        assert "session" in tools["read"]["inputSchema"]["required"]
+        read = tools["polylogue_read"]["inputSchema"]
+        assert {"query", "read", "status"} <= set(read["properties"]["operation"]["enum"])
+        arguments = read["properties"]["arguments"]["properties"]
+        assert {"query", "session"} <= arguments.keys()
+        assert {"operation", "arguments", "request_id"} <= set(read["required"])
+        context = tools["polylogue_context"]["inputSchema"]["properties"]
+        assert {"brief", "recall", "takeover"} <= set(context["operation"]["enum"])
         process.stdin.close()
         assert process.wait(timeout=30) == 0
     finally:
