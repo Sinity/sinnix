@@ -7,9 +7,9 @@
 # - borgbackup-job-persist-hourly: a read-only snapshot of /persist (the worn
 #   root SSD) archived into the persist repository as `hourly-persist-*`. It
 #   binds the snapshot at the drain's own source path, with its archive layout
-#   and file-cache flags, so cache entries match. Its Borg cache lives on
-#   /realm so hourly cache commits (about 570 MB each) never land on the root
-#   SSD; the first run seeds that cache from the drain's.
+#   and file-cache flags, so cache entries match. Its Borg cache lives on the
+#   repository disk (see borgHourlyCacheDir in modules/backup.nix); the first
+#   run seeds that cache from the drain's.
 # - borgbackup-job-live-small: Polylogue's archive.db (a consistent
 #   read-transaction dump of the whole database), the Beads task databases
 #   (old and new layouts alike: the whole tasks tree minus copied migration
@@ -90,12 +90,7 @@ in
       ];
       unitConfig.RequiresMountsFor = [ borgHourlyCacheDir ];
     };
-    serviceConfig = hourlyServiceConfig // {
-      # The hourly cache commit writes to Realm even when the source is warm.
-      # Relative I/O priority alone does not bound this foreground contention.
-      IOReadBandwidthMax = [ "${realmRoot} 2M" ];
-      IOWriteBandwidthMax = [ "${realmRoot} 1M" ];
-    };
+    serviceConfig = hourlyServiceConfig;
     path = with pkgs; [
       borgbackup
       btrfs-progs
