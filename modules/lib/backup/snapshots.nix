@@ -93,9 +93,9 @@
         ${snapshotCoverage} observe-acquisitions ${lib.escapeShellArg genomeSnapshots} 'genome.*' ${genomeCoveragePolicy} \
           --source ${lib.escapeShellArg (toString genomeRoot)} > "$temporary"
         chmod 0644 "$temporary"
-        sync -f "$temporary"
+        sync -- "$temporary"
         mv -f "$temporary" "$inventory"
-        sync -f ${lib.escapeShellArg borgDrainStateRoot}
+        sync -- ${lib.escapeShellArg borgDrainStateRoot}
         trap - EXIT
       ''}
     '';

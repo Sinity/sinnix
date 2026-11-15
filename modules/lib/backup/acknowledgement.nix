@@ -243,9 +243,9 @@ in
             temporary=$(mktemp "$acquisition_marker.XXXXXXXX")
             printf 'epoch=%s\npolicy_sha256=%s\n' "$(date +%s)" ${lib.escapeShellArg acquisitionPolicy} > "$temporary"
             chmod 0644 "$temporary"
-            sync -f "$temporary"
+            sync -- "$temporary"
             mv -f "$temporary" "$acquisition_marker"
-            sync -f ${lib.escapeShellArg borgDrainStateRoot}
+            sync -- ${lib.escapeShellArg borgDrainStateRoot}
           fi
         else
           echo "backup_phase=coordinator unit=btrbk.service status=skipped reason=dump-failure" >&2

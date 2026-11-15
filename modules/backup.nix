@@ -384,6 +384,23 @@ let
       fi
     }
 
+    acquire_borg_global_lock() {
+      if [ "''${SINNIX_BORG_GLOBAL_LOCK_HELD:-0}" = 1 ]; then
+        return
+      fi
+      exec 9>${lib.escapeShellArg borgGlobalLock}
+      flock 9
+      export SINNIX_BORG_GLOBAL_LOCK_HELD=1
+    }
+
+    release_borg_global_lock() {
+      if [ "''${SINNIX_BORG_GLOBAL_LOCK_HELD:-0}" = 1 ]; then
+        flock -u 9
+        exec 9>&-
+        unset SINNIX_BORG_GLOBAL_LOCK_HELD
+      fi
+    }
+
     acquire_borg_global_lock_or_skip() {
       if [ "''${SINNIX_BORG_GLOBAL_LOCK_HELD:-0}" = 1 ]; then
         return
@@ -419,9 +436,10 @@ let
       trap 'rm -f "$temporary"' RETURN
       cat > "$temporary" || return 1
       chmod 0644 "$temporary" || return 1
-      sync -f "$temporary" || return 1
+      # Persist only this file and its rename, not unrelated filesystem writes.
+      sync -- "$temporary" || return 1
       mv -f "$temporary" "$marker" || return 1
-      sync -f "$marker_dir" || return 1
+      sync -- "$marker_dir" || return 1
       trap - RETURN
     }
 
@@ -547,13 +565,18 @@ let
       }
       # Admit one finite queue. Later acquisitions wait for the next wake.
       snapshots="$(${snapshotCoverage} queue -- ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} "$latest_marker" ${lib.escapeShellArg archivePrefix} ${lib.escapeShellArg replacementSuffix})"
+      release_borg_global_lock
       while IFS= read -r snapshot; do
         [ -n "$snapshot" ] || continue
+        # Keep one cut's create, verification and durable acknowledgement
+        # together; queued readers can run before the next cut.
+        acquire_borg_global_lock
         acknowledgement="$acknowledgement_root/$snapshot"
         if [ -f "$acknowledgement" ]; then
           acknowledged="$(${snapshotCoverage} acknowledged -- ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} "$acknowledgement" ${lib.escapeShellArg archivePrefix} ${lib.escapeShellArg replacementSuffix})"
           [ "$acknowledged" = "$snapshot" ] || exit 1
           publish_acknowledgement
+          release_borg_global_lock
           continue
         fi
         snapshot_path=${lib.escapeShellArg snapshotDir}/"$snapshot"
@@ -728,13 +751,23 @@ let
           printf 'epoch=%s\n' "$(date +%s)"
         } | publish_backup_marker "$acknowledgement"
         publish_acknowledgement
+        release_borg_global_lock
       done <<< "$snapshots"
       # Each candidate needs its own durable proof. Keep the newest admitted
       # source for independent auditing; interrupted release resumes next wake.
+      acquire_borg_global_lock
       if [ -f "$latest_marker" ]; then
         prune_plan="$(${snapshotCoverage} prune-plan -- ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} "$latest_marker" ${lib.escapeShellArg archivePrefix} ${lib.escapeShellArg replacementSuffix})"
         while IFS=$'\t' read -r old expected_uuid expected_generation expected_id; do
           [ -n "$old" ] || continue
+          acquire_borg_global_lock
+          # Maintenance may have changed archives while the lock was released.
+          # Revalidate this exact candidate before touching its source.
+          current_prune_plan="$(${snapshotCoverage} prune-plan -- ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} "$latest_marker" ${lib.escapeShellArg archivePrefix} ${lib.escapeShellArg replacementSuffix})"
+          if ! printf '%s\n' "$current_prune_plan" | grep -Fxq "$(printf '%s\t%s\t%s\t%s' "$old" "$expected_uuid" "$expected_generation" "$expected_id")"; then
+            release_borg_global_lock
+            continue
+          fi
           old_path=${lib.escapeShellArg snapshotDir}/"$old"
           # Independent audits pin only their selected immutable source, not
           # the global create/drain gate. Never wait on that pin while draining.
@@ -742,6 +775,7 @@ let
           if ! flock -n -x 8; then
             echo "Retaining snapshot held by an independent audit: $old"
             exec 8<&-
+            release_borg_global_lock
             continue
           fi
           actual_details="$(${snapshotCoverage} details "$old_path")"
@@ -756,11 +790,11 @@ let
           fi
           btrfs subvolume delete "$old_path"
           exec 8<&-
-          # The btrfs cleaner frees a deleted snapshot after `delete` returns.
-          # Nineteen queued at once kept the shared NVMe at 48-78% I/O full
-          # for minutes, and PostgreSQL acknowledgements missed producer
-          # deadlines. Free one snapshot at a time and let I/O pressure
-          # settle (up to five minutes) before releasing the next.
+          # Deletion is admitted. Cleaner completion and pressure settling do
+          # not use Borg; let normal readers acquire its mutex during them.
+          release_borg_global_lock
+          # Await cleaner completion and let pressure settle before admitting
+          # another deletion, so their I/O does not accumulate.
           btrfs subvolume sync ${lib.escapeShellArg snapshotDir} "$expected_id"
           for _ in $(seq 60); do
             io_full="$(${pkgs.gawk}/bin/awk '/^full/ { sub("avg10=", "", $2); print int($2) }' /proc/pressure/io)"
@@ -769,6 +803,7 @@ let
           done
         done <<< "$prune_plan"
       fi
+      release_borg_global_lock
     '';
 
   chromeCacheRoot = "home/sinity/.config/chrome-ws";

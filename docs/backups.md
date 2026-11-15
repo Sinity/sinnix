@@ -71,21 +71,21 @@ paths. Neither measurement establishes that a directory is disposable.
 
 ## What is backed up
 
-| Source                   | How                                                                    | When                                             | Repository                         |
-| ------------------------ | ---------------------------------------------------------------------- | ------------------------------------------------ | ---------------------------------- |
-| `/realm`                 | btrbk read-only snapshot, archived by the Borg job                     | snapshots 00/06/12/18:00, drain nightly 03:05    | `borg-realm-v2`                    |
-| `/persist`               | btrbk read-only snapshot, archived by the Borg job                     | same as `/realm`                                 | `borg-persist-v1`                  |
-| HDD genome workspace     | dedicated btrbk cut, archived independently of `/realm`                | six-hour cuts only when changed, drained nightly | `borg-realm-v2`, `genome-*` series |
-| The ephemeral root       | snapshot the initrd takes before each wipe                             | nightly coordinator                              | `borg-root-snapshots-v1`           |
-| Sinex content stores     | read in place: the running store, its producer spools, and the whole dated earlier deployment (stopped PostgreSQL cluster included) | nightly coordinator | `borg-sinex-blobs-v1` |
-| Sinex database dump      | `pg_dump` into `state/db-dumps/sinex`, archived with `/realm`          | dump daily at midnight                           | `borg-realm-v2`                    |
-| Polylogue state          | hooks archived directly from a read-only snapshot of its subvolume     | nightly coordinator                              | `borg-polylogue-state-v1`          |
-| Purchased embedding vectors | the 2026-07-10 stores on `/neo-outer-realm/archive/polylogue/embeddings`, in the same archive as Polylogue state; they never change, so Borg stores them once | nightly coordinator | `borg-polylogue-state-v1` |
-| Polylogue live archive   | `state/polylogue-live` (except `index.db`) inside the `/realm` btrbk snapshot; an atomic snapshot is consistent for Polylogue | same as `/realm` | `borg-realm-v2` |
-| Polylogue live spools    | `~/.local/state/polylogue` (hook, browser and collector spools; the AI Studio Drive token), persisted on `/persist` | same as `/persist` | `borg-persist-v1` |
-| Polylogue archive database, hourly | `.dump` of the whole `archive.db` in one read transaction, streamed into a `polylogue-archive-*` archive; it follows whatever schema is deployed, so no table list exists to fall behind | hourly at :47 | `borg-live-small-v1` |
-| Beads task databases and Sinex spools, hourly | the `state/tasks` tree (minus migration backups) and the producer spools, read in place | hourly at :47 | `borg-live-small-v1`, `live-small-*` series |
-| Telemetry database dumps | `--rsyncable` zstd copies in `state/db-dumps/`, archived with `/realm` | dumps before nightly cut, seal Sunday            | `borg-realm-v2`                    |
+| Source                                        | How                                                                                                                                                                                      | When                                             | Repository                                  |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ | ------------------------------------------- |
+| `/realm`                                      | btrbk read-only snapshot, archived by the Borg job                                                                                                                                       | snapshots 00/06/12/18:00, drain nightly 03:05    | `borg-realm-v2`                             |
+| `/persist`                                    | btrbk read-only snapshot, archived by the Borg job                                                                                                                                       | same as `/realm`                                 | `borg-persist-v1`                           |
+| HDD genome workspace                          | dedicated btrbk cut, archived independently of `/realm`                                                                                                                                  | six-hour cuts only when changed, drained nightly | `borg-realm-v2`, `genome-*` series          |
+| The ephemeral root                            | snapshot the initrd takes before each wipe                                                                                                                                               | nightly coordinator                              | `borg-root-snapshots-v1`                    |
+| Sinex content stores                          | read in place: the running store, its producer spools, and the whole dated earlier deployment (stopped PostgreSQL cluster included)                                                      | nightly coordinator                              | `borg-sinex-blobs-v1`                       |
+| Sinex database dump                           | `pg_dump` into `state/db-dumps/sinex`, archived with `/realm`                                                                                                                            | dump daily at midnight                           | `borg-realm-v2`                             |
+| Polylogue state                               | hooks archived directly from a read-only snapshot of its subvolume                                                                                                                       | nightly coordinator                              | `borg-polylogue-state-v1`                   |
+| Purchased embedding vectors                   | the 2026-07-10 stores on `/neo-outer-realm/archive/polylogue/embeddings`, in the same archive as Polylogue state; they never change, so Borg stores them once                            | nightly coordinator                              | `borg-polylogue-state-v1`                   |
+| Polylogue live archive                        | `state/polylogue-live` (except `index.db`) inside the `/realm` btrbk snapshot; an atomic snapshot is consistent for Polylogue                                                            | same as `/realm`                                 | `borg-realm-v2`                             |
+| Polylogue live spools                         | `~/.local/state/polylogue` (hook, browser and collector spools; the AI Studio Drive token), persisted on `/persist`                                                                      | same as `/persist`                               | `borg-persist-v1`                           |
+| Polylogue archive database, hourly            | `.dump` of the whole `archive.db` in one read transaction, streamed into a `polylogue-archive-*` archive; it follows whatever schema is deployed, so no table list exists to fall behind | hourly at :47                                    | `borg-live-small-v1`                        |
+| Beads task databases and Sinex spools, hourly | the `state/tasks` tree (minus migration backups) and the producer spools, read in place                                                                                                  | hourly at :47                                    | `borg-live-small-v1`, `live-small-*` series |
+| Telemetry database dumps                      | `--rsyncable` zstd copies in `state/db-dumps/`, archived with `/realm`                                                                                                                   | dumps before nightly cut, seal Sunday            | `borg-realm-v2`                             |
 
 Left out of the `/realm` archive (`realmExcludes` in `modules/backup.nix`):
 downloaded model weights (including embeddings), Steam libraries and runtimes,
@@ -157,6 +157,17 @@ Daily direct-path archives run before complete historical snapshot queues so
 a multi-day Realm/genome backlog cannot consume their daily start window.
 That trades their runtime before Realm's space-sensitive drain; no historical
 cut is dropped, and each native drain still processes its finite lossless queue.
+
+Realm, Persist and genome snapshot drains hold the global Borg mutex for one cut's creation,
+verification and durable acknowledgement, then release it before the next
+cut. Snapshot retirement reacquires the mutex and rechecks current archive
+coverage and source identity before deletion. Btrfs cleaner completion and
+I/O-pressure settling run without the Borg mutex, so normal metadata readers
+can proceed during those waits. A plan made before a wait never authorizes a
+later deletion by itself. Marker publication fsyncs the temporary file,
+renames it into place, then fsyncs its parent directory. Acquisition markers
+use the same file and directory durability boundary. These writes do not
+request a filesystem-wide flush of unrelated application or backup data.
 
 The drain keeps the newest archived snapshot for the independent audit.
 When no cuts are queued it validates existing acknowledgements and leaves a
@@ -287,12 +298,12 @@ the comparison. This checks a tree copy, not a Borg archive.
 
 ## Checks that run on their own
 
-| Check                    | Unit                              | When                             | What it shows                                                                   |
-| ------------------------ | --------------------------------- | -------------------------------- | ------------------------------------------------------------------------------- |
-| Repository integrity     | `borgbackup-verify`               | Sunday 13:00                     | Borg's segment CRCs, advanced in time-limited partial passes                    |
-| `/realm` coverage sample | `borgbackup-coverage-audit-realm` | nightly when due, at most weekly | all paths and metadata match, plus up to 128 files / 1 GiB of contents compared |
+| Check                    | Unit                              | When                             | What it shows                                                                                                                                |
+| ------------------------ | --------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Repository integrity     | `borgbackup-verify`               | Sunday 13:00                     | Borg's segment CRCs, advanced in time-limited partial passes                                                                                 |
+| `/realm` coverage sample | `borgbackup-coverage-audit-realm` | nightly when due, at most weekly | all paths and metadata match, plus up to 128 files / 1 GiB of contents compared                                                              |
 | Beads restore check      | `sinnix-borg-beads-check`         | Thursday 12:00                   | every task database restored from the latest realm archive and opened offline; waits up to three hours for the Borg lock and fails past that |
-| Sealed telemetry         | `machine-telemetry-seal`          | Sunday 04:30                     | each sealed SQLite file passes a structural check once                          |
+| Sealed telemetry         | `machine-telemetry-seal`          | Sunday 04:30                     | each sealed SQLite file passes a structural check once                                                                                       |
 
 The coverage sample checks only the newest archive, so files that exist only
 in older archives are covered by the repository check, not by a content

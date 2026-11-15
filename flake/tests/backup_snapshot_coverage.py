@@ -2157,14 +2157,32 @@ class DrainFixture(unittest.TestCase):
             (root / "identities.json").write_text("{}")
             (root / "generations.json").write_text("{}")
             mock = """#!PYTHON
-import json, os, pathlib, shutil, subprocess, sys, uuid
+import fcntl, json, os, pathlib, shutil, subprocess, sys, uuid
 root=pathlib.Path(os.environ['TMPDIR']); command=pathlib.Path(sys.argv[0]).name; args=sys.argv[1:]
+def check_global_lock(held):
+    # A separately opened descriptor models another normal Borg reader.
+    with (root/'state/sinnix-borg.lock').open('a') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            assert held, (command, args, 'reader blocked outside custody section')
+        else:
+            assert not held, (command, args, 'reader entered custody section')
 with (root/'logs/commands').open('a') as log: log.write(json.dumps([command,*args])+'\\n')
 if command=='sleep':
     assert args==['5'], args
+    check_global_lock(False)
+    changed=root/'remove-archive-during-settle.json'
+    if changed.exists():
+        request=json.loads(changed.read_text()); changed.unlink()
+        with (root/'state/sinnix-borg.lock').open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            subprocess.run([REAL_BORG,'delete',request['repo']+'::'+request['archive']],check=True)
     (root/'io-pressure').write_text('full avg10=0.00 avg60=0.00 avg300=0.00 total=1\\n')
     sys.exit(0)
 if command=='borg':
+    if args[0]=='create' and any(arg.startswith(('::realm-', '::persist-', '::genome-')) for arg in args):
+        check_global_lock(True)
     if args[0]=='create' and (root/'fail-create').exists(): sys.exit(2)
     if args[0]=='create' and (root/'logs/append-hooks').exists() and any(arg.startswith('::polylogue-state-') for arg in args):
         if (root/'live-polylogue/hooks').is_dir():
@@ -2222,10 +2240,14 @@ elif command=='btrfs':
         print('Flags: '+('readonly' if args[2] in parents else '-'))
         print('UUID: '+identities[args[2]])
         print('Gen at creation: '+str(generations[args[2]]))
-        print('Subvolume ID: '+str(100+generations[args[2]]))
+        ids_path=root/'subvolume-ids.json'
+        ids=json.loads(ids_path.read_text()) if ids_path.exists() else {}
+        print('Subvolume ID: '+str(ids.get(args[2],100+generations[args[2]])))
     elif args[:2]==['property','get']: print('ro=true')
-    elif args[:2]==['subvolume','sync']: pass
+    elif args[:2]==['subvolume','sync']:
+        check_global_lock(False)
     elif args[:2]==['subvolume','delete']:
+        check_global_lock(True)
         assert args[2] in identities
         if (root/'fail-delete').exists(): sys.exit(1)
         shutil.rmtree(args[2])
@@ -2504,6 +2526,46 @@ else: sys.exit(1)
             self.assertEqual(deleted, [str(old)])
             self.assertEqual(commands.count(["sleep", "5"]), 1)
 
+            # A normal maintenance reader can change archive custody during
+            # cleaner settling. The next source must be checked again under
+            # the lock, rather than trusting the earlier retirement plan.
+            first = snapshot("realm.20260301T000000+0000", {"first": "retained"})
+            second = snapshot("realm.20260302T000000+0000", {"second": "retained"})
+            generations = json.loads((root / "generations.json").read_text())
+            generations[str(first)] = 1
+            generations[str(second)] = 1
+            (root / "generations.json").write_text(json.dumps(generations))
+            (root / "subvolume-ids.json").write_text(
+                json.dumps({str(first): 97, str(second): 98})
+            )
+            pins = [
+                os.open(path, os.O_RDONLY | os.O_DIRECTORY) for path in (first, second)
+            ]
+            try:
+                for descriptor in pins:
+                    fcntl.flock(descriptor, fcntl.LOCK_SH)
+                run()
+            finally:
+                for descriptor in pins:
+                    os.close(descriptor)
+            (root / "io-pressure").write_text(
+                "full avg10=20.00 avg60=20.00 avg300=20.00 total=1\n"
+            )
+            (root / "remove-archive-during-settle.json").write_text(
+                json.dumps({"repo": repo, "archive": "realm-" + second.name})
+            )
+            run(ok=False)
+            self.assertFalse(first.exists())
+            self.assertTrue(second.exists())
+            # Remove the now-invalid acknowledgement and recreate its archive
+            # through the normal drain before continuing other controls.
+            (
+                root
+                / "state/borg-drain/realm.latest-archived.by-snapshot"
+                / second.name
+            ).unlink()
+            run()
+            self.assertFalse(second.exists())
 
             rollback = snapshot(
                 "realm.20260401T233000+0000",
