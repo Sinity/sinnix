@@ -229,7 +229,11 @@
           steering = [ "${realm}/project/steering/repo/steering.sqlite" ];
           library = [ "${realm}/library" ];
           documents = [ "${realm}/document" ];
-          downloads = [ "${realm}/inbox/download" ];
+          # The download folder is not read: Sinex stored whole copies of its
+          # videos, and those copies are being released. It returns, as
+          # "${realm}/inbox/download", once Sinex records video and audio
+          # there by location and hash instead of copying the bytes.
+          downloads = [ ];
         };
         inputs.journal-json = [
           "${realm}/device/sinnix-prime/maintenance/sinex-deploy-20261111/journal-json"
