@@ -195,6 +195,12 @@
       # under earlier roots (sinex-v3 and before) are left as they were;
       # changing the value moves every producer to new, empty streams.
       nats.subjectRoot = "sinex-v4";
+      # Reading of terminal recordings is paused: the parser keeps inline-image
+      # data in its stored text and the text is indexed for search. The
+      # recordings stay on disk, and reading resumes from its saved positions
+      # when this line goes.
+      exclude."terminal.asciinema".reason =
+        "Paused until the recording parser stops storing image data and its raw output leaves the text index; recordings remain under /realm/activity/terminal/asciinema";
       nats.producers.${config.services.sinex.session.producer} = {
         writeFamily = "sinex";
         attestedHost = config.services.sinex.host;
