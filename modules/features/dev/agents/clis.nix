@@ -112,6 +112,10 @@ mkFeatureModule {
             reasoning_effort = reasoningEffort;
           };
           approvals.mode = "off";
+          # Hermes keeps every session. Later releases can delete ended sessions
+          # idle past a retention window and ask about it when the disk runs
+          # low; an explicit false disables both.
+          sessions.auto_prune = false;
           memory = {
             memory_enabled = true;
             user_profile_enabled = true;
