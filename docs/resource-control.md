@@ -19,7 +19,7 @@ agent ceiling exceeds the remainder.
 | Physical memory (`MemTotal`)        | 31.2 |                                                                            |
 | Kernel memory and free-page reserve | 2.0  | uncharged slab, vmalloc and stacks (~1.3), `min_free_kbytes` and watermarks |
 | zram store                          | 3.0  | zram `mem_limit` (`zram-resident-limit`)                                  |
-| Desktop: apps, session, shell       | 6.5  | `MemoryMin` on app (4), session (1.5) and desktop-shell (1); `MemoryLow` 12 |
+| Desktop: apps, session, shell       | 6.5  | `MemoryMin` on app (4), session (1.5) and desktop-shell (1)               |
 | PostgreSQL                          | 5.5  | `MemoryLow`; 4.3 of it are the huge pages of shared buffers              |
 | sinexd                              | 1.0  | `MemoryLow`                                                                |
 | NATS, journald capture              | 0.25 | `MemoryLow` 128M each                                                     |
@@ -63,6 +63,12 @@ reads land on the QLC drive. The pool stays at 4 GiB. Shrinking it is worth
 revisiting if, at steady state, more than about 40% of buffers sit at usage
 count 0-1 while the cluster's block reads (`pg_stat_database.blks_read`) and
 the unit's `workingset_refault_file` stay low.
+
+The cgroup filesystem is mounted with `memory_recursiveprot`: protection a
+consumer does not use passes to its siblings. The user slice's `MemoryLow`
+therefore equals the sum of the lines below it (desktop, user live services,
+capture producers), so agent work, the other child of the user manager,
+inherits only the part of those lines currently unused.
 
 Memory a line does not cover is paid for out of agent work's share: the
 desktop above its guarantee, a service between its line and its ceiling, Nix

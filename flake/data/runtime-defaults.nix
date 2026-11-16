@@ -19,19 +19,17 @@ let
     MemorySwapMax = "4G";
   };
 
-  # Desktop memory is in MiB: Min protects memory from reclaim; Low protects
-  # the larger working set while unprotected memory remains.
+  # The desktop's guarantee in MiB (MemoryMin: never reclaimed). Measured
+  # 2026-11-02..16: app.slice p50 3.9G p95 4.6G, session 0.9-1.5G, the shell
+  # 1.0G. Beyond its guarantee the desktop competes with unprotected memory,
+  # which is almost all agent work.
   desktopMemory = rec {
     chromeMin = 3072;
     appMin = 4096;
-    appLow = 8192;
     compositorMin = 768;
     sessionMin = 1536;
-    sessionLow = 3072;
     shellMin = 1024;
-    shellLow = 1024;
     totalMin = appMin + sessionMin + shellMin;
-    totalLow = appLow + sessionLow + shellLow;
   };
 
   # The host's memory budget, in MiB (docs/resource-control.md). Every line
@@ -316,10 +314,12 @@ rec {
         IOWeight = 400;
         MemoryMin = mib desktopMemory.totalMin;
         # The user manager's live and capture slices are protected only
-        # within this.
-        MemoryLow = mib (
-          desktopMemory.totalLow + memoryBudget.userLive + memoryBudget.captureProducers
-        );
+        # within this. With memory_recursiveprot, protection a child does not
+        # use passes to its siblings, agent work included, so this equals
+        # the budget lines below it and nothing more: at 14G (a soft Low of
+        # 12G for the desktop) agent work inherited most of the slack and the
+        # kernel reclaimed Chrome beside it.
+        MemoryLow = mib (desktopMemory.totalMin + memoryBudget.userLive + memoryBudget.captureProducers);
       };
       # Individual units set memory limits; the shared slice yields IO.
       background = {
@@ -424,10 +424,9 @@ rec {
         IOAccounting = true;
         CPUWeight = 100;
         IOWeight = 300;
-        # Chrome claims part of this guaranteed memory; Low protects the rest
-        # while unprotected memory remains. IO weights do not guarantee latency.
+        # Chrome claims part of this guaranteed memory. IO weights do not
+        # guarantee latency.
         MemoryMin = mib desktopMemory.appMin;
-        MemoryLow = mib desktopMemory.appLow;
       };
       session = {
         IOAccounting = true;
@@ -436,7 +435,6 @@ rec {
         # Hyprland (claiming desktopMemory.compositorMin), kitty, PipeWire and
         # the portals need about 0.9 GiB together.
         MemoryMin = mib desktopMemory.sessionMin;
-        MemoryLow = mib desktopMemory.sessionLow;
       };
       # systemd creates this dash-hierarchy parent for desktop-shell.slice.
       # Carry the shell policy to its competition with the other user slices.
@@ -445,7 +443,6 @@ rec {
         CPUWeight = 400;
         IOWeight = 300;
         MemoryMin = mib desktopMemory.shellMin;
-        MemoryLow = mib desktopMemory.shellLow;
       };
       # The shell has its own memory protection.
       desktop-shell = {
@@ -453,7 +450,6 @@ rec {
         CPUWeight = 400;
         IOWeight = 300;
         MemoryMin = mib desktopMemory.shellMin;
-        MemoryLow = mib desktopMemory.shellLow;
       };
       backup = {
         IOAccounting = true;
