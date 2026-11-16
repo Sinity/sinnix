@@ -55,6 +55,16 @@ mkFeatureModule {
       # activation text cannot accidentally resolve the Home Manager config.
       dotsRoot = config.sinnix.paths.dotsRoot;
       inherit (helpers.data) mcpRegistry;
+      # Codex agent roles: one file per role under dots/codex/agents, named by
+      # an [agents.<role>] table in dots/codex/config.toml. Each is linked
+      # live beside the system config, which resolves `config_file` relative
+      # to itself, and into the Codex home.
+      codexAgentRoles = [
+        "explorer"
+        "implementer"
+        "review"
+      ];
+      codexAgentRoleFile = role: "codex/agents/${role}.toml";
       # Browser control goes through sinnix-chrome-control, which attaches
       # to the operator's running Chrome and opens its own agent window.
       # Live dots path, not `inputs.self + ...`: a store copy would mean a
@@ -94,8 +104,12 @@ mkFeatureModule {
     lib.mkMerge [
       {
         # Codex reads this live system layer before its private overlay.
-        environment.etc."codex/config.toml".source = codexSystemConfigFile;
-        environment.etc."codex/agents/explorer.toml".source = "${dotsRoot}/codex/agents/explorer.toml";
+        environment.etc = {
+          "codex/config.toml".source = codexSystemConfigFile;
+        }
+        // lib.genAttrs (map codexAgentRoleFile codexAgentRoles) (file: {
+          source = "${dotsRoot}/${file}";
+        });
         sinnix.features.dev.mcp-servers.codexConfigSource = codexSystemConfigFile;
         sinnix.features.dev.mcp-servers.codexHooksSource = codexHooksFile;
 
@@ -190,72 +204,75 @@ mkFeatureModule {
                   direct_link "$HOME/.config/claude/agents" "${dotsRoot}/claude/agents"
                   direct_link "$HOME/.config/claude/skills" "${dotsRoot}/_ai/skills"
                   direct_link "$HOME/.agents/skills" "${dotsRoot}/_ai/skills"
-                  direct_link "$HOME/.codex/agents/explorer.toml" "${dotsRoot}/codex/agents/explorer.toml"
+                  ${lib.concatMapStringsSep "\n" (
+                    role: ''direct_link "$HOME/.${codexAgentRoleFile role}" "${dotsRoot}/${codexAgentRoleFile role}"''
+                  ) codexAgentRoles}
                 '';
               };
             };
 
-            home.file = {
-              ".config/claude/agents" = {
-                source = mkDotsFile "/claude/agents";
+            home.file =
+              lib.genAttrs (map (role: ".${codexAgentRoleFile role}") codexAgentRoles) (file: {
+                source = mkDotsFile "/${lib.removePrefix "." file}";
                 force = true;
+              })
+              // {
+                ".config/claude/agents" = {
+                  source = mkDotsFile "/claude/agents";
+                  force = true;
+                };
+                ".agents/skills" = {
+                  source = mkDotsFile "/_ai/skills";
+                  force = true;
+                };
+                ".codex/hooks.json" = {
+                  source = codexHooksFile;
+                  force = true;
+                };
+                ".local/bin/mcp-github" = {
+                  source = "${scriptPkgs.mcp-github}/bin/mcp-github";
+                  force = true;
+                };
+                ".local/bin/mcp-firecrawl" = {
+                  source = "${mcpFirecrawlBin}/bin/mcp-firecrawl";
+                  force = true;
+                };
+                ".local/bin/sinnix-chrome-control" = {
+                  source = config.lib.file.mkOutOfStoreSymlink "${desktopControlScripts}/chrome-control.sh";
+                  force = true;
+                };
+                ".local/bin/sinnix-hypr-control" = {
+                  source = config.lib.file.mkOutOfStoreSymlink "${desktopControlScripts}/hypr-control.sh";
+                  force = true;
+                };
+                ".local/bin/sinnix-keyboard-control" = {
+                  source = config.lib.file.mkOutOfStoreSymlink "${desktopControlScripts}/keyboard-control.sh";
+                  force = true;
+                };
+                ".local/bin/sinnix-kitty-control" = {
+                  source = config.lib.file.mkOutOfStoreSymlink "${desktopControlScripts}/kitty-remote-control.sh";
+                  force = true;
+                };
+                ".local/bin/sinnix-screenshot-control" = {
+                  source = config.lib.file.mkOutOfStoreSymlink "${desktopControlScripts}/screenshot-color-lab.sh";
+                  force = true;
+                };
+                ".local/bin/mcp-lynchpin" = {
+                  executable = true;
+                  force = true;
+                  text = mcpLynchpinText;
+                };
+                ".local/bin/mcp-polylogue" = {
+                  executable = true;
+                  force = true;
+                  text = mcpPolylogueText;
+                };
+                ".local/bin/mcp-sinex" = {
+                  executable = true;
+                  text = mcpSinexText;
+                  force = true;
+                };
               };
-              ".agents/skills" = {
-                source = mkDotsFile "/_ai/skills";
-                force = true;
-              };
-              ".codex/agents/explorer.toml" = {
-                source = mkDotsFile "/codex/agents/explorer.toml";
-                force = true;
-              };
-              ".codex/hooks.json" = {
-                source = codexHooksFile;
-                force = true;
-              };
-              ".local/bin/mcp-github" = {
-                source = "${scriptPkgs.mcp-github}/bin/mcp-github";
-                force = true;
-              };
-              ".local/bin/mcp-firecrawl" = {
-                source = "${mcpFirecrawlBin}/bin/mcp-firecrawl";
-                force = true;
-              };
-              ".local/bin/sinnix-chrome-control" = {
-                source = config.lib.file.mkOutOfStoreSymlink "${desktopControlScripts}/chrome-control.sh";
-                force = true;
-              };
-              ".local/bin/sinnix-hypr-control" = {
-                source = config.lib.file.mkOutOfStoreSymlink "${desktopControlScripts}/hypr-control.sh";
-                force = true;
-              };
-              ".local/bin/sinnix-keyboard-control" = {
-                source = config.lib.file.mkOutOfStoreSymlink "${desktopControlScripts}/keyboard-control.sh";
-                force = true;
-              };
-              ".local/bin/sinnix-kitty-control" = {
-                source = config.lib.file.mkOutOfStoreSymlink "${desktopControlScripts}/kitty-remote-control.sh";
-                force = true;
-              };
-              ".local/bin/sinnix-screenshot-control" = {
-                source = config.lib.file.mkOutOfStoreSymlink "${desktopControlScripts}/screenshot-color-lab.sh";
-                force = true;
-              };
-              ".local/bin/mcp-lynchpin" = {
-                executable = true;
-                force = true;
-                text = mcpLynchpinText;
-              };
-              ".local/bin/mcp-polylogue" = {
-                executable = true;
-                force = true;
-                text = mcpPolylogueText;
-              };
-              ".local/bin/mcp-sinex" = {
-                executable = true;
-                text = mcpSinexText;
-                force = true;
-              };
-            };
           };
       }
     ];

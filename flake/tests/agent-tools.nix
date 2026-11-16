@@ -171,9 +171,23 @@ in
             }
             {
               assertion =
-                (config.environment.etc."codex/agents/explorer.toml".source or null)
-                == "${config.sinnix.paths.dotsRoot}/codex/agents/explorer.toml";
-              message = "The explorer role must resolve relative to the system Codex config through a live dots link.";
+                let
+                  # Every role the Codex config names, read from the config
+                  # itself rather than restated here.
+                  roleFiles = lib.mapAttrsToList (_: role: role.config_file) (
+                    lib.filterAttrs (_: role: builtins.isAttrs role && role ? config_file)
+                      (builtins.fromTOML (builtins.readFile ../../dots/codex/config.toml)).agents
+                  );
+                in
+                roleFiles != [ ]
+                && builtins.all (
+                  file:
+                  (config.environment.etc."codex/${file}".source or null)
+                  == "${config.sinnix.paths.dotsRoot}/codex/${file}"
+                  && builtins.pathExists (../../dots/codex + "/${file}")
+                  && builtins.hasAttr ".codex/${file}" hm.home.file
+                ) roleFiles;
+              message = "Every agent role in dots/codex/config.toml must exist and resolve beside the system Codex config and in the Codex home through a live dots link.";
             }
             {
               assertion = builtins.hasAttr ".agents/skills" hm.home.file;
@@ -222,6 +236,8 @@ in
           ".config/claude/agents"
           ".agents/skills"
           ".codex/agents/explorer.toml"
+          ".codex/agents/implementer.toml"
+          ".codex/agents/review.toml"
           ".codex/hooks.json"
         ];
         fixtureAssets = [

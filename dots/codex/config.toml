@@ -97,6 +97,14 @@ default_subagent_reasoning_effort = "medium"
 description = "Fast read-only codebase exploration and evidence gathering."
 config_file = "agents/explorer.toml"
 
+[agents.review]
+description = "Read-only adversarial reviewer that cites exact evidence and tests the strongest counterclaim."
+config_file = "agents/review.toml"
+
+[agents.implementer]
+description = "Implementation worker for one coherent task group in its own worktree: writes the whole change, verifies it, and publishes it through the repository's normal route."
+config_file = "agents/implementer.toml"
+
 [plugins."google-calendar@openai-curated"]
 enabled = false
 
