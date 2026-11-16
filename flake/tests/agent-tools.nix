@@ -143,7 +143,6 @@ in
           (_: {
             sinnix.features.dev.shell.enable = true;
             sinnix.features.dev.mcp-servers.enable = true;
-            sinnix.services.clodex.enable = true;
             sinnix.services.polylogue.liveRoot = polylogueSentinelDataDir;
           })
         ];
@@ -247,32 +246,6 @@ in
               message = "Codex defaults migration must leave a pending marker before rewriting private state, and never retry a pending rewrite automatically.";
             }
             {
-              assertion = builtins.hasAttr "sinnix-clodex" hm.systemd.user.services;
-              message = "Clodex must run as an advertised local user service for Claude Code child-process routing.";
-            }
-            {
-              # Startup checks are store scripts, so unit values stay on one
-              # line rather than embedding shell bodies.
-              assertion =
-                let
-                  condition = hm.systemd.user.services.sinnix-clodex.Service.ExecCondition;
-                in
-                lib.hasInfix "sinnix-clodex-patch-check" condition && !(lib.hasInfix "\n" condition);
-              message = "Clodex alias reconciliation and patch validation must share one startup condition.";
-            }
-            {
-              assertion =
-                hm.systemd.user.services.sinnix-clodex.Service.Restart == "on-failure"
-                && lib.hasInfix "sinnix-clodex-patch-check" hm.systemd.user.services.sinnix-clodex.Service.ExecCondition;
-              message = "Clodex must skip startup when its patch check fails while restarting ordinary process failures.";
-            }
-            {
-              assertion = lib.any (
-                entry: (if builtins.isAttrs entry then entry.directory else entry) == ".clodex"
-              ) config.sinnix.persistence.home.directories;
-              message = "Clodex's non-secret OAuth recovery state must survive impermanence.";
-            }
-            {
               assertion = builtins.all (path: builtins.hasAttr path hm.home.file) [
                 ".local/bin/sinnix-chrome-control"
                 ".local/bin/sinnix-hypr-control"
@@ -296,10 +269,6 @@ in
           pkgs.zsh
         ];
         homeFiles = laneWrapperFiles ++ [
-          ".local/bin/claude-clodex"
-          ".local/bin/clodex"
-          ".local/bin/clodex-claude"
-          ".local/bin/sinnix-clodex-server"
           ".gemini/settings.json"
           ".gemini/config/mcp_config.json"
           ".gemini/config/skills"
@@ -374,8 +343,6 @@ in
       };
       agentToolsRuntimeEvaluated = evalTestSpec system devAgentToolsRuntimeSpec;
       agentToolsRuntimeConfig = agentToolsRuntimeEvaluated.config;
-      clodexPatchCheck =
-        agentToolsRuntimeConfig.home-manager.users.${agentToolsRuntimeConfig.sinnix.user.name}.systemd.user.services.sinnix-clodex.Service.ExecCondition;
       agentToolsCodexConfigSource =
         agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexConfigSource;
       agentToolsAntigravityMcpConfigSource =
@@ -877,12 +844,6 @@ in
             test -L "$HOME/.gemini/config/AGENTS.md"
             test -L "$HOME/.config/claude/mcp.json"
             test -L "$HOME/.config/hermes/skills"
-            patch_check=${clodexPatchCheck}
-            test -x "$patch_check"
-            grep -Fq '.claudeVersion' "$patch_check"
-            grep -Fq '.patchedSize' "$patch_check"
-            grep -Fq 'run clodex patch' "$patch_check"
-            SINNIX_CLODEX_MODULE=${../../modules/services/clodex.nix} python3 ${../../scripts/tests/test_clodex_patch_check.py}
             python3 - "$HOME/.hermes/config.yaml" <<'PYCODE'
             import pathlib, re, sys
             config = pathlib.Path(sys.argv[1]).read_text()
@@ -915,10 +876,6 @@ in
             assert 'firecrawl:' in research
             PYCODE
 
-            bash -n "$HOME/.local/bin/claude-clodex"
-            bash -n "$HOME/.local/bin/clodex"
-            bash -n "$HOME/.local/bin/clodex-claude"
-            bash -n "$HOME/.local/bin/sinnix-clodex-server"
             for wrapper in \
               ${lib.concatMapStringsSep " \\\n              " (f: ''"$HOME/${f}"'') laneWrapperFiles} \
               "$HOME/.local/bin/gemini" \
@@ -1028,28 +985,6 @@ in
             ${claudeLaneWrapperChecks}
             grep -Fq 'claude_args+=(--add-dir=' "$HOME/.local/bin/claude"
             ${codexLaneWrapperChecks}
-            grep -Fq '@bman654/clodex' "$HOME/.local/bin/claude-clodex"
-            grep -Fq 'CLODEX_REQUIRE_SERVER=1' "$HOME/.local/bin/claude-clodex"
-            grep -Fq 'CLODEX_CREDENTIAL_HELPER=' "$HOME/.local/bin/claude-clodex"
-            grep -Fq 'claude-wrapper.js' "$HOME/.local/bin/claude-clodex"
-            grep -Fq 'claude-code/bin/claude.exe' "$HOME/.local/bin/claude-clodex"
-            grep -Fq 'MCP_CONFIG="$HOME/.config/claude/mcp.json"' "$HOME/.local/bin/claude-clodex"
-            grep -Fq 'export SINNIX_CLAUDE_PROFILE=full' "$HOME/.local/bin/claude-clodex"
-            grep -Fq 'export CLAUDE_CODE_FORK_SUBAGENT=1' "$HOME/.local/bin/claude-clodex"
-            grep -Fq 'export CLAUDE_CODE_PROCESS_WRAPPER="$HOME/.local/bin/clodex-claude"' "$HOME/.local/bin/claude-clodex"
-            if grep -Fq 'CLAUDE_CODE_PROCESS_WRAPPER' "$HOME/.local/bin/claude"; then
-              echo "native Claude wrapper must not route children through Clodex" >&2
-              exit 1
-            fi
-            grep -Fq '@bman654/clodex' "$HOME/.local/bin/clodex"
-            grep -Fq 'CLODEX_CLAUDE_PATH="$claude_binary"' "$HOME/.local/bin/clodex"
-            grep -Fq 'TWEAKCC_CC_INSTALLATION_PATH="$claude_binary"' "$HOME/.local/bin/clodex"
-            grep -Fq 'claude-code/bin/claude.exe' "$HOME/.local/bin/clodex"
-            grep -Fq 'claude-wrapper.js' "$HOME/.local/bin/clodex-claude"
-            grep -Fq 'CLODEX_CREDENTIAL_HELPER=' "$HOME/.local/bin/clodex-claude"
-            grep -Fq 'server --proxy' "$HOME/.local/bin/sinnix-clodex-server"
-            grep -Fq 'CLODEX_CREDENTIAL_HELPER=' "$HOME/.local/bin/sinnix-clodex-server"
-            jq -e '(.env | has("CLAUDE_CODE_PROCESS_WRAPPER") | not) and (.env | has("CLAUDE_CODE_FORK_SUBAGENT") | not)' ${inputs.self}/dots/claude/managed-settings.json >/dev/null
 
             # Every outer agent wrapper must enter agent-cli.slice before its
             # bootstrap runs. A missing scope launch leaves npm/bootstrap work

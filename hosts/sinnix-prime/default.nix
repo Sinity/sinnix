@@ -37,9 +37,6 @@
       enable = true;
       tunnelId = "tunnel_6a2eb972c3bc8191be437670f455ebd9";
     };
-    # Clodex remains inactive until its one-time device-code OAuth has created
-    # ~/.clodex/providers.json. See docs/clodex.md.
-    clodex.enable = true;
     # US-only OpenAI egress lane: ChatGPT desktop, default Codex and
     # OpenAI/ChatGPT browser origins only. Other traffic remains direct.
     proton-openai.enable = true;

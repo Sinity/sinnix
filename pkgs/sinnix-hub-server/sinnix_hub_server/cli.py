@@ -12,7 +12,6 @@ from sinnix_runtime import inventory as runtime_inventory
 from sinnix_runtime.actions import ActionService
 from sinnix_runtime.agent_jobs import AgentCtlClient
 from sinnix_runtime.client import UnixConnection
-from sinnix_runtime.clodex_usage import clodex_usage
 from sinnix_runtime.snapshot import SnapshotBuilder, observe_section
 
 from . import feedback, pages
@@ -195,12 +194,6 @@ def main() -> None:
             "agentctl",
         ),
     )
-    parser.add_argument(
-        "--clodex-usage",
-        type=Path,
-        default=None,
-        help="Clodex routed inference accounting JSONL",
-    )
     args = parser.parse_args()
     root = args.runtime_dir / "sinnix"
     root.mkdir(parents=True, exist_ok=True)
@@ -216,7 +209,6 @@ def main() -> None:
         layer.sequence_path,
         section_source=observe_section,
         agent_jobs_source=agentctl.snapshot,
-        clodex_usage_source=lambda: clodex_usage(args.clodex_usage),
     )
     builder.anchor_event_path = args.anchor_events or (root / "afk-resume.json")
     builder.hyprland_event_path = args.hyprland_events or (root / "hyprland-events")

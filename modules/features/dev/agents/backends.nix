@@ -17,8 +17,6 @@ let
   # Mirrors environment.sessionVariables.TMPDIR in modules/profiles/workstation.nix;
   # the wrappers re-assert it because inheritance is not guaranteed.
   shellTmpRoot = "${sinnixCfg.paths.realmRoot}/tmp/work";
-  # Clodex ties its stored credentials to this spelling, not the resolved binary.
-  clodexCredentialHelper = "/home/${user}/.local/bin/sinnix-clodex-credential-helper";
 
   # Shared npm bootstrap prelude — delegates state-dir setup and first-run npm
   # recovery to scripts/sinnix-agent-npm-bootstrap. The agent executable is
@@ -178,10 +176,7 @@ let
     export CLAUDE_CONFIG_DIR="''${CLAUDE_CONFIG_DIR:-$HOME/.config/claude}"
   '';
 
-  # Claude Code's common launch contract. Both native Claude and the Clodex
-  # proxy need the same scratch location and selected profile before their
-  # distinct launch paths. Clodex inserts its child-routing exports after this
-  # fragment, so the argument assembly remains a second shared fragment.
+  # Claude Code's scratch location and selected profile.
   mkClaudeScratchPrelude =
     { profile }:
     ''
@@ -225,13 +220,6 @@ let
     claude_args+=(--debug-file="$claude_debug_dir/$(${pkgs.coreutils}/bin/date +%Y%m%dT%H%M%S)-$$.log")
   '';
 
-  mkClodexRoutingPrelude = ''
-    # Clodex's proxy child route is opt-in to this wrapper. Keeping these
-    # out of managed settings leaves ordinary native sessions independent.
-    export CLAUDE_CODE_FORK_SUBAGENT=1
-    export CLAUDE_CODE_PROCESS_WRAPPER="$HOME/.local/bin/clodex-claude"
-  '';
-
   mkClaudeCodeWrapper =
     {
       mcpConfigName ? "mcp",
@@ -272,98 +260,6 @@ let
       executable = true;
       force = true;
     };
-  # Claude Code launched through Clodex's advertised selective proxy. Clodex
-  # owns the ChatGPT/Codex-plan OAuth flow and local MITM CA; this wrapper
-  # retains the normal managed Claude Code command shape so MCP, hooks, scratch
-  # and MCP setup remain identical to native profiles.
-  mkClodexWrapper =
-    {
-      mcpConfigName ? "mcp",
-      profile ? "full",
-    }:
-    {
-      text = ''
-        #!/usr/bin/env bash
-        set -euo pipefail
-
-        ${agentScopePrelude}
-
-        ${mkNpmBootstrap {
-          stateDir = "clodex";
-          npmPackage = "@bman654/clodex";
-          binaryName = "clodex";
-        }}
-        CLODEX_STATE="$STATE"
-        export CLODEX_CREDENTIAL_HELPER=${lib.escapeShellArg clodexCredentialHelper}
-
-        ${mkNpmBootstrap {
-          stateDir = "claude-code";
-          npmPackage = "@anthropic-ai/claude-code";
-          binaryName = "claude";
-        }}
-
-        ${
-          mkClaudeScratchPrelude { inherit profile; }
-        }${mkClodexRoutingPrelude}${mkClaudeLaunchArgs mcpConfigName}
-        CLAUDE_STATE="$STATE"
-        claude_binary="$CLAUDE_STATE/npm/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
-
-        # A routed session must not silently fall back to native Claude when
-        # the local proxy is unavailable. The upstream package does not
-        # publish clodex-claude as an npm bin, so invoke its bundled wrapper
-        # with the managed Node runtime directly.
-        export CLODEX_REQUIRE_SERVER=1
-        exec ${pkgs.nodejs}/bin/node "$CLODEX_STATE/npm/lib/node_modules/@bman654/clodex/dist/claude-wrapper.js" "$claude_binary" "''${claude_args[@]}" "$@"
-      '';
-      executable = true;
-      force = true;
-    };
-  # This is invoked by Claude Code for agents-view and background children.
-  mkClodexChildWrapper = {
-    text = ''
-      #!/usr/bin/env bash
-      set -euo pipefail
-
-      ${claudeConfigPrelude}
-
-      ${mkNpmBootstrap {
-        stateDir = "clodex";
-        npmPackage = "@bman654/clodex";
-        binaryName = "clodex";
-      }}
-      CLODEX_STATE="$STATE"
-      export CLODEX_CREDENTIAL_HELPER=${lib.escapeShellArg clodexCredentialHelper}
-
-      ${mkNpmBootstrap {
-        stateDir = "claude-code";
-        npmPackage = "@anthropic-ai/claude-code";
-        binaryName = "claude";
-      }}
-      export CLODEX_CLAUDE_PATH="$STATE/npm/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
-
-      exec ${pkgs.nodejs}/bin/node "$CLODEX_STATE/npm/lib/node_modules/@bman654/clodex/dist/claude-wrapper.js" "$@"
-    '';
-    executable = true;
-    force = true;
-  };
-  # The user service owns resource placement, so this server launcher does
-  mkClodexServerWrapper = {
-    text = ''
-      #!/usr/bin/env bash
-      set -euo pipefail
-
-      ${mkNpmBootstrap {
-        stateDir = "clodex";
-        npmPackage = "@bman654/clodex";
-        binaryName = "clodex";
-      }}
-      export CLODEX_CREDENTIAL_HELPER=${lib.escapeShellArg clodexCredentialHelper}
-
-      exec "$STATE/npm/bin/clodex" server --proxy
-    '';
-    executable = true;
-    force = true;
-  };
   mkCodexWrapper =
     {
       profile ? null,
@@ -608,11 +504,7 @@ in
     mkCodexBackendEnv
     mkClaudeScratchPrelude
     mkClaudeLaunchArgs
-    mkClodexRoutingPrelude
     mkClaudeCodeWrapper
-    mkClodexWrapper
-    mkClodexChildWrapper
-    mkClodexServerWrapper
     mkCodexWrapper
     mkPiWrapper
     mkGrokWrapper

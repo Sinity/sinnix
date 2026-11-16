@@ -255,9 +255,6 @@ mkFeatureModule {
         mkClaudeBackendEnv
         mkCodexBackendEnv
         mkClaudeCodeWrapper
-        mkClodexWrapper
-        mkClodexChildWrapper
-        mkClodexServerWrapper
         mkCodexWrapper
         mkPiWrapper
         mkGrokWrapper
@@ -300,13 +297,6 @@ mkFeatureModule {
               directory = ".config/claude";
               mode = "0700";
             }
-            # Clodex stores only mutable model registry and non-secret OAuth
-            # recovery metadata here. Credentials use the encrypted local
-            # credential helper below.
-            {
-              directory = ".clodex";
-              mode = "0700";
-            }
             {
               directory = ".gemini";
               mode = "0700";
@@ -324,7 +314,6 @@ mkFeatureModule {
             ".local/state/codex"
             ".local/state/pi"
             ".local/state/gemini"
-            ".local/state/sinnix/clodex-credentials"
             {
               directory = ".grok";
               mode = "0700";
@@ -464,50 +453,6 @@ mkFeatureModule {
                 })
               ) agentProfiles.hermesProfiles)
               // {
-                # Subscription-authenticated Claude Code bridge. Proxy mode
-                # leaves native Anthropic requests untouched and routes only
-                # explicitly selected Clodex models through OpenAI OAuth.
-                ".local/bin/claude-clodex" = mkClodexWrapper { };
-
-                ".local/bin/clodex-claude" = mkClodexChildWrapper;
-                ".local/bin/sinnix-clodex-server" = mkClodexServerWrapper;
-                ".local/bin/sinnix-clodex-credential-helper" = {
-                  source = "${scriptPkgs.sinnix-clodex-credential-helper}/bin/sinnix-clodex-credential-helper";
-                  force = true;
-                };
-                ".local/bin/clodex" = {
-                  text = ''
-                    #!/usr/bin/env bash
-                    set -euo pipefail
-
-                    ${agentScopePrelude}
-
-                    ${mkNpmBootstrap {
-                      stateDir = "clodex";
-                      npmPackage = "@bman654/clodex";
-                      binaryName = "clodex";
-                    }}
-                    CLODEX_STATE="$STATE"
-                    export CLODEX_CREDENTIAL_HELPER=${lib.escapeShellArg "/home/${user}/.local/bin/sinnix-clodex-credential-helper"}
-
-                    ${mkNpmBootstrap {
-                      stateDir = "claude-code";
-                      npmPackage = "@anthropic-ai/claude-code";
-                      binaryName = "claude";
-                    }}
-                    claude_binary="$HOME/.local/state/claude-code/npm/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
-                    export CLODEX_CLAUDE_PATH="$claude_binary"
-                    export TWEAKCC_CC_INSTALLATION_PATH="$claude_binary"
-
-                    # The second bootstrap prepares Claude, but Clodex owns
-                    # the process below and any npm update it starts.
-                    export npm_config_prefix="$CLODEX_STATE/npm"
-                    export NPM_CONFIG_PREFIX="$CLODEX_STATE/npm"
-                    exec "$CLODEX_STATE/npm/bin/clodex" "$@"
-                  '';
-                  executable = true;
-                  force = true;
-                };
                 ".local/bin/gemini" = {
                   text = ''
                     #!/usr/bin/env bash

@@ -30,14 +30,6 @@
       hash = "sha512-m8ArJUtVcQMSe1lLE/Ei7vX/JV7O39sWmWBsXV2NOU70F0qCp8GubA24pT3LnwTmM6LL2xV80/h6sQg85n69ew==";
     };
   };
-  "@bman654/clodex" = import ../../pkgs/agent-cli-sources/dependency-source.nix {
-    inherit pkgs;
-    name = "@bman654/clodex";
-    src = pkgs.fetchurl {
-      url = "https://registry.npmjs.org/@bman654/clodex/-/clodex-2.18.10.tgz";
-      hash = "sha512-8BA+8mzerSl6DDP0nkswZjQZSGsFR2ev9uyIWTKCvkc+jjTrgzF8ZN2/+Wmu7j28zw0XRg4O7hTYkGJGihIj/A==";
-    };
-  };
   "@google/gemini-cli" = import ../../pkgs/agent-cli-sources/dependency-source.nix {
     inherit pkgs;
     name = "@google/gemini-cli";
