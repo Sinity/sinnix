@@ -29,6 +29,7 @@ if sys.argv[1] == 'list':
         os.environ,
         PATH=str(tmp_path) + ":" + os.environ["PATH"],
         BORG_PASSCOMMAND="unused",
+        BORG_HOST_ID="fixture@stable",
         SINNIX_BORG_GLOBAL_LOCK=str(tmp_path / "lock"),
         TMPDIR=str(tmp_path),
         CALLS=str(tmp_path / "calls"),

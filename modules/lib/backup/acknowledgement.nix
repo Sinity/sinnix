@@ -343,7 +343,6 @@ in
       shopt -s nullglob
       ${mkBorgCommonScript borgRepoRootSnapshots}
       acquire_borg_global_lock_or_skip "root snapshot Borg drain"
-      recover_stale_borg_locks
 
       PERSIST_DEV="/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02"
       TMP_ROOT=$(mktemp -d)

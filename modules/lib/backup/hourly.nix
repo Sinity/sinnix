@@ -178,7 +178,6 @@ in
       ${hourlyCommon borgRepoLiveSmall}
       acquire_borg_global_lock_or_skip "hourly live-small archive"
       install -d -m 0700 -o root -g root ${lib.escapeShellArg borgRepoLiveSmallPath}
-      recover_stale_borg_locks
       if [ ! -e ${lib.escapeShellArg "${borgRepoLiveSmallPath}/config"} ]; then
         with_borg_lock borg init --encryption repokey-blake2 "$BORG_REPO"
       fi

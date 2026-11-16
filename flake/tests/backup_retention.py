@@ -11,17 +11,24 @@ from pathlib import Path
 
 
 def run(command, **kwargs):
-    return subprocess.run(command, check=True, capture_output=True, text=True, **kwargs)
+    try:
+        return subprocess.run(
+            command, check=True, capture_output=True, text=True, **kwargs
+        )
+    except subprocess.CalledProcessError as error:
+        print(error.stdout, error.stderr, file=sys.stderr)
+        raise
 
 
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
-    repo = root / "dead-holder/repos/borg-realm-v2"
+    repo = root / "maintenance/repos/borg-realm-v2"
     repo.parent.mkdir(parents=True)
     env = dict(
         os.environ,
         TMPDIR=str(root),
         BORG_PASSPHRASE="",
+        BORG_HOST_ID="backup-fixture@stable",
         BORG_CACHE_DIR=str(root / "cache"),
     )
     run(["borg", "init", "--encryption=none", str(repo)], env=env)
@@ -122,14 +129,14 @@ with tempfile.TemporaryDirectory() as temporary:
             env=env,
         ).stdout
         assert restored == (root / "payload").read_text()
-    marker = root / "dead-holder/cache-drain/maintenance.last-success"
+    marker = root / "maintenance/cache-drain/maintenance.last-success"
     stamp = marker.read_bytes()
     run(["bash", str(script)], env=env)
-    assert marker.read_bytes() == stamp, (
-        "completed pass should not repeat while not due"
-    )
+    assert (
+        marker.read_bytes() == stamp
+    ), "completed pass should not repeat while not due"
     marker.unlink()
-    with (root / "dead-holder/global.lock").open("w") as lock:
+    with (root / "maintenance/global.lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         result = run(["bash", str(script)], env=env)
         assert "remains_due=true" in result.stdout

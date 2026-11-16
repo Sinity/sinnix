@@ -42,13 +42,9 @@ classes, all of which look like a command at the start of a line:
                               inside a `"$( ... )"` command substitution
                               desyncs the flat quote-pairing for the rest of
                               the script (no real tokenizer here). Confirmed
-                              instances go in KNOWN_FALSE_POSITIVES below,
-                              by hand, after reading the script -- that is
-                              what keeps the standing check from being
-                              chronically red on a known-clean host.
-Verify every hit not already in KNOWN_FALSE_POSITIVES against the script
-before believing it. A hit is real when the word is genuinely executed and
-genuinely missing from the unit's PATH.
+                              hits must be checked against the script.
+Verify every hit against the script before believing it. A hit is real when
+its word is executed and missing from the unit's PATH.
 
 There is a positive control next to this file (unit_path_audit_test.py).
 Run it after ANY change here: an earlier version of this scanner was blind
@@ -90,22 +86,6 @@ CMD_RE = re.compile(
 )
 FUNC_RE = re.compile(r"^\s*(?:function\s+)?([A-Za-z_][A-Za-z0-9_-]*)\s*\(\)", re.M)
 ASSIGN_RE = re.compile(r"^\s*[A-Za-z_][A-Za-z0-9_]*=", re.M)
-
-# Reviewed false positives from a structural gap the flat quote-stripper
-# cannot close without a real tokenizer: a double-quoted string NESTED
-# inside a `"$( ... )"` command substitution (e.g.
-# `x="$(find "$var" ...)"`) desyncs the outer pairing, so text after the
-# inner string's opening quote reads as unquoted code until parity happens
-# to resync. Each entry here was verified by hand against the live script
-# named in the comment; re-verify before removing or adding to this list
-# (`python3 dots/_ai/tools/unit_path_audit.py`, then read the named script).
-KNOWN_FALSE_POSITIVES = {
-    # modules/backup.nix "recover_stale_borg_locks": the
-    # `stale_lock="$(\n  find "$repo_path" ...\n)"` assignment above this
-    # line desyncs quote pairing; "refusing" is inside a later, correctly
-    # double-quoted echo string that the desync leaves unstripped.
-    ("borgbackup-maintenance.service", "refusing"),
-}
 
 
 def unit_property(unit: str, prop: str, user: bool = False) -> str:
@@ -219,24 +199,9 @@ def main() -> int:
             if not unit.endswith(".service"):
                 continue
             out.extend(scan_unit(unit, user))
-    suspects = set(out)
-    suppressed = {
-        row
-        for row in suspects
-        if any(
-            row.startswith(f"{unit}: {word}") for unit, word in KNOWN_FALSE_POSITIVES
-        )
-    }
-    live = suspects - suppressed
+    live = set(out)
     for row in sorted(live):
         print(row)
-    if suppressed:
-        print(
-            f"\n{len(suppressed)} reviewed false positive(s) suppressed:",
-            file=sys.stderr,
-        )
-        for row in sorted(suppressed):
-            print(f"  {row}", file=sys.stderr)
     print(f"\n{len(live)} suspect command(s)", file=sys.stderr)
     return 1 if live else 0
 

@@ -70,7 +70,20 @@ for index in range(1500):
 class BorgHostIdentityFixture(unittest.TestCase):
     @unittest.skipUnless(ARGS.scripts, "requires rendered owner scripts")
     def test_stable_identity_and_explicit_override(self):
-        script = json.loads(Path(ARGS.scripts).read_text())["realm"]
+        scripts = json.loads(Path(ARGS.scripts).read_text())
+        for name in (
+            "realm",
+            "genome",
+            "persist",
+            "sinex",
+            "polylogue",
+            "beads",
+            "maintenance",
+        ):
+            with self.subTest(script=name):
+                self.check_identity(scripts[name])
+
+    def check_identity(self, script):
         prefix = script.split("with_borg_lock()", 1)[0]
         with tempfile.TemporaryDirectory() as tmp:
             identity = Path(tmp) / "machine-id"
@@ -3234,37 +3247,6 @@ else: sys.exit(1)
                 genome_new.exists(),
                 "latest HDD audit source must survive no-work retries",
             )
-            for directory in (
-                "live-holder/snapshots",
-                "live-holder/repo",
-                "dead-holder/repos/borg-realm-v2",
-            ):
-                (root / directory).mkdir(parents=True, exist_ok=True)
-            for repo in ("live-holder/repo", "dead-holder/repos/borg-realm-v2"):
-                subprocess.run(
-                    ["borg", "init", "--encryption=none", str(root / repo)],
-                    env=env,
-                    check=True,
-                )
-            with subprocess.Popen(["sleep", "60"]) as holder:
-                hostname = os.uname().nodename
-                live_lock = root / "live-holder/repo/lock.exclusive"
-                dead_lock = root / "dead-holder/repos/borg-realm-v2/lock.exclusive"
-                dead = subprocess.Popen(["true"])
-                dead.wait()
-                for directory, pid in ((live_lock, holder.pid), (dead_lock, dead.pid)):
-                    directory.mkdir()
-                    (directory / f"{hostname}@281474976710655.{pid}-0").touch()
-                    os.utime(directory, (1, 1))
-                try:
-                    result = run("liveLock")
-                    self.assertIn("refusing break-lock", result.stderr)
-                    self.assertTrue(live_lock.exists())
-                    run("deadLock")
-                    self.assertFalse(dead_lock.exists())
-                finally:
-                    holder.terminate()
-
             daily_receipts = {}
             for name in ("polylogue-state", "sinex-blobs", "local-dumps"):
                 policy = re.search(

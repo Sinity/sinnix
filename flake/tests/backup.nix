@@ -144,6 +144,15 @@ assert lib.assertMsg (
             message = "Every Borg job's capture lane must point at a path its unit -- or a packaged script that unit runs -- actually writes";
           }
           {
+            assertion =
+              lib.all (name: lib.hasInfix "export BORG_HOST_ID=" config.services.borgbackup.jobs.${name}.preHook)
+                [
+                  "sinex"
+                  "sinex-keys"
+                ];
+            message = "Both upstream Sinex Borg jobs must use the stable local host identity";
+          }
+          {
             # A liveness probe that cannot run is worse than none: the lane
             # reads healthy because nothing contradicts it.
             assertion = lib.all (
@@ -623,85 +632,27 @@ assert lib.assertMsg (
           }
         ];
 
-      # The stale-lock guard, driven through the drain job's own call site.
-      # The snapshot directory stays empty, so the drain reaches the guard and
-      # then has nothing left to archive.
-      liveHolderLockScript =
-        rewriteBackupHook backupRuntimeEval.config.systemd.services.borgbackup-job-realm.script
-          [
-            {
-              from = "/outer-realm/backup/borg-realm-v2";
-              to = "$TMPDIR/live-holder/repo";
-            }
-            {
-              from = "/persist/root/.cache/borg-drain";
-              to = "$TMPDIR/live-holder/drain-state";
-            }
-            {
-              from = "/persist/root/.cache/borg";
-              to = "$TMPDIR/live-holder/cache";
-            }
-            {
-              # The Borg cache moved to /realm (b47fb2094).
-              from = "/realm/state/cache/borg";
-              to = "$TMPDIR/live-holder/cache";
-            }
-            {
-              from = "/run/lock/sinnix-borg.lock";
-              to = "$TMPDIR/live-holder/global.lock";
-            }
-            {
-              from = "install -d -m 0700 -o root -g root";
-              to = "install -d -m 0700";
-            }
-            {
-              from = "install -d -m 0755 -o root -g root";
-              to = "install -d -m 0755";
-            }
-            {
-              from = "${pkgs.util-linux}/bin/mountpoint";
-              to = "$TMPDIR/mock-bin/mountpoint";
-            }
-            {
-              from = "${pkgs.util-linux}/bin/umount";
-              to = "$TMPDIR/mock-bin/umount";
-            }
-            {
-              from = "${pkgs.util-linux}/bin/mount";
-              to = "$TMPDIR/mock-bin/mount";
-            }
-            {
-              from = "/realm/.btrfs/snapshot";
-              to = "$TMPDIR/live-holder/snapshots";
-            }
-            {
-              from = "/run/borgbackup-snapshot-inputs/realm";
-              to = "$TMPDIR/live-holder/bind";
-            }
-          ];
-
-      # The same guard through the maintenance job's call site, which passes
-      # the repository as an argument. The retention fixture creates realm
-      # and both native Sinex repositories; other stores stay uninitialized.
-      deadHolderLockScript =
+      # The retention fixture creates Realm and both Sinex repositories;
+      # other stores stay uninitialized.
+      maintenanceScript =
         rewriteBackupHook backupRuntimeEval.config.systemd.services.borgbackup-maintenance.script
           [
             {
               from = "/outer-realm/backup";
-              to = "$TMPDIR/dead-holder/repos";
+              to = "$TMPDIR/maintenance/repos";
             }
             {
               from = "/persist/root/.cache/borg";
-              to = "$TMPDIR/dead-holder/cache";
+              to = "$TMPDIR/maintenance/cache";
             }
             {
               # The Borg cache moved to /realm (b47fb2094).
               from = "/realm/state/cache/borg";
-              to = "$TMPDIR/dead-holder/cache";
+              to = "$TMPDIR/maintenance/cache";
             }
             {
               from = "/run/lock/sinnix-borg.lock";
-              to = "$TMPDIR/dead-holder/global.lock";
+              to = "$TMPDIR/maintenance/global.lock";
             }
           ];
 
@@ -887,7 +838,7 @@ assert lib.assertMsg (
             pkgs.util-linux
           ];
           script = ''
-            ${pkgs.python3}/bin/python3 ${./backup_retention.py} ${pkgs.writeText "backup-maintenance-fixture.sh" deadHolderLockScript}
+            ${pkgs.python3}/bin/python3 ${./backup_retention.py} ${pkgs.writeText "backup-maintenance-fixture.sh" maintenanceScript}
             ${pkgs.python3}/bin/python3 ${./backup_capacity.py} ${../../scripts/sinnix-backup-capacity}
             ${pkgs.python3}/bin/python3 ${./backup_native_restore_test.py} ${./backup_native_restore.py}
             ${pkgs.python3}/bin/python3 ${./borg-check-arguments.py} ${../../scripts/sinnix-borg-check}
@@ -905,8 +856,7 @@ assert lib.assertMsg (
                     sinex = sinexBlobBorgScript;
                     polylogue = polylogueStateBorgScript;
                     beads = beadsCheckScript;
-                    liveLock = liveHolderLockScript;
-                    deadLock = deadHolderLockScript;
+                    maintenance = maintenanceScript;
                   }
                 )
               }

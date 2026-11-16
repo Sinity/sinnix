@@ -78,6 +78,16 @@ if [ -z "${BORG_PASSCOMMAND:-}" ]; then
   exit 2
 fi
 
+# Match the archive units so Borg can recognize abandoned local locks.
+if [ -z "${BORG_HOST_ID:-}" ]; then
+  borg_machine_id="$(cat /etc/machine-id)"
+  if [[ ! "$borg_machine_id" =~ ^[0-9a-f]{32}$ ]]; then
+    echo "Invalid machine identity; refusing to start Borg" >&2
+    exit 1
+  fi
+  export BORG_HOST_ID="$(uname -n)@$borg_machine_id"
+fi
+
 # Keep transient stderr together for this invocation. The JSONL trail below
 # is the retained receipt; no temporary Borg output belongs in TMPDIR.
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/sinnix-borg-check.XXXXXXXX")"

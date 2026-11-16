@@ -146,7 +146,13 @@ class RestoreProof(unittest.TestCase):
                     "getpwnam",
                     return_value=SimpleNamespace(pw_dir="/synthetic/root"),
                 ),
-                patch.dict(RESTORE.os.environ, {"TMPDIR": "/synthetic/task-scratch"}),
+                patch.dict(
+                    RESTORE.os.environ,
+                    {
+                        "TMPDIR": "/synthetic/task-scratch",
+                        "BORG_HOST_ID": "fixture@stable",
+                    },
+                ),
             ):
                 shell, values = RESTORE.installed_owner("realm")
             self.assertTrue(
@@ -159,7 +165,13 @@ class RestoreProof(unittest.TestCase):
                 patch.object(
                     RESTORE.subprocess, "check_output", side_effect=responses
                 ) as output,
-                patch.dict(RESTORE.os.environ, {"TMPDIR": "/synthetic/task-scratch"}),
+                patch.dict(
+                    RESTORE.os.environ,
+                    {
+                        "TMPDIR": "/synthetic/task-scratch",
+                        "BORG_HOST_ID": "fixture@stable",
+                    },
+                ),
             ):
                 RESTORE.installed_owner("persist")
             self.assertTrue(
@@ -173,6 +185,7 @@ class RestoreProof(unittest.TestCase):
                 values["BORG_PASSCOMMAND"], "/synthetic/cat /run/secret/synthetic"
             )
             self.assertEqual(values["TMPDIR"], "/synthetic/task-scratch")
+            self.assertEqual(values["BORG_HOST_ID"], "fixture@stable")
             self.assertEqual(values["HOME"], "/synthetic/root")
 
 

@@ -139,7 +139,6 @@ let
     ++ lib.optional (
       options.services ? sinex && config.services.sinex.enable
     ) "${config.services.sinex.session.stateDir}/spool";
-  borgStaleLockMinutes = 120;
   borgGlobalLock = "/run/lock/sinnix-borg.lock";
   # Every Beads task store a project declares as its task authority. The
   # restore check requires each one in the archive; other trackers found
@@ -159,8 +158,8 @@ let
       projectUuid = authority.projectUuid or null;
     }
   ) taskAuthorities;
-  # The Beads restore check waits this long for another Borg operation; the
-  # nightly coordinator holds the lock up to about 2.5 hours.
+  # Archives, independent checks and manual Borg commands share this lock.
+  # Unit ordering cannot serialize commands started outside systemd.
   beadsCheckLockWaitSec = 3 * 60 * 60;
   # The file keeps its historical name: Lynchpin reads it by path.
   beadsCheckLog = "${config.sinnix.paths.machineRoot}/borg_beads_drill.jsonl";
@@ -279,96 +278,7 @@ let
       borgExcludePatterns root exclude
     );
 
-  # Borg records every holder of an exclusive lock as an empty file inside the
-  # lock directory, named "<hostid>.<pid>-<threadid>" (borg/locking.py,
-  # ExclusiveLock.unique_name); lock.roster repeats the same triple as JSON.
-  # That recorded pid is the identification which survives the wrapper: the
-  # wrapped binary's comm is `.borg-wrapped`, so matching a process name finds
-  # no Borg at all and breaks the lock under a live writer.
-  #
-  # Only the hostname ahead of the hostid is compared. The "@<node-id>" tail
-  # is uuid.getnode(), which differs between Borg runs here -- a repository
-  # lock held by borgbackup-job-realm recorded a random-fallback node id while
-  # Borg on the same host otherwise records the NIC MAC -- so requiring the
-  # whole hostid to match would make every holder look foreign and no stale
-  # lock could ever be broken. That instability is also why Borg's own
-  # stale-lock reaper leaves these locks behind for this function to clear.
-  #
-  # $BORG_REPO and $BORG_CACHE_DIR are the environment Borg itself reads, so
-  # the guard and the Borg it guards always look at the same repository.
-  borgStaleLockRecovery = ''
-    # Echoes the first holder of the lock directory $1 that may still be
-    # running, and nothing when the lock is provably abandoned.
-    borg_lock_live_holder() {
-      borg_holder_dir="$1"
-      borg_local_host="$(uname -n)"
-      for borg_holder_path in "$borg_holder_dir"/*; do
-        [ -e "$borg_holder_path" ] || continue
-        borg_holder="''${borg_holder_path##*/}"
-        borg_holder_host_pid="''${borg_holder%-*}"
-        borg_holder_pid="''${borg_holder_host_pid##*.}"
-        borg_holder_host="''${borg_holder_host_pid%.*}"
-        case "$borg_holder_pid" in
-          "" | *[!0-9]*)
-            printf '%s' "$borg_holder"
-            return
-            ;;
-        esac
-        case "$borg_holder_host" in
-          "$borg_local_host" | "$borg_local_host".* | "$borg_local_host"@*) ;;
-          *)
-            printf '%s' "$borg_holder"
-            return
-            ;;
-        esac
-        if [ -e /proc/"$borg_holder_pid" ]; then
-          printf '%s' "$borg_holder"
-          return
-        fi
-      done
-    }
-
-    recover_stale_borg_locks() {
-      repo="''${1-$BORG_REPO}"
-      repo_path="''${repo#file://}"
-
-      if [ ! -e "$repo_path/config" ]; then
-        return
-      fi
-
-      # `borg break-lock` clears the repository lock and this host's cache
-      # lock for that repository, so a live holder of either one forbids it,
-      # whether or not that particular lock has aged past the threshold.
-      borg_stale_locks=""
-      for borg_lock_dir in \
-        "$repo_path/lock.exclusive" \
-        "$BORG_CACHE_DIR/lock.exclusive" \
-        "$BORG_CACHE_DIR"/*/lock.exclusive; do
-        [ -d "$borg_lock_dir" ] || continue
-        borg_lock_holder="$(borg_lock_live_holder "$borg_lock_dir")"
-        if [ -n "$borg_lock_holder" ]; then
-          echo "Borg lock $borg_lock_dir for $repo is held by $borg_lock_holder; refusing break-lock" >&2
-          return
-        fi
-        borg_lock_age=$(($(date +%s) - $(stat -c %Y "$borg_lock_dir")))
-        if [ "$borg_lock_age" -gt ${toString (borgStaleLockMinutes * 60)} ]; then
-          borg_stale_locks="$borg_stale_locks $borg_lock_dir"
-        fi
-      done
-
-      if [ -z "$borg_stale_locks" ]; then
-        return
-      fi
-
-      echo "Breaking stale Borg lock for $repo:$borg_stale_locks" >&2
-      with_borg_lock borg break-lock "$repo"
-    }
-  '';
-
-  mkBorgCommonScript = repo: ''
-    export BORG_REPO=${lib.escapeShellArg repo}
-    export BORG_PASSCOMMAND=${lib.escapeShellArg "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}"}
-    export BORG_CACHE_DIR=${lib.escapeShellArg borgCacheDir}
+  borgHostIdentity = ''
     # Borg's uuid.getnode() fallback can change between invocations. A stable
     # local identity lets Borg's own reaper recognize its abandoned locks.
     if [ -z "''${BORG_HOST_ID:-}" ]; then
@@ -379,6 +289,13 @@ let
       fi
       export BORG_HOST_ID="$(uname -n)@$borg_machine_id"
     fi
+  '';
+
+  mkBorgCommonScript = repo: ''
+    export BORG_REPO=${lib.escapeShellArg repo}
+    export BORG_PASSCOMMAND=${lib.escapeShellArg "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}"}
+    export BORG_CACHE_DIR=${lib.escapeShellArg borgCacheDir}
+    ${borgHostIdentity}
 
     with_borg_lock() {
       if [ "''${SINNIX_BORG_GLOBAL_LOCK_HELD:-0}" = 1 ]; then
@@ -446,8 +363,6 @@ let
       sync -- "$marker_dir" || return 1
       trap - RETURN
     }
-
-    ${borgStaleLockRecovery}
   '';
 
   # Full verification indexes millions of paths on disk. System services do
@@ -544,7 +459,6 @@ let
       trap cleanup_snapshot_bind_mount EXIT
       install -d -m 0700 -o root -g root ${lib.escapeShellArg repoPath}
       install -d -m 0700 -o root -g root ${lib.escapeShellArg bindTarget}
-      recover_stale_borg_locks
       if [ ! -e ${lib.escapeShellArg "${repoPath}/config"} ]; then
         with_borg_lock borg init --encryption repokey-blake2 "$BORG_REPO"
       fi
@@ -1111,6 +1025,7 @@ let
   mkBeadsCheckScript = ''
     set -euo pipefail
 
+    ${mkBorgCommonScript borgRepoRealm}
     exec 9>${lib.escapeShellArg borgGlobalLock}
     if ! flock -w ${toString beadsCheckLockWaitSec} 9; then
       echo "another Borg operation held the lock for ${toString beadsCheckLockWaitSec} s; the Beads restore check did not run" >&2
@@ -1230,23 +1145,6 @@ let
     printf '%s\n' "''${records[@]}" | tee -a ${lib.escapeShellArg beadsCheckLog}
   '';
 
-  # Persist and realm freshness probes read snapshot timestamps from their
-  # latest-archived markers. The integrity probe below has its own deadline.
-  mkIntegrityStuckProbeScript = ''
-    receipt=${lib.escapeShellArg borgIntegrityReceipt}
-    # No receipt yet is the capture lane's own staleness check to make (or,
-    # before the first weekly run, its calm not-yet-run state) -- this probe
-    # answers one narrower question, whether an IN-PROGRESS run has overrun
-    # its own deadline.
-    [ -s "$receipt" ] || exit 0
-    now="$(${pkgs.coreutils}/bin/date +%s)"
-    result="$(${pkgs.jq}/bin/jq -r --argjson now "$now" \
-      'if (.state == "running") and ($now > (.deadline_epoch // 0)) then "stuck" else "ok" end' \
-      "$receipt" 2>/dev/null)" || exit 3
-    [ "$result" = stuck ] && exit 1
-    exit 0
-  '';
-
   btrbkConfig = ''
     # === Global settings ===
     timestamp_format        long-iso
@@ -1312,6 +1210,29 @@ in
               ) (import ./lib/storage/scratch-roots.nix);
               message = "Realm scratch subvolumes must name exact Borg-excluded regenerable roots.";
             }
+          ];
+
+          services.borgbackup.jobs = lib.mkMerge [
+            (lib.mkIf
+              (
+                options.services ? sinex
+                && config.services.sinex.enable
+                && config.services.sinex.backup.repo != null
+              )
+              {
+                sinex.preHook = lib.mkBefore borgHostIdentity;
+              }
+            )
+            (lib.mkIf
+              (
+                options.services ? sinex
+                && config.services.sinex.enable
+                && config.services.sinex.backup.keysRepo != null
+              )
+              {
+                sinex-keys.preHook = lib.mkBefore borgHostIdentity;
+              }
+            )
           ];
 
           # The realm archive's observed working set paged heavily under the
@@ -1523,17 +1444,7 @@ in
                   # Same 3x-weekly-cadence budget as the borg-check lane above: the
                   # receipt only updates on a verify run.
                   staleAfterSeconds = 1814400;
-                  # Staleness alone reads a run stuck mid-check (state=="running"
-                  # well past its own deadline_epoch, the case the retired
-                  # borgbackup-status integrity-state machinery covered) as merely
-                  # "not yet stale" until the weekly budget itself expires --
-                  # days later. The probe answers that narrower question directly.
-                  # completed/failed states exit 0 here: a failed run already
-                  # fires OnFailure from the unit itself.
-                  livenessProbe = {
-                    command = mkIntegrityStuckProbeScript;
-                    timeoutSeconds = 10;
-                  };
+
                 }
               ];
             };
@@ -1662,7 +1573,6 @@ in
           borgGlobalLock
           mkBackupJob
           mkBorgExcludeArgs
-          borgStaleLockRecovery
           mkBorgCommonScript
           ;
       })

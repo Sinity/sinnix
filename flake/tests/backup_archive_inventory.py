@@ -35,15 +35,10 @@ def main():
         args.archive,
     ]
     groups = defaultdict(int)
-    files = total = entries = 0
+    files = total = 0
     with subprocess.Popen(command, stdout=subprocess.PIPE, text=True) as process:
         try:
             for line in process.stdout:
-                entries += 1
-                if entries > 5_000_000:
-                    raise ValueError(
-                        "archive exceeds bounded five-million-entry census"
-                    )
                 item = json.loads(line)
                 if item["type"] != "-":
                     continue

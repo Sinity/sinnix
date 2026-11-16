@@ -194,6 +194,17 @@ The newest archived cut stays until a newer one is archived, so the
 independent audit always has an unchanging source. Only the Borg drain deletes
 these snapshots.
 
+The live Polylogue archive and every directory in
+`sinnix.services.polylogue.retainedArchives` exclude only their derived
+`index.db`, `index.db-wal` and `index.db-shm`. Keep that list complete when an
+archive moves: queued snapshots still contain its earlier directory. Raw
+segments, archive databases and purchased vectors remain covered.
+
+Snapshot inputs are bind-mounted at stable paths under
+`/run/borgbackup-snapshot-inputs`. Borg keeps `ctime,size,inode` validation;
+Btrfs snapshots preserve inode numbers. Hourly jobs use a separate cache
+directory and do not age the nightly Realm files cache.
+
 The genome workspace can live at `sinnix.backup.genomeRoot` on the HDD while a
 declared mount preserves `/realm/health/genome` for its callers. A Realm
 snapshot does not cross that mount. The genome subvolume therefore has its
@@ -321,6 +332,15 @@ saved segment cursor and verify segment CRCs. They do not cryptographically
 verify archive contents. The backup resource class sets I/O priority 7 and
 IOWeight 20; it sets no device bandwidth cap. A full-pass horizon therefore
 needs measured throughput; 40 MB/s is not an enforced limit.
+
+Borg archive, maintenance and restore-check commands use a stable
+`BORG_HOST_ID` built from the hostname and machine ID. Borg recognizes and
+removes abandoned locks from that identity. The weekly check's systemd
+`TimeoutStartSec=4h30m` ends overrunning checks and records a unit failure.
+
+The Beads restore check shares the Borg lock with archive jobs, maintenance,
+independent coverage checks and manual commands. It keeps its three-hour lock
+wait because `After=` orders systemd starts but cannot order manual commands.
 
 Snapshot archives use the source cut time for Borg retention, including delayed
 backfills. The drain and acknowledgement marker still order snapshots by Btrfs

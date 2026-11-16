@@ -114,6 +114,9 @@ def installed_owner(scope):
     if not os.environ.get("TMPDIR"):
         raise ValueError("native restore requires managed job scratch")
     values["TMPDIR"] = os.environ["TMPDIR"]
+    values["BORG_HOST_ID"] = os.environ.get("BORG_HOST_ID") or (
+        os.uname().nodename + "@" + Path("/etc/machine-id").read_text().strip()
+    )
     # The child receives this only after flock has acquired the owner mutex.
     values["SINNIX_BORG_GLOBAL_LOCK_HELD"] = "1"
     return shell, values

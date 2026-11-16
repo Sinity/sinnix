@@ -30,7 +30,6 @@
   borgGlobalLock,
   mkBackupJob,
   mkBorgExcludeArgs,
-  borgStaleLockRecovery,
   mkBorgCommonScript,
 }:
 let
@@ -58,7 +57,7 @@ let
     script = ''
       set -euo pipefail
       umask 077
-      export BORG_CACHE_DIR=${lib.escapeShellArg borgCacheDir}
+      ${mkBorgCommonScript borgRepoRealm}
       dry_run="''${SINNIX_BORG_MAINTENANCE_DRY_RUN:-0}"
       marker=${lib.escapeShellArg "${borgDrainStateRoot}/maintenance.last-success"}
       now=$(date +%s)
@@ -81,8 +80,6 @@ let
         exit 0
       fi
       export SINNIX_BORG_GLOBAL_LOCK_HELD=1
-      with_borg_lock() { "$@"; }
-      ${borgStaleLockRecovery}
       run_dir=${lib.escapeShellArg "${borgDrainStateRoot}/retention"}/$(date -u +%Y%m%dT%H%M%SZ)-$$
       install -d -m 0700 "$run_dir"
       if [ "$dry_run" = 1 ]; then
@@ -98,7 +95,6 @@ let
           echo "Skipping uninitialized repo $repo"
           return
         fi
-        if [ "$dry_run" = 0 ]; then recover_stale_borg_locks "$repo"; fi
         name=$(basename "''${repo#file://}")
         borg list --json --lock-wait ${toString borgLockWaitSec} "$repo" > "$run_dir/$name.before.json"
         IFS=' ' read -r -a active_series <<< "$active"
@@ -177,7 +173,6 @@ in
         ${mkBorgCommonScript borgRepoSinexBlobs}
 
         install -d -m 0700 -o root -g root ${lib.escapeShellArg borgRepoSinexBlobsPath}
-        recover_stale_borg_locks
 
         if [ ! -e ${lib.escapeShellArg "${borgRepoSinexBlobsPath}/config"} ]; then
           with_borg_lock borg init --encryption repokey-blake2 "$BORG_REPO"
@@ -298,7 +293,6 @@ in
       ${mkBorgCommonScript borgRepoPolylogueState}
 
       install -d -m 0700 -o root -g root ${lib.escapeShellArg borgRepoPolylogueStatePath}
-      recover_stale_borg_locks
 
       if [ ! -e ${lib.escapeShellArg "${borgRepoPolylogueStatePath}/config"} ]; then
         with_borg_lock borg init --encryption repokey-blake2 "$BORG_REPO"

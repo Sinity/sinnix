@@ -128,9 +128,6 @@
       # check back to failed.
       trap receipt_failure_trap EXIT
       write_integrity_receipt running
-      recover_stale_borg_locks
-      ${mkBorgCommonScript borgRepoRealm}
-      recover_stale_borg_locks
 
       # --max-duration makes the repository check INCREMENTAL: each run
       # verifies segments for at most the budget and records progress in
