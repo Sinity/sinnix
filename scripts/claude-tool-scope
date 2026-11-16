@@ -37,6 +37,19 @@ case "${cmd[-1]}" in
   */dots/claude/hooks/* | polylogue\ hook\ *) exec "${cmd[@]}" ;;
 esac
 
+# Temporary files belong to the session that made them. Each session's tool
+# commands and MCP servers get their own TMPDIR beside Claude Code's own
+# per-session directories, and sinnix-tmp-sweep removes both once no live
+# Claude process has that session (docs/scratch.md). A lane worker never gets
+# here: its job already has a private TMPDIR that ends with the job.
+if [[ "${CLAUDE_CODE_SESSION_ID:-}" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
+  && [ -n "${CLAUDE_CODE_TMPDIR:-}" ]; then
+  session_tmp="$CLAUDE_CODE_TMPDIR/claude-$(id -u)/session-tmp/$CLAUDE_CODE_SESSION_ID"
+  if (umask 077 && mkdir -p "$session_tmp") 2>/dev/null; then
+    export TMPDIR="$session_tmp"
+  fi
+fi
+
 # The scope keeps this PID, stdio and signals, so Claude's timeouts and
 # kills still reach the command. Without a user manager to ask, run in place.
 # Agent tool commands rank above browser tabs (200-300) as global OOM

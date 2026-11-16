@@ -191,7 +191,7 @@ class SweepTest(unittest.TestCase):
                     "roots": lambda: ["/fixture"],
                     "collect_candidates": lambda *_: ({path: (1, 2, 1000)}, 0),
                     "held_directories": scan,
-                    "inspect_tree": lambda *_: (7, 1, False),
+                    "inspect_tree": lambda *_, **__: (7, 1, False),
                     "paced_remove": remove,
                 },
             ),
@@ -631,6 +631,88 @@ class ManagedSweepTest(unittest.TestCase):
             self.assertEqual(fn(["sweep", "--dry-run"]), 0)
         self.assertTrue((self.root / "codex/lane").exists())
         self.assertTrue((self.root / "general/payload").exists())
+
+    def session_fixture(self):
+        """Three session trees and a session record of this test process."""
+        ended = "11111111-1111-4111-8111-111111111111"
+        recorded = "22222222-2222-4222-8222-222222222222"
+        carried = "33333333-3333-4333-8333-333333333333"
+        claude = self.root / f"claude-{self.uid}"
+        trees = {
+            "ended": claude / "-realm-project-example" / ended,
+            "tool": claude / "session-tmp" / ended,
+            "recorded": claude / "-realm-project-example" / recorded,
+            "carried": claude / "session-tmp" / carried,
+        }
+        for path in trees.values():
+            (path / "scratchpad" / "claude-notes").mkdir(parents=True)
+            (path / "scratchpad" / "claude-notes" / "file").write_text("scratch")
+        # Claude Code's own name for a non-session folder stays untouched.
+        (claude / "bash-edit-diff").mkdir()
+        home = self.root / "home"
+        records = home / ".config" / "claude" / "sessions"
+        records.mkdir(parents=True)
+        with open("/proc/self/stat") as source:
+            started = MODULE["parse_stat_start_time"](source.read())
+        (records / f"{os.getpid()}.json").write_text(
+            json.dumps({"pid": os.getpid(), "procStart": str(started), "sessionId": recorded})
+        )
+        # A stale record: the PID exists but started at another time.
+        (records / "1.json").write_text(
+            json.dumps({"pid": 1, "procStart": "0", "sessionId": ended})
+        )
+        return trees, home, carried
+
+    def run_sweep(self, home, carried, removed):
+        fn = MODULE["main"]
+
+        def remove(path, budget, deadline):
+            removed.append(path)
+            return True
+
+        real_held_paths = MODULE["held_paths"]
+
+        def held_paths(process, **kwargs):
+            yield from real_held_paths(process, **kwargs)
+            if process == f"/proc/{os.getpid()}" and kwargs.get("environment") == MODULE["SESSION_VARS"]:
+                yield "env", carried
+
+        with (
+            patch.dict(
+                fn.__globals__,
+                {
+                    "MANAGED_ROOT": str(self.root),
+                    "roots": lambda: [str(self.root)],
+                    "drop_privileges": lambda *_: None,
+                    "paced_remove": remove,
+                    "held_paths": held_paths,
+                },
+            ),
+            patch("pwd.getpwuid", return_value=SimpleNamespace(pw_dir=str(home))),
+            patch("subprocess.run"),
+            contextlib.redirect_stdout(io.StringIO()) as output,
+        ):
+            if self.uid == 0:
+                self.skipTest("requires non-root fixture owner")
+            status = fn(["sweep"])
+        return status, output.getvalue()
+
+    def test_ended_claude_session_scratch_is_removed_and_live_sessions_kept(self):
+        trees, home, carried = self.session_fixture()
+        removed = []
+        status, output = self.run_sweep(home, carried, removed)
+        self.assertEqual(status, 0, output)
+        self.assertEqual(sorted(removed), sorted([str(trees["ended"]), str(trees["tool"])]))
+        self.assertIn("held=2", output)
+
+    def test_unreadable_session_record_retains_every_session_tree(self):
+        trees, home, carried = self.session_fixture()
+        (home / ".config/claude/sessions/broken.json").write_text("{")
+        removed = []
+        status, output = self.run_sweep(home, carried, removed)
+        self.assertEqual(removed, [])
+        self.assertEqual(status, 1)
+        self.assertTrue(trees["ended"].exists())
 
     def test_paced_removal_obeys_entry_budget_and_preserves_symlink_target(self):
         path = self.root / "lane"

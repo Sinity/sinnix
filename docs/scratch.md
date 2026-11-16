@@ -5,12 +5,35 @@ Declared AgentCTL operations with `scratch = "nvme"` create a private job
 subdirectory and remove it on completion. Producers must honor inherited
 TMPDIR and keep retained output outside it.
 
-`sinnix-tmp-sweep` runs every 15 minutes. It recognizes Nix devshell scratch
-and these invocation directories:
+`sinnix-tmp-sweep` runs every 15 minutes. It recognizes Nix devshell scratch,
+Claude Code session scratch, and these invocation directories:
 
 - `sinnix-chatgpt-native.<pid>.<random>`
 - `sinnix-chatgpt-download.<pid>.<random>`
 - `sinnix-router-poll.<pid>.<random>`
+
+## Claude Code session scratch
+
+A Claude Code session owns two directories under
+`/realm/tmp/work/claude-<uid>/`: Claude Code's own
+`<project>/<session-id>/` (which holds the session's scratchpad), and
+`session-tmp/<session-id>/`, which `claude-tool-scope` makes the TMPDIR of
+that session's tool commands and MCP servers. Temporary files made by tools
+therefore land in a directory with a known owner instead of the shared root.
+
+A session is live while a Claude Code session record
+(`<config>/sessions/<pid>.json`, read from every `CLAUDE_CONFIG_DIR` a running
+process names) names it and that PID still has the recorded start time, or
+while any process carries it as `CLAUDE_CODE_SESSION_ID`. The sweeper removes
+both directories of a session that is not live once no process holds them
+(cwd, open file, mapping or scratch environment variable, as below), and a
+Git checkout inside them must pass the custody checks below. An unreadable
+session record or process environment keeps every session tree for that run.
+Resuming an ended session starts it with empty scratch. Other names under
+`claude-<uid>/` and other top-level `claude-*` folders have no recorded owner
+and are kept; whoever names a folder removes it.
+
+## PID-qualified producer scratch
 
 The PID is the allocating shell's BASHPID, captured before invoking mktemp.
 These producers remove their directory on success, failure and catchable
@@ -30,7 +53,7 @@ immediate children of `/realm/tmp/work/codex/` for owner classification after
 seven days without a file modification. Real runs retain those unclassified
 entries. Age and absence of holders do not establish disposability of reports,
 research, recovery evidence or authored files. The `codex` container and
-`claude-*` trees are retained.
+`claude-*` trees are never proposed; session trees follow the rule above.
 Every nested `.git` is checked, including worktree gitfiles. Probes clear the
 caller's Git context and retain unfinished index locks. Dirty, untracked
 or ignored files, shallow or unreadable history, missing cached remote branches,
