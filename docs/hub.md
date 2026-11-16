@@ -116,6 +116,10 @@ What each part is computed from:
   memory against their limits.
 - **Products**: open tasks, the default branch's hosted check, the last merged
   change, the running revision and the state of the product's units.
+- **Activations**: queued and running jobs of operations declared
+  `announce = true` (the host's `switch` and `boot`), each with its caller and
+  the commit its checkout stood on when it was requested.
+- **Path claims** and **Agent sessions**: see the next section.
 
 Text an agent wrote (a commit subject, a task title) appears only as a quoted
 field beside the commit, pull request or task that carries it. Every other
@@ -123,6 +127,69 @@ sentence is assembled from the facts above.
 
 The schema reserves two fields that nothing writes yet: `muted` (a mark for a
 companion agent) and `small_next_move`.
+
+### Sessions sharing the machine
+
+Several agent sessions work on this machine at once. Three small tools let
+them see each other; none of them blocks anything.
+
+**Path claims.** `sinnix claim <path> --for "<what>" [--until <duration>]`
+records that the calling session works under a path (default four hours, at
+most seven days). A claim on a path that overlaps another session's claim is
+still recorded; the command prints the other claim, and `sinnix state` lists
+the pair as an overlap. `sinnix claims` lists every claim, `sinnix release
+[<path>]` drops the caller's. An expired claim disappears without a release.
+The caller is the agent session named by `CLAUDE_CODE_SESSION_ID` or
+`CODEX_THREAD_ID`, or the login name at a plain terminal. The store is one
+document, `/realm/state/hub/path-claims.json`:
+
+```json
+{"schema": "sinnix-path-claims-v1",
+ "claims": [{"id": "c-1a2b3c4d", "path": "/abs/path", "purpose": "...",
+             "harness": "claude", "session": "<session id>",
+             "claimed_at": "<UTC time>", "expires_at": "<UTC time>"}]}
+```
+
+**Agent sessions.** `sinnix sessions` lists the interactive Claude Code and
+Codex sessions with the memory each holds (its `agent-cli.slice` scope,
+resident plus swapped), its idle time and its project, and says for each
+whether it could be parked or why it stays. `sinnix state` shows the same rows
+with a two-hour idle limit.
+
+`sinnix sessions park --idle <duration>` ends Claude Code sessions idle at
+least that long and prints the command that resumes each
+(`cd <project> && claude --resume <id>`); `sinnix sessions parked` lists them
+again later. It is a dry run without `--apply`, and nothing runs it on a
+timer. Idle is not abandoned, so a session stays when any of these holds:
+
+- it was started by another agent session (an agent's session variable in its
+  start environment, or an agent process among its ancestors), or has no
+  terminal: only sessions the operator started are candidates;
+- the harness reports it busy or waiting on a dialog, a tool call has no
+  result yet, or a command its shell tool started is still running;
+- background agents were pending at its last turn end, or a subagent has a
+  tool call without a result;
+- its last turn called another agent, started a background task, or ran a
+  command that waits on a queued job or a hosted check (`agentctl job wait`,
+  `job start --wait`, `gh pr checks`, `gh run watch`, `--watch`, `sleep`);
+- an unfinished agentctl job names it as caller, or the job queue cannot be
+  read;
+- its terminal received input within `--touched` (default 30 minutes);
+- its input box holds text, or cannot be read (checked through kitty just
+  before ending it);
+- it has no transcript, so no ID to resume by; or it is a Codex session, which
+  is reported only.
+
+Parking sends the session's process `SIGTERM` after checking it is the process
+the registry recorded, and never kills one that does not exit.
+
+**Quota.** `sinnix quota ok --for discretionary` says whether work that can
+wait may use the subscription now: exit 0 to start, 1 to wait, 3 when usage
+could not be read, with one line of reason (`--json` for the reading). Work
+waits while the weekly usage is at or above `--threshold` (default 85). The
+gate is Claude's weekly window by default; `--provider codex` or `any` uses
+the Codex limits the newest Codex session reported. `agentctl job start
+--discretionary` asks this check (see [agentctl](agentctl.md)).
 
 ### Forecast and the Bead convention
 

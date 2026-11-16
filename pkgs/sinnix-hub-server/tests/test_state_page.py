@@ -174,3 +174,44 @@ def test_state_routes_serve_the_document_and_move_last_looked(
         json.loads(http_get(base + "/v1/state")[2])["last_looked_at"]
         == state["generated_at"]
     )
+
+
+def test_state_page_shows_claims_and_sessions() -> None:
+    """Breaks if an overlap between two sessions' claims, or the reason a
+    session is no parking candidate, stops reaching the page."""
+    claim = {
+        "purpose": "memory <settings>",
+        "claimed_at": stamp(5),
+        "expires_at": engine.iso(NOW + timedelta(hours=1)),
+    }
+    facts = document()
+    facts["claims"] = [
+        {**claim, "id": "c-1", "harness": "claude", "session": "one", "path": "/x/m"},
+        {**claim, "id": "c-2", "harness": "codex", "session": "two", "path": "/x/m/f"},
+    ]
+    facts["agent_sessions"] = [
+        {
+            "harness": "claude",
+            "session": "0123456789",
+            "pid": 5,
+            "name": "fixture",
+            "project": "/x/project",
+            "memory_bytes": 512 * 2**20,
+            "last_activity_at": (NOW - timedelta(hours=3)).timestamp(),
+            "status": "busy",
+            "terminal": "/dev/pts/1",
+            "transcript": "/x/t.jsonl",
+        }
+    ]
+    html = unescape(
+        pages.render_state(
+            {"host": "fixture"}, engine.compute(facts, {}, NOW), "x" * 20
+        )
+    )
+
+    assert "Path claims (2, 1 overlapping)" in html
+    assert 'overlap: /x/m (claude session one, "memory <settings>")' in html
+    assert "memory <settings>" not in pages.render_state(
+        {"host": "fixture"}, engine.compute(facts, {}, NOW), "x" * 20
+    )
+    assert "512 MiB, idle 3.0h; stays: working (status busy)" in html

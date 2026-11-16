@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from . import claims, sessions
 from .engine import range_text, span
 
 PANEL_ROWS = 6
@@ -48,6 +49,41 @@ def job_line(row: Mapping[str, Any]) -> str:
     if row.get("waiting_because"):
         text += f": {row['waiting_because']}"
     return f"{text}; for {caller_text(row.get('caller'))}"
+
+
+def activation_line(row: Mapping[str, Any]) -> str:
+    revision = row.get("revision") or {}
+    commit = (
+        f"commit {str(revision['commit'])[:9]}"
+        + (" with uncommitted changes" if revision.get("dirty") else "")
+        if revision.get("commit")
+        else "commit not recorded"
+    )
+    return (
+        f"{row['label']} #{row['task_id']} {row['phase']} {span(row['seconds'])}, "
+        f"{commit}, in {row.get('working_directory')}; for {caller_text(row.get('caller'))}"
+    )
+
+
+def claim_lines(claimed: Mapping[str, Any]) -> list[str]:
+    return [
+        *(f"overlap: {claims.overlap_line(pair)}" for pair in claimed["overlaps"]),
+        *(claims.claim_line(row) for row in claimed["active"]),
+    ]
+
+
+def session_lines(agent_sessions: Mapping[str, Any]) -> list[str]:
+    if not agent_sessions.get("read"):
+        return ["sessions not read yet"]
+    return [sessions.session_line(row) for row in agent_sessions["rows"]]
+
+
+def sessions_title(state: Mapping[str, Any]) -> str:
+    agent_sessions, counts = state["sessions"], state["counts"]
+    return (
+        f"Agent sessions ({counts['sessions']}, {gib(agent_sessions.get('memory_bytes'))}, "
+        f"{counts['parking_candidates']} parking candidate(s))"
+    )
 
 
 def change_line(row: Mapping[str, Any]) -> str:
@@ -220,6 +256,9 @@ def summary_lines(state: Mapping[str, Any]) -> dict[str, list[str]]:
         ),
         "limits": limit_lines(state["limits"]),
         "products": [product_line(row) for row in state["products"]],
+        "activations": head(state["activations"], activation_line),
+        "claims": claim_lines(state["claims"])[:PANEL_ROWS],
+        "sessions": session_lines(state["sessions"])[:PANEL_ROWS],
     }
 
 
@@ -245,6 +284,18 @@ def render_text(state: Mapping[str, Any]) -> str:
         [job_line(r) for r in [*state["running"], *state["queued"]]],
         "no jobs",
     )
+    if state["activations"]:
+        section(
+            f"Activations ({counts['activations']})",
+            [activation_line(r) for r in state["activations"]],
+            "",
+        )
+    if state["claims"]["active"]:
+        section(
+            f"Path claims ({counts['claims']}, {counts['claims_overlapping']} overlapping)",
+            claim_lines(state["claims"]),
+            "",
+        )
     new = [change_line(r) for r in finished["new"][:TEXT_FINISHED_ROWS]]
     if len(finished["new"]) > TEXT_FINISHED_ROWS:
         new.append(
@@ -294,6 +345,11 @@ def render_text(state: Mapping[str, Any]) -> str:
         "no registered project",
     )
     section("Limits and load", limit_lines(state["limits"]), "unavailable")
+    section(
+        sessions_title(state),
+        session_lines(state["sessions"]),
+        "no interactive session",
+    )
     stale = [
         f"{name}: {health['error']}"
         for name, health in state["sources"].items()

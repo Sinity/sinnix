@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Say this agent session works under a path, and see who else does
+# runtimeInputs: bash @sinnix-runtime
+set -euo pipefail
+exec sinnix-runtime-claims claim "$@"

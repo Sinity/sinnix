@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
-from . import SCHEMA
+from . import SCHEMA, claims, sessions
 from .history import (
     SIZES,
     bead_kind,
@@ -119,7 +119,7 @@ def waiting_rows(inputs: Mapping[str, Any], now: datetime) -> list[dict[str, Any
 def wait_text(job: Mapping[str, Any], now: datetime) -> str | None:
     wait = job.get("wait")
     if not isinstance(wait, dict):
-        return None
+        wait = {}
     group = wait.get("group") or job.get("group")
     reason = wait.get("reason")
 
@@ -134,6 +134,11 @@ def wait_text(job: Mapping[str, Any], now: datetime) -> str | None:
             )
         return ", ".join(parts)
 
+    if isinstance(job.get("deferred"), dict):
+        deferred = job["deferred"]
+        return f"deferred until {deferred.get('until')}: {deferred.get('reason')}"
+    if str(job.get("phase")) == "stashed":
+        return "held in the queue (stashed)"
     if reason == "group-paused":
         return f"pool {group} is paused in the queue"
     if reason == "dependencies":
@@ -189,6 +194,11 @@ def running_rows(
             "expected_target": job.get("expected_target"),
             "log_idle_seconds": job.get("log_idle_seconds"),
         }
+        if job.get("announce") is True:
+            row["announce"] = True
+            row["revision"] = job.get("revision")
+        if isinstance(job.get("deferred"), dict):
+            row["deferred"] = job["deferred"]
         if phase == "running":
             running.append(row)
         else:
@@ -517,6 +527,42 @@ def forecast(
     }
 
 
+# ---------------------------------------------------------------- coordination
+
+# The idle time and terminal quiet a session needs before the state calls it
+# a parking candidate; `sinnix sessions park` takes its own.
+SESSION_IDLE_SECONDS = 2 * 3600
+SESSION_TOUCHED_SECONDS = 30 * 60
+
+
+def claim_rows(inputs: Mapping[str, Any], now: datetime) -> dict[str, Any]:
+    active = [
+        row
+        for row in inputs.get("claims") or []
+        if (parse_time(row.get("expires_at")) or now) > now
+    ]
+    return {"active": active, "overlaps": claims.overlaps(active)}
+
+
+def session_rows(inputs: Mapping[str, Any], now: datetime) -> dict[str, Any]:
+    facts = inputs.get("agent_sessions")
+    if facts is None:
+        return {"rows": [], "memory_bytes": None, "candidates": 0, "read": False}
+    rows = sessions.judge(
+        facts,
+        job_sessions=sessions.job_sessions_of(inputs.get("jobs") or {}),
+        now=now.timestamp(),
+        idle_seconds=SESSION_IDLE_SECONDS,
+        touched_seconds=SESSION_TOUCHED_SECONDS,
+    )
+    return {
+        "rows": rows,
+        "memory_bytes": sum(row["memory_bytes"] or 0 for row in rows),
+        "candidates": sum(1 for row in rows if row["candidate"]),
+        "read": True,
+    }
+
+
 # ---------------------------------------------------------------- compute
 
 
@@ -530,6 +576,9 @@ def compute(
     running, queued = running_rows(inputs, now)
     stalled = stalled_rows(inputs, running, now)
     changes = change_rows(inputs, memory, now)
+    claimed = claim_rows(inputs, now)
+    agent_sessions = session_rows(inputs, now)
+    activations = [row for row in [*running, *queued] if row.get("announce")]
 
     finished = [change for change in changes if change["state"] == "finished"]
     finished.sort(key=lambda change: change["finished_at"] or "", reverse=True)
@@ -572,11 +621,19 @@ def compute(
             "finished_new": len(new),
             "merged_not_live": len(not_live),
             "failed_new": len(failed),
+            "activations": len(activations),
+            "claims": len(claimed["active"]),
+            "claims_overlapping": len(claimed["overlaps"]),
+            "sessions": len(agent_sessions["rows"]),
+            "parking_candidates": agent_sessions["candidates"],
         },
         "waiting": waiting,
         "running": running,
         "queued": queued,
         "stalled": stalled,
+        "activations": activations,
+        "claims": claimed,
+        "sessions": agent_sessions,
         "finished": {
             "new": new,
             "merged_not_live": not_live,

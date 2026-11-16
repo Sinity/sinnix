@@ -99,6 +99,21 @@ mkServiceModule {
     description = "Each pueue group's width and cross-pool admission policy.";
   };
 
+  extraOptions.buildOutputExempt = lib.mkOption {
+    type = lib.types.listOf lib.types.str;
+    # Checkouts of a campaign in progress, whose owner manages their build
+    # output. Empty this list when that campaign ends.
+    default = [
+      "pl-*"
+      "sx-*"
+      "common-*"
+      "sinnix-a"
+      "sinnix-b"
+      "sinnix-budget"
+    ];
+    description = "Worktree directory names (shell patterns) that `agentctl worktree build-output` lists by name only: their build output is never sized or removed.";
+  };
+
   # No runtime surface: the job plane is pueued (declared by the CLI feature)
   # inside the agent-ctl slice hierarchy; the units here drive it.
   configFn =
@@ -127,6 +142,15 @@ mkServiceModule {
           event_spool = eventSpool;
           agentctl = "${scriptPkgs.agentctl}/bin/agentctl";
           pools = lib.mapAttrs (_name: pool: { inherit (pool) parallel; }) cfg.pools;
+          build_output_exempt = cfg.buildOutputExempt;
+          # What `job start --discretionary` asks before it queues a job.
+          quota_check = [
+            "${scriptPkgs.sinnix-quota}/bin/sinnix-quota"
+            "ok"
+            "--for"
+            "discretionary"
+            "--json"
+          ];
         }
       );
     in

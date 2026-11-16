@@ -283,6 +283,47 @@ def limits_card(state: dict[str, Any]) -> str:
     )
 
 
+def coordination_cards(state: dict[str, Any]) -> str:
+    out = ""
+    if state["activations"]:
+        out += card(
+            f"Activations ({state['counts']['activations']})",
+            "".join(
+                row(esc(text.activation_line(item)), [])
+                for item in state["activations"]
+            ),
+            "Queued and running jobs that change the live machine, with who asked and the commit "
+            "their checkout stood on. The queue runs them one after another.",
+            anchor="activations",
+        )
+    claimed = state["claims"]
+    if claimed["active"]:
+        out += card(
+            f"Path claims ({state['counts']['claims']}, {state['counts']['claims_overlapping']} overlapping)",
+            "".join(
+                row(esc(line), [], tone="warn" if line.startswith("overlap:") else "")
+                for line in text.claim_lines(claimed)
+            ),
+            "Advisory: a claim says which session works under a path and blocks nothing. "
+            "Two sessions on overlapping paths are listed first.",
+            anchor="claims",
+        )
+    return out
+
+
+def sessions_card(state: dict[str, Any]) -> str:
+    return card(
+        text.sessions_title(state),
+        "".join(row(esc(line), []) for line in text.session_lines(state["sessions"]))
+        or empty("No interactive agent session."),
+        "Interactive agent sessions with the memory each holds and how long it has been idle. "
+        "A candidate is idle, resumable by ID and waits on nothing; `sinnix sessions park` ends "
+        "candidates only when run with --apply.",
+        wide=True,
+        anchor="sessions",
+    )
+
+
 def recent_card(state: dict[str, Any]) -> str:
     rows = ""
     for job in state["rest"]["recent_jobs"]:
@@ -383,8 +424,10 @@ def render_state(
         )
         + "</div>"
     )
-    body += waiting_card(state) + running_card(state) + finished_cards(state)
-    body += stalled_card(state) + limits_card(state) + forecast_card(state)
+    body += waiting_card(state) + running_card(state) + coordination_cards(state)
+    body += finished_cards(state)
+    body += stalled_card(state) + limits_card(state) + sessions_card(state)
+    body += forecast_card(state)
     body += products_card(state) + recent_card(state) + log_card() + sources_card(state)
     document = page(
         "state",

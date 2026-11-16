@@ -219,6 +219,7 @@ def main() -> None:
         units=lambda: (
             (builder.snapshot().get("state") or {}).get("systemd_units") or []
         ),
+        claims_path=layer.claims_path,
     )
     builder.operator_state_source = operator_state.summary
     operator_state.start()

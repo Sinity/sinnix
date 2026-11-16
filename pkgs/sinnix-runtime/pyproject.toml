@@ -13,6 +13,9 @@ sinnix-observe = "sinnix_runtime.observe.cli:main"
 sinnix-runtime-status = "sinnix_runtime.status:main"
 sinnix-runtime-state = "sinnix_runtime.operator_state.cli:state_main"
 sinnix-runtime-estimate = "sinnix_runtime.operator_state.cli:estimate_main"
+sinnix-runtime-claims = "sinnix_runtime.operator_state.claims:main"
+sinnix-runtime-sessions = "sinnix_runtime.operator_state.sessions:main"
+sinnix-runtime-quota = "sinnix_runtime.operator_state.quota:main"
 
 [tool.setuptools.packages.find]
 include = ["sinnix_runtime*"]

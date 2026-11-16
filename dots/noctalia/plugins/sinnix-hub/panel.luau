@@ -215,6 +215,12 @@ render = function()
     local counts, lines = operator.counts, operator.lines
     table.insert(rows, infoSection("Waiting on you (" .. text(counts.waiting) .. ")", listOr(lines.waiting, "Nothing needs you.")))
     table.insert(rows, infoSection("Running (" .. text(counts.running) .. " running, " .. text(counts.queued) .. " queued)", listOr(lines.running, "No job is running or queued.")))
+    if type(lines.activations) == "table" and #lines.activations > 0 then
+      table.insert(rows, infoSection("Activations (" .. text(counts.activations) .. ")", lines.activations))
+    end
+    if type(lines.claims) == "table" and #lines.claims > 0 then
+      table.insert(rows, infoSection("Path claims (" .. text(counts.claims) .. ", " .. text(counts.claims_overlapping) .. " overlapping)", lines.claims))
+    end
     -- The list shown is the one captured when the panel opened, so it stays
     -- readable after opening has moved "last looked".
     local finished = shownFinished or lines.finished
@@ -229,6 +235,9 @@ render = function()
       table.insert(rows, infoSection("Failed since you last looked (" .. text(counts.failed_new) .. ")", lines.failed))
     end
     table.insert(rows, infoSection("Limits and load", listOr(lines.limits, "unavailable")))
+    if type(lines.sessions) == "table" and #lines.sessions > 0 then
+      table.insert(rows, infoSection("Agent sessions (" .. text(counts.sessions) .. ", " .. text(counts.parking_candidates) .. " parking candidates)", lines.sessions))
+    end
     table.insert(rows, infoSection("Products", listOr(lines.products, "no registered project")))
   end
   local fleet = unitsLines()

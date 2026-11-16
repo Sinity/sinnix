@@ -18,7 +18,7 @@ from typing import Any, Callable
 
 from sinnix_lib.atomic_json import read_json, write_json_atomic
 
-from . import engine, sources
+from . import claims, engine, sessions, sources
 from .history import JobLog, TaskRunnerHistory
 from .text import summary_lines
 
@@ -84,8 +84,10 @@ class OperatorState:
         jobs: Callable[[], dict[str, Any]],
         units: Callable[[], list[dict[str, Any]]] = lambda: [],
         agentctl_config: Path = AGENTCTL_CONFIG,
+        claims_path: Path = claims.STORE,
     ) -> None:
         self.memory_path = memory_path
+        self.claims_path = claims_path
         self.jobs = jobs
         self.units = units
         self.lock = threading.Lock()
@@ -114,6 +116,8 @@ class OperatorState:
     def _declare_sources(self) -> None:
         self._add("job-log", 10, self.job_log.refresh)
         self._add("machine-load", 10, sources.machine_load)
+        self._add("path-claims", 10, lambda: claims.active(self.claims_path))
+        self._add("agent-sessions", 30, sessions.collect)
         self._add("deployment", 60, self._deployment)
         self._add("claude-usage", 600, sources.claude_usage)
         self._add("codex-usage", 300, sources.codex_usage)
@@ -290,6 +294,8 @@ class OperatorState:
             "pulls": pulls,
             "deployed": self._value("deployment", {}),
             "units": self.units(),
+            "claims": self._value("path-claims", []),
+            "agent_sessions": self._value("agent-sessions"),
             "closed_beads": closed,
             "limits": limits,
             "job_history": {

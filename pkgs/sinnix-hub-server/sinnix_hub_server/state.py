@@ -53,6 +53,7 @@ class StateLayer:
     sequence_path: Path
     receipts_path: Path
     operator_state_path: Path
+    claims_path: Path
     feedback_spool_dir: Path
 
     def stores(self) -> list[Store]:
@@ -85,6 +86,12 @@ class StateLayer:
                 "operator_state.service.OperatorState._save",
             ),
             Store(
+                "path_claims",
+                self.claims_path,
+                "atomic-doc",
+                "operator_state.claims.claim",
+            ),
+            Store(
                 "health_state",
                 health.state_path(),
                 "atomic-doc",
@@ -114,5 +121,6 @@ class StateLayer:
             sequence_path=state_dir / "sequence.json",
             receipts_path=state_dir / "action-receipts.jsonl",
             operator_state_path=state_dir / "operator-state.json",
+            claims_path=state_dir / "path-claims.json",
             feedback_spool_dir=feedback_dir,
         )
