@@ -203,6 +203,9 @@ attended claude '' "$(attention_payload Notification elicitation_dialog)"
 expect_notice 'example-project (Claude Code)' 'asks a question'
 attended codex codex "$(attention_payload PermissionRequest)"
 expect_notice 'example-project (Codex)' 'needs permission for Bash'
+# A checkout kept as <project>/repo is named by its project folder.
+attended claude '' "$(attention_payload Notification permission_prompt | jq -c '.cwd = "/work/example-project/repo"')"
+expect_notice 'example-project (Claude Code)' 'needs permission'
 # Waiting at the prompt after a turn is not a request.
 attended claude '' "$(attention_payload Notification idle_prompt)"
 expect_silence

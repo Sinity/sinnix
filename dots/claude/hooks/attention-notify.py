@@ -111,6 +111,15 @@ def reason_for(name, payload):
     return None
 
 
+def project_name(cwd):
+    """The folder that names the project: a checkout kept as <project>/repo
+    is called by its parent."""
+    parts = [part for part in cwd.split("/") if part]
+    if len(parts) > 1 and parts[-1] == "repo":
+        return parts[-2]
+    return parts[-1] if parts else "session"
+
+
 def start_detached(command):
     subprocess.Popen(
         command,
@@ -173,9 +182,8 @@ def main():
     reason = reason_for(name, payload)
     if reason is None:
         return
-    project = os.path.basename(str(payload.get("cwd") or "").rstrip("/")) or "session"
     label = "Codex" if name == "codex" else "Claude Code"
-    notify(f"{project} ({label})", reason)
+    notify(f"{project_name(str(payload.get('cwd') or ''))} ({label})", reason)
 
 
 if __name__ == "__main__":
