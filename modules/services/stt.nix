@@ -1,24 +1,5 @@
-# Sinnix's speech-to-text hub — Parakeet TDT 0.6B v3 on 127.0.0.1:8090.
-#
-# One OpenAI-compatible /v1/audio/transcriptions endpoint, which is the same
-# interface whisper.cpp served on this port before it was retired. Clients
-# (hermes, the phone, anything speaking the OpenAI audio API) were not changed
-# by the engine swap; only what answers changed.
-#
-# Two things about this module are deliberately unlike its predecessor.
-#
-# It does not touch the GPU. whisper.cpp needed CUDA and therefore had to hold
-# the shared gpu-inference admission key, so a transcription could not run
-# while an LLM was resident and vice versa. Parakeet int8 through sherpa-onnx
-# is fast enough on this CPU to make that trade unnecessary -- measured on
-# sinnix-prime: RTF 0.113 on dense speech and RTF 0.002 over a VAD-gated
-# 300 s ambient chunk. Dropping the key means transcription is always
-# available rather than queued behind the model tier, which matters most for
-# exactly the always-on lane this exists to serve.
-#
-# The HTTP frontend is socket-activated. Recognition runs in short-lived
-# workers; a silent window loads only VAD, and speech initializes its ASR model.
-# The proxy keeps the port answerable while the frontend comes and goes.
+# Parakeet TDT serves OpenAI-compatible transcription on 127.0.0.1:8090 using CPU inference, so it does not need the GPU inference key.
+# Socket activation keeps the endpoint available while short-lived workers load VAD and speech models as needed.
 {
   mkAiService,
   lib,

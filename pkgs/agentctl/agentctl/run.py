@@ -108,11 +108,8 @@ POLICY_POOLS = frozenset(
     }
 )
 DEFAULT_SLICE_POOL = "normal"
-# Pools whose jobs are not to be sacrificed for build memory: a measurement
-# or rehearsal killed 46 minutes in (2026-11-02, by systemd-oomd under the
-# job plane's pressure) is wasted, while a killed build is simply retried.
-# Their units rank low for the kernel's OOM killer and are oomd's last choice
-# (the preference applies to the unit's own cgroup, not to its slice).
+# Measurements cannot be retried without losing the run, so their units rank
+# low for the kernel OOM killer and last for oomd within their own cgroup.
 PROTECTED_POOLS = frozenset({"measure"})
 RUN_EXECUTABLE = "agentctl-run"
 DESCRIPTION_PREFIX = "agentctl"
@@ -573,10 +570,7 @@ def _service_command(
         "KillMode=control-group",
         "RemainAfterExit=yes",
         "IOAccounting=yes",
-        # Job units are the first thing the kernel should take when the host
-        # runs out of memory. At 0 they ranked below Chrome's tab renderers
-        # (200-300), and on 2026-10-27 a global OOM killed a tab while a
-        # benchmark held 2.9G.
+        # Job units rank above Chrome tab renderers (200-300) for global OOM kills.
         "OOMScoreAdjust=900" if pool not in PROTECTED_POOLS else "OOMScoreAdjust=100",
         *(("ManagedOOMPreference=avoid",) if pool in PROTECTED_POOLS else ()),
         f"WorkingDirectory={launch['working_directory']}",

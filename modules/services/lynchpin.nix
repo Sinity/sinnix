@@ -94,11 +94,7 @@ mkServiceModule {
           # Covers the queue wait plus the operation's own 30 min budget.
           timeoutStartSec = "1h";
           rationale = "Daily bounded browser-history capture before Chrome expires visits.";
-          # The webhistory lane belongs to the unit that actually fills it. It
-          # used to be declared in capture-registry.nix against a
-          # `sinnix-capture-webhistory` unit that does not exist, which is how a
-          # lane could carry a 48h staleness budget with nothing on any schedule
-          # able to keep it -- see sinnix-ksws.
+          # The webhistory capture belongs to the unit that fills it, so a schedule backs its freshness budget.
           captures = [
             {
               name = "webhistory";
@@ -189,9 +185,7 @@ mkServiceModule {
                 unit = {
                   requires = [ "lynchpin-local-attrs.service" ];
                   after = [ "lynchpin-local-attrs.service" ];
-                  # The timer runs these; an activation that started one waited
-                  # for its queued AgentCTL job behind the build pools (a 42 min
-                  # switch on 2026-11-01).
+                  # The timer starts these jobs; activation must not wait for them behind the build pools.
                   restartIfChanged = false;
                 };
                 inherit (job) timer;

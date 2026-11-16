@@ -26,15 +26,8 @@ let
   ];
   # Resolve a live checkout at invocation; packaged commands carry no flake source.
   resolveFlakeDir = ''
-    # Precedence: explicit override; then the checkout you are STANDING IN
-    # when it is the SAME repository as the ambient default (a linked
-    # worktree shares its --git-common-dir with the main checkout, an
-    # unrelated repo does not); then the ambient nh defaults. NH_FLAKE/FLAKE
-    # are set globally so `nix run <sinnix>#switch` works from anywhere --
-    # but letting them outrank a sinnix worktree's own tree made every
-    # worktree check/lint silently evaluate the main checkout instead
-    # (caught 2026-08-18 when a renamed check kept its old name through a
-    # "green" worktree run).
+    # Prefer an explicit override, then a checkout sharing the ambient Git
+    # directory, then nh defaults; worktree checks must use their own checkout.
     _flake_dir="''${SINNIX_FLAKE_DIR:-}"
     _ambient="''${NH_FLAKE:-''${FLAKE:-''${PRJ_ROOT:-}}}"
     if [ -z "$_flake_dir" ]; then

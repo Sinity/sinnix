@@ -173,8 +173,7 @@ in
       ".local/share/atuin" # shell history DB
       ".local/share/activitywatch" # AW SQLite DB
       ".local/state/devkit" # history.db and its SQLite WAL/SHM companions
-      # The earlier session producer's positions and last spool files (written
-      # until 2026-11-13); kept until Sinex confirms it holds those frames.
+      # Keep the earlier session producer's positions and spool files until Sinex confirms it holds those frames.
       ".local/state/sinex-session"
       ".local/state/claude-quota" # timestamped usage samples
       ".config/activitywatch" # AW watcher configs (runtime-written)

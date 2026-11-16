@@ -57,12 +57,7 @@ let
 in
 {
   config = lib.mkMerge [
-    # syslog-index previously ran with no registered runtime surface at all
-    # (no resourceClass resolution, no failure-notify) -- an intended
-    # semantic delta of this conversion, not merely a render change: it now
-    # carries the background class's Nice/IOScheduling/CPU/IOWeight/Memory
-    # governance and the standard OnFailure path, matching every other
-    # scheduled oneshot on this host.
+    # The background class and standard failure notification apply to this scheduled job.
     (lib.sinnix.mkScheduledJob
       {
         inherit config;
@@ -91,8 +86,7 @@ in
         };
       }
     )
-    # Boot-triggered oneshot, same governance treatment as syslog-index:
-    # previously unclassed and without failure reporting.
+    # This boot-triggered job uses the same resource class and failure notification as syslog-index.
     (lib.sinnix.mkScheduledJob
       {
         inherit config;

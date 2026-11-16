@@ -78,24 +78,15 @@ let
       runtimeInventory = config.sinnix.runtime.inventory;
       inherit unit;
     };
-  # The default start limit (three failures in ten minutes) left the session
-  # producer dead for days; sinexd and NATS would stop the same way after an
-  # I/O stall or a schema refusal at start while producers keep spooling.
-  # They retry forever, backing off from 10 s to 5 min between attempts.
+  # Retry indefinitely with backoff after I/O stalls or startup failures while producers spool frames.
   restartForever = {
     StartLimitIntervalSec = 0;
     RestartSec = "10s";
     RestartSteps = 6;
     RestartMaxDelaySec = "5min";
   };
-  # PostgreSQL's shared buffers live in 2 MiB huge pages, which the kernel
-  # never swaps: under host reclaim the buffers went to zram nightly, so every
-  # buffer hit became a swap-in, whatever memory.low PostgreSQL carried. The
-  # pages are reserved at boot, when memory is still contiguous; on a running
-  # host fragmentation lets only a fraction be allocated (640 of 2,125 on
-  # 2026-11-09). Beyond the buffers, PostgreSQL's shared memory needs about
-  # 3.8% more (`SHOW shared_memory_size_in_huge_pages` gave 2,125 for 4 GiB),
-  # so the reservation is sized from shared_buffers with a 6% margin.
+  # Reserve unswappable 2 MiB huge pages at boot, before fragmentation limits allocation.
+  # The reservation includes a 6% margin and 32 extra pages for PostgreSQL shared memory.
   sharedBuffersMiB = 4096;
   hugePages = (sharedBuffersMiB / 2) * 106 / 100 + 32;
 in
@@ -170,9 +161,7 @@ in
           # and spool files from disk at the live weight for as long as it
           # stays; at the ceiling it is killed and restarted instead.
           MemoryMax = "8G";
-          # Its working set stays resident under host reclaim: on 2026-11-01
-          # 726 MB of it sat in swap, on the acknowledgment path of every
-          # producer frame. Fits beside PostgreSQL's 5G in live.slice's 6G.
+          # Keep the daemon's working set resident: every producer frame waits for its acknowledgment.
           MemoryLow = "1G";
         };
         notifyOnFailure = true;
@@ -217,7 +206,7 @@ in
         unit = "sinex-session.service";
         manager = "user";
         resourceClass = "live";
-        # 186 MB of its 235 MB working set was swapped on 2026-11-01.
+        # Keep the session producer's working set resident because it waits on acknowledgments.
         resources.MemoryLow = "256M";
         notifyOnFailure = true;
         operatorRestart = false;
@@ -236,10 +225,7 @@ in
       operatorRestart = false;
     });
 
-    # The session producer exits when a frame goes unacknowledged; under build
-    # I/O load on the /realm NVMe that happens, and three failures in ten
-    # minutes left it dead for days (2026-10-29, 2026-11-01). It keeps
-    # retrying; its spool holds unacknowledged frames across restarts.
+    # The producer retries unacknowledged frames without a start limit; its spool preserves them across restarts.
     systemd.user.services.sinex-session = {
       unitConfig.StartLimitIntervalSec = lib.mkForce 0;
       serviceConfig =
@@ -257,10 +243,7 @@ in
       postgresql = {
         unitConfig.RequiresMountsFor = [ root ];
         serviceConfig = runtimeServiceConfig "postgresql.service" // {
-          # With 16GB of WAL between 30-minute checkpoints, the shutdown and
-          # end-of-recovery checkpoints write gigabytes on the QLC drive. Under the module's 120 s, an activation on
-          # 2026-10-27 killed the shutdown checkpoint, then killed the
-          # recovery checkpoint at start and left the unit start-limit-hit.
+          # Shutdown and recovery checkpoints can write gigabytes of WAL; the timeout must cover both.
           TimeoutSec = lib.mkForce 1800;
         };
       };

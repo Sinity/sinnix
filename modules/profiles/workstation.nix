@@ -194,11 +194,8 @@ in
           }
         ];
 
-        # zram is the only swap. An NVMe swapfile overflow tier was removed on
-        # 2026-10-27: on 10-27 00:05 agent work filled zram plus 4 GiB of it on
-        # the QLC /realm drive, and paging there held IO-full PSI at 74% for
-        # the whole host. Overcommit beyond zram is killed, not paged to disk.
-        # Telemetry samples zram/PSI/refaults so a thrash regression stays visible.
+        # zram is the only swap; overcommit beyond it is killed because disk paging stalls the host.
+        # Telemetry samples zram, PSI and refaults.
         zramSwap = {
           enable = true;
           algorithm = "zstd";
@@ -328,16 +325,8 @@ in
         services.earlyoom = {
           enable = true;
           enableNotifications = true;
-          # Last resort when swap is nearly full AND the host stalls. MemAvailable
-          # includes reclaimable cache, so -m3 could veto kills with RAM and zram
-          # full while memory.high held jobs in reclaim below every hard limit.
-          # -m5 keeps a real memory gate. -m99 (2026-10-27) let a full swap
-          # alone trigger kills: on 2026-10-28 03:36 earlyoom killed with 40%
-          # of RAM available, because cold pages filled zram while the host
-          # stalled on IO. Thrash inside the agent budget is oomd's job
-          # (agent-ctl and agent-tool kill on memory pressure and on swap).
-          # Scoped oomd targets job/tool descendants; this global fallback
-          # also covers pressure outside those trees and swap-ineligible jobs.
+          # Last resort when swap is nearly full and the host stalls; -m5 retains a memory gate because MemAvailable includes cache.
+          # oomd handles thrashing inside the agent budget; this fallback also covers pressure outside it and swap-ineligible jobs.
           freeMemThreshold = 5;
           # Keep the same RAM floor for SIGKILL: a victim that survives SIGTERM
           # must not hold a fully swapped host between 2.5% and 5% available RAM.
@@ -422,39 +411,8 @@ in
           inherit sliceConfig;
         }) runtimeInventory.slices.user;
 
-        # Shutdown cost of the graphical session is bounded here, once, for every
-        # user unit — Sinnix-owned or not.
-        #
-        # The tty1 login parks `systemctl --user start --wait
-        # wayland-session-envelope@hyprland-uwsm.desktop.target` inside
-        # session-1.scope (uwsm's signal-handler.sh, which on SIGTERM stops that
-        # target and then waits on the same pid). logind stops the session scope
-        # BEFORE the user manager — user@1000.service is ordered
-        # Before=session-1.scope, and ordering reverses on stop — so the scope's
-        # stop job completes only once the envelope target, and therefore every
-        # graphical-session member, has gone inactive. One member that ignores
-        # SIGTERM holds the target for its full stop timeout while the session
-        # scope burns an identical timeout in parallel, and logind offers no
-        # per-scope knob to cap a transient session scope: it inherits the manager
-        # default. Bounding that default is the only lever that reaches the whole
-        # chain.
-        #
-        # Measured, not theorised: the 2026-08-14 reboot cost 91s of dead time
-        # because a single wedged screen recorder sat in graphical-session.target
-        # for the full 90s default. That unit is gone, but the exposure was never
-        # specific to it — 44 of the 47 user services running on this host carry
-        # the 90s default, so any one of them can reproduce the stall.
-        #
-        # 15s is Sinnix's established shutdown-debris cap for ordinary services,
-        # and Borg jobs.
-        # A session helper still alive 15s after SIGTERM is wedged; the choice is
-        # not between a clean exit and a kill, it is between killing it now and
-        # killing it 75s later. This is only the *default*, so per-unit
-        # TimeoutStopSec still wins in either direction — the three user services
-        # that already declare their own keep them (uwsm's wayland-wm@ at 10s,
-        # nm-applet and at-spi at 5s) — and the system manager's own 90s default
-        # is deliberately left alone, since daemons with real flush work sit
-        # outside this chain.
+        # The user manager stop timeout bounds shutdown of graphical-session members and their session scope.
+        # Per-unit TimeoutStopSec overrides this default; the system manager keeps its own timeout for services that flush data.
         systemd.user.settings.Manager = {
           DefaultTimeoutStopSec = "15s";
           # Per-unit I/O figures for user units (agent jobs, the Polylogue

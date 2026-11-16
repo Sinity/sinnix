@@ -23,15 +23,8 @@ python3Packages.buildPythonApplication {
   };
   doCheck = false;
   build-system = [ python3Packages.setuptools ];
-  # sinnix-capture-lib: the CaptureWriter/build_envelope the phone-stream
-  # receiver appends through -- this package is their canonical origin, no
-  # longer a private port (see receiver.py). sinnix-lib: the shared
-  # atomic-state/ledger/lock primitives, depended on for architecture
-  # consistency with the other sinnix Python packages; this package's own
-  # JSON writes keep their existing (non-compact) on-disk format rather than
-  # adopting sinnix_lib.atomic_json's sort_keys+compact-separator shape (see
-  # state.py) -- the phone app and the drain already parse these files as
-  # written, and changing their bytes was out of scope for this move.
+  # Shared capture and state helpers keep phone ingress consistent with other
+  # producers; JSON writes retain the format the app and drain parse.
   dependencies = [
     sinnix-capture-lib
     sinnix-lib

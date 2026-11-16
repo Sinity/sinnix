@@ -15,22 +15,8 @@ let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   resourceClassNames = builtins.attrNames runtimeDefaults.classes;
 
-  # Sinnix's single failure-report path: a unit that enters `failed`
-  # reports itself, so nothing has to poll it. It routes into the hub-server,
-  # which owns the health sweep, rather than appending to the ledger directly:
-  # one schema and one dedup state for both the OnFailure path and the sweep.
-  # When they kept separate keys the same unit re-notified on every failure and
-  # its recovery never paired with the outage (2026-08-14, on
-  # borgbackup-status.service). `emit-failure` posts to the running hub server and
-  # falls back to writing the same transition itself when the hub server is down,
-  # which is exactly a moment when units fail.
-  #
-  # umask 0002 because this runs as root while the hub server runs as the
-  # operator: both write the same two files in /run/sinnix, which is setgid
-  # `users` for that reason.
-  #
-  # One body, two templates: a user-manager unit cannot OnFailure into a
-  # system template, and only the systemctl scope differs.
+  # Failure notifications share the hub's per-unit state and write it directly
+  # if the hub is down; root and user templates share group users and umask 0002.
   unitFailureNotify = pkgs.writeShellApplication {
     name = "sinnix-unit-failure-notify";
     runtimeInputs = [
@@ -100,13 +86,8 @@ let
     }
   ];
 
-  # One shape for a capture lane, used in two places: inline on a runtime
-  # surface that owns its own lane, and standalone in sinnix.runtime.captures
-  # for a lane whose writer is not a systemd unit at all. Those used to be the
-  # same option, which forced three surfaces to put a shell script's name in a
-  # field typed "systemd unit name" and carved a `kind = "capture"` hole in the
-  # assertion that checks it. A lane is not a unit; now it does not have to
-  # pretend to be one.
+  # Capture outputs share one shape, inline on their owning unit or standalone
+  # in sinnix.runtime.captures when their writer is not a systemd unit.
   captureLaneType = import ./lib/capture-output-type.nix { inherit lib; };
 
   runtimeInventory =
@@ -156,11 +137,8 @@ in
             resourceClass = lib.mkOption {
               type = lib.types.enum resourceClassNames;
               default = "ordinary";
-              # A class becomes real by way of serviceConfig, which only a
-              # service has: mkRuntimeServiceConfig resolves a surface by its
-              # `<unit>.service` name and can never reach a timer. Rejecting the
-              # combination here rather than deleting the inert keys once is what
-              # stops a tenth from being added.
+              # Only services have serviceConfig; resource classes cannot apply
+              # to timers and must be declared on the service they trigger.
               apply =
                 value:
                 lib.throwIf (config.kind == "timer" && value != "ordinary")
@@ -285,15 +263,13 @@ in
               default = null;
               description = "AI backend classification carried by the owning runtime surface.";
             };
-            # Without this, every fresh agent session rediscovers an intentional
-            # outage as an emergency and re-reports it. It is not a mute: the
-            # unit still appears, in its own section, with this text attached,
-            # so a stale entry stays visible.
+            # Expected outages stay visible with their reason, without
+            # repeatedly reporting the unit as an unexpected failure.
             expectedDown = lib.mkOption {
               type = lib.types.nullOr lib.types.nonEmptyStr;
               default = null;
-              example = "Parked during the archive reindex (polylogue-reindex-2026.1, since 2026-08-14)";
-              description = "Why this unit is expected to be down, with its tracking reference and date; null when it should run.";
+              example = "Stopped while the archive index is rebuilt";
+              description = "Why this unit is expected to be down; null when it should run.";
             };
             captures = lib.mkOption {
               type = lib.types.listOf captureLaneType;
@@ -376,11 +352,8 @@ in
     description = "Enabled runtime units and their capture lanes, declared by owning modules.";
   };
 
-  # Lanes with no owning systemd unit: a hotkey script, a shell wrapper the
-  # terminal launches, an external artifact drop. They still need freshness
-  # budgets, because "nothing writes this lane" is the failure that looks
-  # exactly like silence -- but they are not units, and giving them a
-  # `unit` field was a lie every consumer had to know about.
+  # Outputs from hotkeys, shell wrappers and external drops have no owning
+  # systemd unit; they still need freshness monitoring.
   options.sinnix.runtime.captures = lib.mkOption {
     type = lib.types.listOf captureLaneType;
     default = [ ];
@@ -429,21 +402,15 @@ in
                 value: builtins.length (builtins.filter (candidate: candidate == value) values) > 1
               ) values
             );
-          # A class only becomes real when some module writes it onto the unit.
-          # nix-gc declared `background` for months while nixpkgs owned the
-          # unit and nothing applied it, so it ran at the default IOWeight of
-          # 100 -- a hundred times its declared share -- and starved the jobs
-          # that were correctly throttled. The timer guard above rejects one
-          # shape of inert declaration; this rejects the other.
+          # A resource class applies only when its owning module writes the
+          # settings onto a service; reject declarations with no applied settings.
           inertResourceClasses = lib.filter (surface: surface != null) (
             lib.mapAttrsToList (
               name: surface:
               let
                 unitName = lib.removeSuffix ".service" surface.unit;
                 system = (surface.manager or "system") == "system";
-                # A user unit comes from either the NixOS user manager or Home
-                # Manager; polylogue-live declared `capture` from Home Manager
-                # and ran unclassed in app.slice until 2026-10-27.
+                # User services can come from NixOS or Home Manager; check both.
                 homeUnits = config.home-manager.users.${cfg.user.name}.systemd.user.services or { };
                 exists =
                   if system then

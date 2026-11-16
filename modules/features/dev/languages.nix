@@ -140,9 +140,7 @@ mkFeatureModule {
         ];
       })
 
-      # Seeded 2026-09-28 from ~/.cache/uv (built wheels and the archive
-      # entries they point at, including the source-built free-threaded
-      # duckdb); a fresh worktree then provisions with no wheel build.
+      # The uv cache includes built wheels and their archive entries, so a fresh worktree provisions without building wheels.
       (lib.mkIf cfg.python.enable {
         home-manager.users.${user}.home.sessionVariables = {
           UV_CACHE_DIR = "/realm/state/cache/uv";

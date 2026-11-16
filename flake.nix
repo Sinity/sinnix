@@ -84,10 +84,7 @@
       inputs.nixpkgsRepomix.follows = "nixpkgs";
     };
 
-    # The phone app, extracted to its own repo (operator decision,
-    # sinnix-svvz Phase 4). Sourced from GitHub like sinex/polylogue so
-    # deploys follow pushed history; non-flake — sinnix's flake/scripts.nix
-    # calls its pkg.nix directly, same pattern as beads.
+    # The non-flake phone app is sourced from GitHub; flake/scripts.nix calls its pkg.nix.
     phone-app = {
       url = "github:Sinity/sinnix-phone-app/f4a97957529b0896411d73f5c55cd70c1f84f0f6";
       flake = false;

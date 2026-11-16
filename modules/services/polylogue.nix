@@ -155,13 +155,7 @@ mkServiceModule {
           lib.stringToCharacters (builtins.substring 0 32 (builtins.hashString "sha256" extensionDir))
         );
 
-      # The live class places the daemon in the user manager's live.slice,
-      # ahead of the desktop and agent work for the disk. Memory bounds are
-      # its own: start-up peaked at 15.6 GB on
-      # 2026-10-27, and at 16:09 that day host OOM pressure killed it.
-      # 6G high / 9G max / 2G swap trades slower start-up under reclaim for a
-      # host that stays up, until Polylogue's ingest bounds memory by work in
-      # flight (its owner's redesign).
+      # The live class prioritizes daemon disk access; its memory limits trade slower startup under reclaim for host responsiveness.
       liveServiceClass = lib.sinnix.mkRuntimeServiceConfig {
         runtimeInventory = config.sinnix.runtime.inventory;
         unit = "polylogue-live.service";
@@ -240,19 +234,14 @@ mkServiceModule {
             Unit.Description = "Polylogue daemon over the live archive";
             Service = liveServiceClass // {
               ExecStart = "${cli}/bin/polylogue daemon" + lib.optionalString (!cfg.readSources) " --no-sources";
-              # always, not on-failure: a SIGTERM from the OOM response counts
-              # as a clean stop, and on 2026-10-27 that left the daemon down.
+              # Restart even after a clean stop: a SIGTERM from the OOM response counts as clean.
               Restart = "always";
               RestartSec = "5s";
               # The daemon exits 78 when it refuses the archive (a schema it
               # cannot migrate); restarting cannot change that.
               RestartPreventExitStatus = 78;
-              # A clean stop during an index build syncs the private build
-              # file so the next start resumes it; a SIGKILL leaves it torn
-              # and the build starts over from stored bytes (Polylogue
-              # docs/architecture.md, Durability). Syncing a large unsynced
-              # file on a busy disk can take minutes, longer than the 90 s
-              # default.
+              # Clean stops sync the index build so it resumes; SIGKILL forces a rebuild.
+              # Fifteen minutes covers syncing a large file under disk contention.
               TimeoutStopSec = "15min";
             };
             Install.WantedBy = lib.optional cfg.startDaemon "default.target";

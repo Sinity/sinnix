@@ -131,14 +131,8 @@ mkFeatureModule {
         ];
       };
 
-      # The 2026-10-28 path trace caught Chrome pwrite64 threads waiting in
-      # __reserve_bytes and btrfs_inode_lock on deleted .com.google.Chrome.*
-      # files in /realm/tmp/work. Open temporary files totalled about 60 MiB.
-      # Override the user manager's agent-oriented TMPDIR in the package
-      # wrapper, including direct launches. 512 MiB is on-demand headroom,
-      # not a reservation; the inode cap also bounds metadata growth. Live
-      # temporary allocations can fail at the cap, so this is separate from
-      # the HTTP cache. Never put profile state or captures on this mount.
+      # Chrome's temporary files use tmpfs to avoid btrfs space reservation and inode lock stalls.
+      # The wrapper overrides TMPDIR; the size and inode limits bound temporary allocations, not profile state or captures.
       fileSystems.${chromeTmpDir} = {
         device = "tmpfs";
         fsType = "tmpfs";

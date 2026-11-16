@@ -84,8 +84,7 @@ in
 
       gc = {
         automatic = true;
-        # Away from midnight, where the realm backup, the filesystem index and
-        # the store walk all used to land in the same few minutes.
+        # Away from midnight, when the realm backup, filesystem index and store walk run.
         dates = "Mon 04:30";
         randomizedDelaySec = "30min";
         # `--delete-generations +N` is a nix-env flag; nix-collect-garbage
@@ -93,10 +92,7 @@ in
         options = "--delete-older-than 30d";
       };
 
-      # auto-optimise-store already hardlinks each path as it is added, so a
-      # daily full-store pass re-walks hundreds of GB to find work the daemon
-      # has already done. Measured 2026-09-14: the timer's pass and the GC
-      # overlapped for 50 minutes and drove io.pressure full to ~40%.
+      # auto-optimise-store hardlinks each path as it is added; a daily full-store pass would contend with GC for I/O.
       optimise.automatic = false;
     };
 

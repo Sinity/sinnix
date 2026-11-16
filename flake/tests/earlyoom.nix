@@ -1,9 +1,5 @@
-# Behavior check for the sinnix earlyoom patches (overlay/package/earlyoom.nix).
-# Runs the patched binary in --dryrun against PSI fixtures, so the check
-# exercises the real kill decision path rather than asserting on the patch
-# text. Memory/swap state comes from the sandbox's real /proc; -m 99 -s 100
-# reads any live state as "below limits", which is exactly the shape of the
-# 2026-08-16 bwa-mem2 incident (thresholds crossed, machine healthy).
+# Exercise the patched earlyoom decisions against PSI fixtures; -m 99 -s 100
+# makes the sandbox memory and swap state fall below the thresholds.
 { inputs, ... }:
 {
   perSystem =

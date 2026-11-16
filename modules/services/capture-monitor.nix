@@ -37,15 +37,8 @@ let
       capture_bin="$1"
       capture_root="$2"
 
-      # One getvcp call for all four features: every ddcutil invocation
-      # re-probes the I2C buses, so the former detect plus four getvcp calls
-      # cost 2.5 s of CPU per poll against 0.6 s for this (measured
-      # 2026-10-27). A monitor that answers none of them (cable unplugged,
-      # panel off, input without i2c passthrough) is an outage, not a calm
-      # reading, so no VCP lines exits non-zero.
-      # --brief prints "VCP <code> C <cur> <max>" for continuous features
-      # (10, 12; $4 decimal) and "VCP <code> SNC x<hex>" for simple ones
-      # (D6, 60); lines come back sorted by code, so match on the code.
+      # One getvcp call avoids repeated I2C probes; no VCP lines means an outage and exits non-zero.
+      # Brief output differs for continuous and simple features, so match each line by its code.
       vcp="$(ddcutil getvcp 10 12 d6 60 --brief 2>/dev/null)"
       echo "$vcp" | grep -q '^VCP ' || {
         echo "capture-monitor: no DDC/CI answer from the display" >&2

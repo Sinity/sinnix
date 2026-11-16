@@ -53,7 +53,7 @@
       "org.koreader.launcher.fdroid"
     ];
 
-    # Store and side-loaded utilities retained after the 2026-09 cleanup.
+    # Store and side-loaded utilities kept on the headset.
     # `cleanup = "report"` only surfaces drift in `android-rebuild plan`.
     attended = [
       "com.aurora.store"

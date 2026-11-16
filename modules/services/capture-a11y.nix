@@ -93,12 +93,7 @@ mkServiceModule {
               livenessProbe = {
                 command = lib.concatStringsSep "; " [
                   "uid=$(id -u ${username} 2>/dev/null) || exit 3"
-                  # at-spi-bus-launcher names this socket "bus"; the "bus_0" spelling
-                  # belongs to the per-display launcher shape and does not exist here,
-                  # so the probe could never find the socket and reported unknown
-                  # forever (observed 2026-08-14: the lane was capturing normally while
-                  # its own liveness probe exited 3 on every sweep). Accept either
-                  # rather than pinning the spelling.
+                  # at-spi-bus-launcher uses "bus" here and "bus_0" for per-display launches; accept either.
                   "bus=/run/user/$uid/at-spi/bus"
                   "[ -S \"$bus\" ] || bus=/run/user/$uid/at-spi/bus_0"
                   "[ -S \"$bus\" ] || exit 3"

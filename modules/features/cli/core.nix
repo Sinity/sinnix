@@ -146,8 +146,7 @@ mkFeatureModule {
             home.packages = lib.mkAfter (
               with pkgs;
               [
-                # Agent lanes: worktree lifecycle and the bounded job queue
-                # (target architecture 2026-09-02).
+                # Agent tools for worktree lifecycle and the bounded job queue.
                 worktrunk
                 pueue
                 nix-output-monitor

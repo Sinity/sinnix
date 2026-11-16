@@ -117,14 +117,8 @@ in
 {
   sinnix.backup.genomeRoot = "${neoOuterRealm}/content/genome";
 
-  # The /realm NVMe (Crucial P3 4 TB, QLC, 87% full). Coefficients from fio on
-  # a No_COW 4 GiB file on /realm (O_DIRECT, 20 s each: 4M at depth 16 for
-  # bytes, 4k at depth 64 for IOPS), taken 2026-11-01 under a build wave, so
-  # they are a floor; the QoS lets the virtual rate rise to 6x while
-  # latencies hold. Writes are what the drive cannot sustain (24 MB/s
-  # direct 4M writes once its SLC cache is spent). With the kernel's
-  # automatic SSD profile and no latency targets the virtual rate sat at
-  # 243% while I/O pressure stayed above 80%, so no weight took effect.
+  # The QLC NVMe needs latency targets for IO weights to take effect;
+  # QoS allows higher rates while those targets hold.
   sinnix.machine.blockCost.CT4000P3SSD8 = {
     model = "rbps=1171981054 rseqiops=14123 rrandiops=26675 wbps=24114864 wseqiops=2633 wrandiops=924";
     qos = "rpct=90.00 rlat=10000 wpct=90.00 wlat=50000 min=50.00 max=600.00";
@@ -376,15 +370,8 @@ in
 
     timers.sinnix-fstrim = fstrimJob.systemd.timers.sinnix-fstrim;
 
-    # Ensure the dedicated sinex subvolume exists on the /realm NVMe (not the
-    # MX500) before /var/lib/sinex is mounted, creating it nodatacow;
-    # idempotent, so this is a no-op on an already-provisioned host and only
-    # matters for a fresh install/restore. /realm is the filesystem's top
-    # level (subvol=/), so it works there. It used to mount subvolid=5 itself
-    # with no other options; when that won the race against realm.mount it
-    # was the filesystem's first mount, and btrfs kept its options for every
-    # mount: no compression and async discard instead of /realm's declared
-    # compress=zstd and nodiscard (observed through 2026-10-27).
+    # Create the nodatacow subvolume through /realm before mounting it; the
+    # first btrfs mount sets filesystem-wide options.
     services.ensure-sinex-subvol = {
       description = "Ensure dedicated sinex nodatacow subvolume exists on the /realm NVMe";
       requires = [ "realm.mount" ];

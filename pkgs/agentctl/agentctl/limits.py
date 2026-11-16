@@ -6,8 +6,8 @@ DEFAULT_TIMEOUT_SECONDS = 3_600
 # reaped eventually.
 MAX_AGENT_TIMEOUT_SECONDS = 7 * 24 * 3_600
 MAX_DECLARED_OPERATION_TIMEOUT_SECONDS = 28_800
-# One round trip to a local tool (pueue, wt, gh, git, bd). Five minutes:
-# worktree provisioning under a corpus run takes over a minute and a wedged daemon still surfaces.
+# Deadline for one external tool call (pueue, wt, git including fetch and push, gh, bd, systemctl),
+# so a hung tool surfaces as an error; sized for checkout creation under disk contention.
 CALL_TIMEOUT_SECONDS = 300
 SYSTEMCTL_TIMEOUT_SECONDS = 30
 # Hex characters shown of a run id's suffix, a commit, or a job id.

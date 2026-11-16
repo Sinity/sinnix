@@ -122,9 +122,7 @@ in
           # The protocol is per-service by design and Hyprland does not
           # implement it, so turning the export off here loses nothing and
           # stops the leak at its only source.
-          # MemoryMin claims the compositor's part of session.slice's hard
-          # guarantee: on 2026-10-27 Hyprland's 0.6 GiB was mostly swapped
-          # out under agent load, and every frame waited on swap-in.
+          # MemoryMin claims the compositor's share of session.slice's hard guarantee so frames do not wait on swap-in.
           + lib.optionalString (name == "wayland-wm@.service") ''
 
             [Service]

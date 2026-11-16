@@ -18,7 +18,7 @@
 #      this is USB ISOCHRONOUS BANDWIDTH exhaustion, not disk: the DAC is a
 #      12 Mbps full-speed device whose playback and capture endpoints share
 #      one 1023 byte/frame budget, so 24-bit in both directions does not fit.
-#      The observed trigger (2026-09-14) was the DAC's own unused line-in
+#      The usual trigger is the DAC's own unused line-in
 #      winning the default-source election and being opened by Chrome/Steam;
 #      the `13-fiio-no-capture` rule below disables that node. Moving the DAC
 #      to the bus-2 xHCI controller would raise the ceiling permanently.

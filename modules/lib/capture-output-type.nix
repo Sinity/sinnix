@@ -41,25 +41,10 @@ lib.types.submodule {
             command = lib.mkOption {
               type = lib.types.str;
               description = ''
-                Shell snippet (run as `bash -c "$command"` under
-                `timeout`) answering "is the thing this lane
-                observes actually present and publishing?" --
-                a check on the UPSTREAM source, distinct from
-                whether the lane's own unit is active
-                (systemctl is-active is already covered
-                elsewhere and is precisely the check that
-                missed sinnix-pev0's a11y incident: the unit,
-                listeners, and bus were all healthy while the
-                AT-SPI registry root had zero children
-                published).
-
-                Exit-code contract the health sweep relies on:
-                0 = present, 1 = confirmed absent, anything
-                else (including a timeout's 124) = unknown.
-                A probe that cannot determine the answer must
-                exit something other than 0 or 1 -- silently
-                exiting 0 on failure is exactly the bug class
-                this option exists to catch.
+                Shell snippet run as `bash -c` under timeout to check whether the upstream
+                source is present and publishing, independently of unit status.
+                Exit 0 for present, 1 for confirmed absent, or any other code
+                (including timeout 124) when the answer is unknown.
               '';
             };
             timeoutSeconds = lib.mkOption {
@@ -97,23 +82,10 @@ lib.types.submodule {
         "geometry.width"
       ];
       description = ''
-        Dotted paths into a sinnix-capture-v1 record's `payload`
-        that this lane claims to populate. The hub server's health sweep
-        samples the lane's most recent records and flags the lane
-        `degenerate` when a declared field is null/empty in EVERY
-        sampled record -- the "alive and writing at full cadence,
-        but the data is unconditionally null" failure the
-        staleness check cannot see (screen-frames shipped that way
-        for its whole deployed life; see sinnix-3w9n).
-
-        Declare only fields a healthy record always carries.
-        Fields that are legitimately absent sometimes (an optional
-        subtitle, a nullable parent id) must NOT be listed: the
-        check is deliberately all-or-nothing so a partially
-        populated field is never an alarm, which means a
-        sometimes-null field simply makes the check unable to
-        fire. Leave empty for lanes whose captures are not
-        JSONL envelopes.
+        Dotted paths into a sinnix-capture-v1 record's payload. The health
+        sweep flags a capture when a declared field is null or empty in every
+        sampled record. Declare only fields a healthy record always carries;
+        leave this empty for captures that are not JSONL records.
       '';
     };
   };

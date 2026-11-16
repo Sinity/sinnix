@@ -473,11 +473,7 @@ in
             && !(poolSlices.agent-ctl-pytest ? ManagedOOMMemoryPressure)
             && poolSlices.agent-ctl-pytest.CPUWeight == 200
             && poolSlices.agent-ctl-pytest.IOWeight == 200
-            # The structural invariant the 2026-09-14 corpus OOM exposed: a
-            # child slice's ceiling is meaningless above its parent's, so the
-            # parent must never bind below the widest leaf beneath it.
-            # Provably fails when: agent-ctl-pytest.MemoryHigh is lowered below
-            # agent-ctl-pytest-heavy.MemoryHigh (verified by restoring "6G").
+            # A parent ceiling must not bind below its widest child.
             &&
               sliceBytes poolSlices.agent-ctl-pytest.MemoryHigh
               >= sliceBytes poolSlices.agent-ctl-pytest-heavy.MemoryHigh

@@ -47,8 +47,7 @@
         assert !host.systemd.oomd.enableRootSlice;
         assert !host.systemd.oomd.enableSystemSlice;
         assert !host.systemd.oomd.enableUserSlices;
-        # earlyoom exits at startup on -m above 99; an out-of-range value
-        # crash-looped the service on 2026-10-27 while this check passed.
+        # earlyoom rejects a memory threshold above 99 at startup.
         assert host.services.earlyoom.freeMemThreshold <= 99;
         assert lib.all (arg: lib.hasInfix arg earlyoomArgs) [
           "-m5,5"

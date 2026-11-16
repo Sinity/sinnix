@@ -34,9 +34,7 @@ let
       # consumed by scripts/sinnix-rank the same way scripts import
       # @sinnix-lib.
       sinnix-rank-core = externalPackages.sinnix-rank-core;
-      # sinnix-phone-dispatcher moved out of scripts/ into a real Python
-      # package (sinnix-svvz); scripts/sinnix-phone still names
-      # @sinnix-phone-dispatcher in its own runtimeInputs and resolves here.
+      # sinnix-phone resolves its dispatcher runtime input to this package.
       sinnix-phone-dispatcher = externalPackages.sinnix-phone-dispatcher;
       sinnix-phone-keyguard = externalPackages.sinnix-phone-keyguard;
       # Sinnix's bd, not nixpkgs'. A script naming bare `beads` in its

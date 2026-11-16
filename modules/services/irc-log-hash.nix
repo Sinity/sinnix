@@ -1,13 +1,5 @@
-# IRC log hashing
-#
-# Daily user timer that hashes "old enough" per-day IRC logs in the
-# captures archive and renames them to ``YYYY-MM-DD.b2-<12hex>.log``.
-# The script is packaged from ./irc-log-hash/hash_logs.py; the /realm data tree
-# holds data only (the in-tree scripts/ copy was retired 2026-08-24; the
-# ad-hoc analysis siblings moved to sinity-lynchpin scripts/irc/).
-#
-# See the hash_logs.py header for the 2-day buffer rationale (avoids
-# racing weechat fds across midnight on dormant channels).
+# Daily timer hashes IRC logs older than two days into YYYY-MM-DD.b2-<12hex>.log.
+# See hash_logs.py for the buffer that avoids racing open log files.
 {
   mkServiceModule,
   lib,

@@ -56,40 +56,23 @@ mkServiceModule {
       }
     );
     default = {
-      # Claude workers that run focused tests in their own process reach
-      # 2-3 GiB each; twelve, then eight, held the 8G agent-ctl-agent slice at
-      # 80-95% full memory pressure (2026-09-28), which also paused the pytest
-      # pools through pressure pauses. Six fit.
+      # Claude workers running focused tests reach 2-3 GiB each; six fit the
+      # 8G agent-ctl-agent slice without sustained pressure.
       agent.parallel = 6;
-      # Codex workers: light, mostly waiting on builds in other pools, so
-      # the fleet is sized by available work, not by cores (2026-10-27).
-      # 40 (2026-10-27 15:40) filled zram completely by 16:06 (5 MB free,
-      # 3.1 GB available) next to the job plane's builds; 32 recovered it.
+      # Codex workers mostly wait on builds; 32 fit beside the job plane
+      # without filling zram.
       codex.parallel = 32;
       pytest.parallel = 2;
       pytest-heavy = {
         parallel = 1;
       };
-      # Bounded selections stay admissible beside a wave: a worker runs its own
-      # focused tests here while its own task occupies the agent pool.
-      # Focused jobs run one pytest process. 106 slot receipts (2026-09-27)
-      # peaked at p99 553 MiB and max 988 MiB, so eight fit under the quick
-      # slice's 9G MemoryHigh even at the observed maximum (six running jobs
-      # measured 5.2 GiB together). The width is an interim static bound;
-      # sinnix-tisc makes admission follow live headroom.
+      # Focused jobs run one pytest process (p99 about 550 MiB, max about 1 GiB),
+      # so eight fit under the quick slice's 9G MemoryHigh.
       pytest-quick = {
         parallel = 8;
       };
-      # The widths of the pools that run Cargo builds (normal, bulk, compile)
-      # are the bound on concurrent builds: a job takes its queue slot only
-      # when it can run. Together they admit four, two of them
-      # metadata-only checks. The measure is job completion, not PSI: with
-      # normal at 2 beside a bulk build, focused job 625 timed out at 30
-      # minutes on 2026-11-02 while still compiling the `polylogue` crate
-      # (4.5 CPU-minutes of work when the drive is free), because /realm's
-      # QLC drive sustains about 25-50 MB/s of writes and three test builds
-      # each write 1-6 GB.
-      # Focused test builds and lane checks: one at a time.
+      # Cargo pool widths bound concurrent builds to four, two metadata-only:
+      # /realm sustains 25-50 MB/s writes, while each test build writes 1-6 GB.
       normal.parallel = 1;
       # Full checks and arbitrary commands, the longest builds: one at a time.
       bulk.parallel = 1;
@@ -99,24 +82,18 @@ mkServiceModule {
       # The gateway's shell.run groups: agent CLIs and commands declared
       # long go to shell-long, so quick commands don't wait behind them.
       shell-quick.parallel = 8;
-      # ChatGPT sessions launch 10-60 min `claude -p` workers here
-      # (2026-09-29); four at once is what the old shared pool held.
+      # ChatGPT sessions launch 10-60 minute Claude workers here, four at once.
       shell-long.parallel = 4;
       # Long I/O-heavy maintenance (copies between disks, offloads) that must
       # yield the disk to builds and interactive work; its slice carries the
       # lowest I/O weight in the job plane.
       background.parallel = 2;
-      # Measurements and full system builds: long jobs that held bulk slots
-      # while the checks gating merges queued behind them. A slot each,
-      # outside bulk. A measurement that compiles uses `measure`; restores and
-      # benchmarks of prebuilt binaries use `measure_run`.
+      # Measurements and full system builds each get a slot outside bulk, so
+      # checks can run beside them; prebuilt benchmarks use `measure_run`.
       measure.parallel = 1;
       system-build.parallel = 1;
-      # Rust type and lint checks (`compile`, `fast`, Clippy) write only
-      # metadata and take 1-4 minutes. In their own pool they never wait
-      # behind test builds or for a pause of `normal` and `bulk`, so a head
-      # is known to compile before it is pushed. Two at once: each peaks at
-      # 3.1-3.9 GiB (2026-11-01), inside the compile slice's 8G.
+      # Rust type and lint checks write only metadata and have their own pool;
+      # two at once, each peaking at 3-4 GiB, fit in the compile slice's 8G.
       compile.parallel = 2;
     };
     description = "Each pueue group's width and cross-pool admission policy.";
@@ -162,9 +139,7 @@ mkServiceModule {
         }
         {
           manager = "user";
-          # Not the yielding background class: at Nice 10 and IO priority 7 the
-          # tick starved during the very stalls it exists to answer, and timed
-          # out 14 times over the 10-18..10-27 boot.
+          # The tick must run during stalls, so it uses the ordinary class.
           resourceClass = "ordinary";
           # The pass pauses and resumes pueue groups through the pueue client.
           path = [ pkgs.pueue ];

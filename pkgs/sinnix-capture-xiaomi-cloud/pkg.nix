@@ -1,11 +1,5 @@
-# Xiaomi cloud capture (sinnix-ogll).
-#
-# The protocol client is upstream GPL-3 TypeScript (miband-bot), pinned and
-# fetched here rather than vendored into this repository -- the checkout
-# stays byte-auditable against upstream, and this public repo carries only
-# the thin orchestration entry (xiaomi-sync.ts). Bun runs the TypeScript
-# directly; the client needs nothing beyond node builtins, so there is no
-# lockfile, no node_modules, and no build step.
+# Xiaomi cloud capture runs the pinned upstream TypeScript client through Bun;
+# its node builtins need no dependency installation or build step.
 {
   lib,
   stdenvNoCC,

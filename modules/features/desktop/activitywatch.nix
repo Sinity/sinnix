@@ -103,11 +103,7 @@ mkFeatureModule {
                     idle-timeout-seconds = 60;
                     poll-time-idle-seconds = 5;
                     poll-time-window-seconds = 2;
-                    # Strip CLI-agent spinner glyphs (Claude Code half-disks,
-                    # braille frames, ✳) from kitty titles: each animation tick
-                    # otherwise defeats heartbeat merging and one agent session
-                    # becomes thousands of near-zero-duration window events
-                    # (93% of the 2026-08 window bucket was this churn).
+                    # Strip CLI-agent spinner glyphs from kitty titles so animation does not defeat heartbeat merging.
                     filters = [
                       {
                         match-app-id = "kitty";

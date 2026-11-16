@@ -18,19 +18,11 @@
 # ── Where the pages come from ───────────────────────────────────────────────
 # Caddy serves no HTML of its own beyond /reports/. Every page is rendered on
 # request by the hub-server, which already holds the state the pages show, and
-# Caddy reverse-proxies the page paths to the hub server's Unix socket. Rendering
-# on request replaced an earlier design that wrote the same pages to static
-# files on a 60-second timer; a page is now as current as the moment it was
-# asked for, and there is no window in which the hub describes a system that
-# has since moved on.
+# Caddy reverse-proxies page paths to the hub server's Unix socket; rendering on request keeps pages current.
 #
 # ── Where annotations go ────────────────────────────────────────────────────
-# `/feedback` is a route on that same hub server, writing the same append-only
-# JSONL an earlier standalone feedback daemon wrote (same envelope, same
-# file-per-UTC-day, same fsync per line -- agents read those files directly).
-# Arrival of a `sinnix-rank-v1` judgment starts the ingest that a 120s timer used
-# to run, coalesced so a comparison session is drained once rather than once
-# per tap.
+# `/feedback` appends JSONL by UTC day and fsyncs each line.
+# A sinnix-rank-v1 judgment starts coalesced ingest so a comparison session is drained once.
 #
 # Auth: the hub server treats its Unix socket as authorized (it is 0600 in the
 # operator's runtime dir) and still demands a bearer token on its loopback TCP
@@ -74,11 +66,7 @@
 let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   userName = config.sinnix.user.name;
-  # Where the phone's always-on telemetry push (speech, the app's event
-  # mirror) lands, demuxed by the dispatcher's embedded TCP receiver
-  # (absorbed from an earlier standalone receiver unit, sinnix-tjqi). Host/
-  # device telemetry's subject root, not this module's own reportsDir/
-  # feedbackDir -- see modules/foundation.nix.
+  # The dispatcher's embedded TCP receiver writes phone telemetry beneath the device telemetry root (modules/foundation.nix).
   phoneLaneRoot = "${config.sinnix.paths.devicesRoot}/shared";
   phoneStateRoot = "${config.sinnix.paths.stateRoot}/sinnix-phone";
   phoneAmbientProgressPath = "${phoneStateRoot}/ambient-progress";
@@ -542,13 +530,7 @@ mkServiceModule {
         # audio can be re-transcribed by a better engine later, a transcript
         # cannot be un-lost.
         "d ${phoneLaneRoot}/phone/speech 0700 ${userName} users -"
-        # What prime holds for the phone, moved here from the retired
-        # phone-drain module: what the app FETCHES (the glance is generated
-        # on request; receipts, notifications and decks are files)
-        # and the executed-intent tokens that make a re-delivered intent a
-        # no-op. On the NVMe volume rather than the wear-limited root, and
-        # under /realm/state because losing the token set would let an
-        # already-executed intent run a second time after a reboot.
+        # Phone state includes fetched files and executed-intent tokens; /realm/state preserves tokens across reboot to prevent replay.
         "d ${phoneStateRoot} 0700 ${userName} users -"
         "d ${phoneStateRoot}/inbox 0700 ${userName} users -"
         "d ${phoneStateRoot}/inbox/receipts 0700 ${userName} users -"
@@ -568,27 +550,8 @@ mkServiceModule {
           resourceClass = "ordinary";
           notifyOnFailure = true;
           operatorRestart = true;
-          # The ambient archive lands HERE now, not through the drain: the
-          # capture app uploads each finished chunk to this service and
-          # deletes its copy only once the hash comes back verified. The lane
-          # is declared beside the unit that receives it so the thing that
-          # can fail is the thing being watched -- it sat on phone-drain
-          # until 2026-08-17, which by then was a unit that no longer touched
-          # these files. The drain itself is gone now; what the phone cannot
-          # push (its system log, which needs READ_LOGS) is pulled by
-          # sinnix-phone-logcat, and nothing else is.
-          #
-          # Two hours, where the pull-era budget was a day. A chunk closes
-          # every five minutes and ships within a heartbeat, so the only
-          # honest reasons for silence are a phone off wifi or genuinely not
-          # recording -- and both of those are worth hearing about long
-          # before tomorrow.
-          #
-          # phone-speech and the app's event lane moved here from the retired
-          # sinnix-phone-receiver surface (sinnix-tjqi): the dispatcher's
-          # embedded TCP receiver is what writes them now, so the lane
-          # declaration sits beside the unit that can actually fail to write
-          # it, same reasoning as phone-ambient above. Fields unchanged.
+          # The app deletes each ambient chunk only after its hash is verified; the receiving unit owns its capture.
+          # Chunks ship every five minutes, so the freshness budget is two hours.
           captures = [
             {
               name = "phone-ambient";
@@ -606,27 +569,8 @@ mkServiceModule {
               eventDriven = true;
             }
             {
-              # The app's own event log -- battery, health, location,
-              # thermal, notifications, instrument runs, and the lane_blocked
-              # records that say when one of those stopped and why. The
-              # richest lane the phone has, and the one `sinnix-phone
-              # app-status` answers from when adb is down, which is when the
-              # question matters most.
-              #
-              # It arrives here as byte ranges appended to the day file
-              # (/phone/v1/events), which is why the budget is half an hour
-              # rather than the drain's day: batches leave the phone on a 20
-              # second heartbeat, so the budget only has to absorb an
-              # ordinary phone-off-the-tailnet stretch.
-              #
-              # This replaced a second lane, `phone-event`, which
-              # carried a live TCP MIRROR of the same records into a
-              # different directory. Two lanes for one subject meant every
-              # consumer had to dedup them, and the mirror could never be the
-              # authority anyway: its cursor started at end-of-file, so
-              # anything written while it was off did not exist as far as it
-              # was concerned. That directory keeps its files as history;
-              # nothing writes it any more, so it is no longer declared.
+              # The app's event log includes battery, health, location, thermal, notifications and instrument runs.
+              # Batches arrive as byte ranges every 20 seconds; the half-hour budget allows for time off the tailnet.
               name = "phone-events";
               path = "${phoneLaneRoot}/phone/events";
               cadenceSeconds = 20;
@@ -680,14 +624,7 @@ mkServiceModule {
           Unit.Description = "Prime's live half of the phone's dual transport, plus the always-on telemetry receiver";
           Service = {
             Type = "simple";
-            # sinnix-score is shelled out to (scoring on trace/voice_note
-            # arrival, sinnix-tjqi) via the
-            # package's own wrapped PATH now (pkgs/sinnix-phone-dispatcher's
-            # pkg.nix makeWrapperArgs), not this Environment -- packaging the
-            # dispatcher (sinnix-svvz) traded the scripts/ registry's
-            # writeShellApplication runtimeInputs wrapper for that mechanism.
-            # Kept as the baseline PATH anything else this process shells out
-            # to inherits.
+            # This is the baseline PATH for subprocesses; sinnix-score comes from the package wrapper.
             Environment = [
               "PATH=/run/wrappers/bin:/run/current-system/sw/bin"
               "SINNIX_PHONE_STATE_DIR=${phoneStateRoot}"

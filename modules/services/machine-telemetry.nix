@@ -138,12 +138,8 @@ mkServiceModule {
           scope = "user";
           path = userSliceCgroupPath "agent";
         }
-        # Historical labels from before the budget nested these slices
-        # (2026-10-27), kept so the existing series stay comparable:
-        # user.agent is the CLI slice, user.agenttool the tool slice, and
-        # user.agentctl-work the job plane ROOT (agent-ctl.slice), not the
-        # agent-ctl-work.slice inside it. The per-pool children arrive below
-        # as user.agentctl-pool-<pool>.
+        # Series labels preserve comparability: user.agent is the CLI slice, user.agenttool the tool slice, and user.agentctl-work the job plane root.
+        # Per-pool children use user.agentctl-pool-<pool>.
         {
           label = "user.agent";
           scope = "user";
@@ -174,10 +170,7 @@ mkServiceModule {
           scope = "user";
           path = "${userSliceRoot}/backup.slice";
         }
-        # The desktop-side slices the agent budget is sized against. Their
-        # MemoryMin and MemoryLow rest on one-off readings (2026-10-27);
-        # without a series there is no way to tell whether the guarantee is
-        # still the right size.
+        # These desktop slices inform the agent budget; their memory series helps assess the reservation.
         {
           label = "user.app";
           scope = "user";

@@ -12,9 +12,7 @@
 # The psi-gate patch adds --mem-psi-min: a third conjunction term that only
 # permits kills while memory PSI "full avg10" is at or above the given value
 # (fail-open when pressure data is unavailable; EARLYOOM_PSI_PATH is a test
-# hook). Measured basis (2026-08-18 incident taxonomy, sinnix-miop): 84% of
-# post-2026-07-13 earlyoom kills happened at memory PSI < 10 — the machine
-# was not stalling, page cache and swap were absorbing the burst as designed.
+# hook). The threshold permits kills under memory stalls rather than bursts.
 # Upstream earlyoom 1.9.0 is deliberately meminfo-only and carries no PSI
 # support, so this is a local patch with the same recheck condition (b) as
 # above. Applies on top of the physical-memtotal patch; regenerate both

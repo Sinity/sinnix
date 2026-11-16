@@ -105,15 +105,8 @@
     # permission a sideloaded app can hold. Everything else the phone produces
     # it pushes itself -- see docs/phone.md.
     phone-logcat.enable = true;
-    # The other half of the phone's hold-still instruments (score the traces
-    # the app uploads: pulse, tremor, sway, interoception, voice) and the
-    # persistent phone->prime telemetry push both used to be separate
-    # opt-in services here. As of 2026-08-17 (sinnix-tjqi) both live inside
-    # sinnix-phone-dispatcher, which runs whenever hub.enable does (above) --
-    # there is no separate toggle left to set.
-    # Router telemetry pulled from prime on a timer: syslog deltas, DHCP
-    # leases, wifi associations with signal, and nlbwmon per-device bandwidth.
-    # Nothing runs on the router.
+    # The dispatcher scores phone data and pushes telemetry when the hub is
+    # enabled; router telemetry is pulled on a timer.
     capture-router.enable = true;
     below = {
       # Keep telemetry on /realm so the root filesystem stays slim. Same
@@ -132,9 +125,8 @@
     polylogue = {
       enable = true;
       dataHome = "/realm/state/polylogue-live/data-20261111";
-      # Polylogue 18af817ebd refuses every source scan on this home
-      # ("coverage entries must be unique within a root") and the refusal
-      # also stops the index build; off until the fix is deployed.
+      # Source scans reject duplicate coverage entries and stop index builds;
+      # serve the existing archive with source scanning disabled.
       readSources = false;
       # The first index build of Polylogue master outgrew the host's memory
       # beside other work; it resumes by hand with lower-memory settings.

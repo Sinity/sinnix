@@ -142,41 +142,8 @@ in
       tmpfiles.rules = lib.mkAfter [
         "d ${paths.outerRealm} 0755 root root -"
         "d ${paths.outerRealm}/inbox 0755 ${username} users -"
-        # The lake is the operator's, like every other root in this list.
-        # These two were the outliers at root:root, which meant any capture
-        # producer running as the operator could not create its own lane
-        # directory: sinnix-url-ledger and sinnix-video-resolve
-        # had each never written a single file while their timers reported
-        # success. Root daemons that write here are unaffected -- root ignores
-        # directory permissions.
-        #
-        # tmpfiles `d` also re-owns an existing directory to its declared
-        # owner (2026-09-28: four root-owned /realm containers became the
-        # operator's at activation with no manual chown), but only for
-        # directories with a rule of their own and a safe parent chain.
-        # Undeclared directories created root-side (a sudo mkdir, a recut)
-        # keep their owner; 2026-08-17 that had re-sprinkled root ownership
-        # across /realm, /realm/state, /realm/library, /realm/tmp/work, and
-        # five recut subject roots, so those roots are declared below. The
-        # list avoids `z`/`Z`: re-chowning live trees every boot is its own
-        # hazard. Service-state leaves root daemons own
-        # (state/journal, state/containers, backup targets, swap, the
-        # snapshots under .btrfs) stay root on purpose.
-        #
-        # A container directory that only holds such leaves is still the
-        # operator's: tmpfiles refuses (as an unsafe path transition) every
-        # rule whose parent chain steps from a user-owned directory into a
-        # root-owned one, so a root-owned container silently disables every
-        # rule beneath it.
-        #
-        # The data root is the operator's alone. Group `users` also holds
-        # service accounts (transmission's primary group), so the boundary is
-        # the owner bit, not the group. A system service that needs a subtree
-        # gets it through its own mount namespace (TemporaryFileSystem=/realm
-        # plus a bind of that subtree), as llama-cpp and ollama
-        # do; sinexd reads through CAP_DAC_READ_SEARCH; root daemons ignore
-        # the mode. Modes below this one stay as they are: nothing but the
-        # operator reaches them through /realm.
+        # Operator-owned private roots let capture producers create directories;
+        # tmpfiles rules need a safe parent chain, without recursive ownership changes.
         "d ${paths.realmRoot} 0700 ${username} users -"
         "f+ ${paths.realmRoot}/.hidden 0644 ${username} users - state\\ntmp\\nworktree\\n"
         "d ${paths.realmRoot}/.btrfs 0755 ${username} users -"

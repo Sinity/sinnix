@@ -67,6 +67,7 @@ let
       description = "Personal analysis hub: cross-source timelines, correlations, and materialized products";
       transport = "stdio";
       tier = "deep-evidence";
+      # Analyses run for minutes.
       callTimeoutSeconds = 300;
       command = "mcp-lynchpin";
       # Mixed routers stay change at the tool grain. These action contracts are
@@ -131,7 +132,7 @@ let
       transport = "stdio";
       tier = "recall";
       command = "mcp-polylogue";
-      # Let the daemon's default 30s read deadline return its typed refusal.
+      # Exceeds the daemon's 30 s read deadline so its typed refusal arrives first.
       callTimeoutSeconds = 35;
       profiles = {
         evidence = { };
