@@ -53,9 +53,7 @@ class OnchangeFreshnessFixture(unittest.TestCase):
         }
         self.publish()
         self.now = int(datetime(2026, 1, 3, tzinfo=timezone.utc).timestamp())
-        self.enterContext(
-            patch.object(time, "time", side_effect=lambda: self.now)
-        )
+        self.enterContext(patch.object(time, "time", side_effect=lambda: self.now))
         self.enterContext(
             patch.object(snapshots, "filesystem_identity", return_value=self.filesystem)
         )

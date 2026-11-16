@@ -85,7 +85,10 @@ def scenario(root, isolated):
 
 
 def test_genome_files_cache_suffix_survives_realm_creates(tmp_path):
-    assert [scenario(tmp_path / "shared", False), scenario(tmp_path / "isolated", True)] == [
+    assert [
+        scenario(tmp_path / "shared", False),
+        scenario(tmp_path / "isolated", True),
+    ] == [
         {
             "isolated": False,
             "realm_creates": 21,

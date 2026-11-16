@@ -49,9 +49,7 @@ class SnapshotInventoryFixture(unittest.TestCase):
             raise OSError(errno.EIO, "entry lookup failed")
 
         entry.stat = unavailable
-        with patch.object(
-            os, "scandir", return_value=nullcontext(iter([entry]))
-        ):
+        with patch.object(os, "scandir", return_value=nullcontext(iter([entry]))):
             with self.assertRaises(OSError):
                 snapshots.snapshot_names("/synthetic/snapshots", "realm.*")
 
@@ -62,7 +60,9 @@ class FilesystemIdentityFixture(unittest.TestCase):
             {"filesystems": [{"target": "/synthetic", "fstype": "btrfs"}]}
         )
         with patch.object(
-            snapshots, "run", side_effect=[mount, f"Label: 'fixture'  uuid: {FS_UUID}\n"]
+            snapshots,
+            "run",
+            side_effect=[mount, f"Label: 'fixture'  uuid: {FS_UUID}\n"],
         ) as probe:
             self.assertEqual(
                 snapshots.filesystem_identity("/synthetic/nested/snapshot"), FS_UUID

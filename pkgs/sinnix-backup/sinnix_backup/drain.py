@@ -52,7 +52,9 @@ def _pending_record(config: BackupConfig, source: SnapshotSource) -> Path:
     return source.marker(config.state_directory, "pending-create.json")
 
 
-def _queue_arguments(config: BackupConfig, source: SnapshotSource) -> tuple[Path, str, Path, str, str]:
+def _queue_arguments(
+    config: BackupConfig, source: SnapshotSource
+) -> tuple[Path, str, Path, str, str]:
     return (
         source.snapshot_directory,
         source.name_glob,
@@ -76,7 +78,11 @@ def _number_text(value: Any) -> str:
 
 
 def _archives(repository_url: str) -> set[str]:
-    return set(borg.run_borg(["list", "--short", repository_url], capture=True).stdout.splitlines())
+    return set(
+        borg.run_borg(
+            ["list", "--short", repository_url], capture=True
+        ).stdout.splitlines()
+    )
 
 
 def _unmount(bind_path: Path) -> None:
@@ -84,7 +90,9 @@ def _unmount(bind_path: Path) -> None:
         subprocess.run(["umount", str(bind_path)], check=True)
 
 
-def _adoptable_acknowledgement(config: BackupConfig, source: SnapshotSource) -> str | None:
+def _adoptable_acknowledgement(
+    config: BackupConfig, source: SnapshotSource
+) -> str | None:
     """The snapshot the latest marker acknowledges under the current policy, or None.
 
     Only the same named, still-identified snapshot is adopted, so no large
@@ -105,7 +113,9 @@ def _adoptable_acknowledgement(config: BackupConfig, source: SnapshotSource) -> 
     return record[0]
 
 
-def _publish_acknowledgement(config: BackupConfig, source: SnapshotSource, snapshot: str, acknowledgement: Path) -> None:
+def _publish_acknowledgement(
+    config: BackupConfig, source: SnapshotSource, snapshot: str, acknowledgement: Path
+) -> None:
     """Advance the latest marker when this snapshot is not older; always record last success."""
     latest = _latest(config, source)
     text = acknowledgement.read_text()
@@ -160,7 +170,9 @@ def drain(config: BackupConfig, label: str) -> int:
             # newest stays for the independent audit.
             if latest.is_file():
                 lock.wait()
-                prune_plan = snapshots.verified_prune_plan(*_queue_arguments(config, source))
+                prune_plan = snapshots.verified_prune_plan(
+                    *_queue_arguments(config, source)
+                )
                 lock.release()
                 for row in prune_plan:
                     lock.wait()
@@ -171,7 +183,13 @@ def drain(config: BackupConfig, label: str) -> int:
                     # Cleaner completion and pressure settling do not use Borg,
                     # so they run without the lock before the next deletion.
                     subprocess.run(
-                        ["btrfs", "subvolume", "sync", str(source.snapshot_directory), str(row[3])],
+                        [
+                            "btrfs",
+                            "subvolume",
+                            "sync",
+                            str(source.snapshot_directory),
+                            str(row[3]),
+                        ],
                         check=True,
                     )
                     wait_for_io_settle()
@@ -192,11 +210,15 @@ def plan(config: BackupConfig, label: str) -> dict[str, Any]:
         latest = _latest(config, source)
         acknowledgements = snapshots.acknowledgement_directory(latest)
         queue = snapshots.queued_snapshots(*_queue_arguments(config, source))
-        archives = _archives(repository.url) if queue and repository.initialized else set()
+        archives = (
+            _archives(repository.url) if queue and repository.initialized else set()
+        )
         rows = []
         for snapshot in queue:
             archive = choose_archive_name(source, snapshot, archives)
-            snapshot_uuid = snapshots.snapshot_details(source.snapshot_directory / snapshot)[0]
+            snapshot_uuid = snapshots.snapshot_details(
+                source.snapshot_directory / snapshot
+            )[0]
             rows.append(
                 {
                     "snapshot": snapshot,
@@ -224,13 +246,20 @@ def plan(config: BackupConfig, label: str) -> dict[str, Any]:
         ),
         "queue": rows,
         "prune_plan": [
-            {"snapshot": name, "uuid": uuid, "generation": generation, "subvolume_id": subvolume_id}
+            {
+                "snapshot": name,
+                "uuid": uuid,
+                "generation": generation,
+                "subvolume_id": subvolume_id,
+            }
             for name, uuid, generation, subvolume_id in prune_plan
         ],
     }
 
 
-def choose_archive_name(source: SnapshotSource, snapshot: str, archives: set[str]) -> str:
+def choose_archive_name(
+    source: SnapshotSource, snapshot: str, archives: set[str]
+) -> str:
     """The archive name for a snapshot before any create record is consulted.
 
     An archive made under an older policy keeps its name and the snapshot gets
@@ -256,7 +285,9 @@ def _unused_name(original: str, kind: str, first: int, archives: set[str]) -> st
     return f"{original}-{kind}-v{number}"
 
 
-def archive_snapshot(config: BackupConfig, source: SnapshotSource, snapshot: str, lock: BorgLock) -> None:
+def archive_snapshot(
+    config: BackupConfig, source: SnapshotSource, snapshot: str, lock: BorgLock
+) -> None:
     """Create, check and acknowledge one snapshot. The caller holds `lock`.
 
     Any failure raises and keeps the snapshot on disk.
@@ -325,7 +356,9 @@ def archive_snapshot(config: BackupConfig, source: SnapshotSource, snapshot: str
                 )
         else:
             try:
-                check = check_archive(config, source, snapshot, archive, details, created)
+                check = check_archive(
+                    config, source, snapshot, archive, details, created
+                )
             except CHECK_FAILURES as error:
                 if created is not None:
                     raise
@@ -338,7 +371,9 @@ def archive_snapshot(config: BackupConfig, source: SnapshotSource, snapshot: str
                 check = _content_check(config, source, archive, details[0], "full")
 
         if created is not None and check.get("archive_id") != created.archive_id:
-            raise ValueError(f"Created archive identity changed; retaining {snapshot_path}")
+            raise ValueError(
+                f"Created archive identity changed; retaining {snapshot_path}"
+            )
         fallback = {
             "create_seconds": created.seconds if created else 0,
             "create_original_bytes": created.original_bytes if created else 0,
@@ -347,7 +382,9 @@ def archive_snapshot(config: BackupConfig, source: SnapshotSource, snapshot: str
         check = {
             **check,
             **{
-                key: value if check.get(key) is None or check.get(key) is False else check[key]
+                key: value
+                if check.get(key) is None or check.get(key) is False
+                else check[key]
                 for key, value in fallback.items()
             },
         }
@@ -382,7 +419,13 @@ def archive_snapshot(config: BackupConfig, source: SnapshotSource, snapshot: str
     _publish_acknowledgement(config, source, snapshot, acknowledgement)
 
 
-def create_archive(config: BackupConfig, source: SnapshotSource, snapshot: str, archive: str, details: tuple[str, int, int]) -> CreateResult:
+def create_archive(
+    config: BackupConfig,
+    source: SnapshotSource,
+    snapshot: str,
+    archive: str,
+    details: tuple[str, int, int],
+) -> CreateResult:
     """Run the drain's `borg create` on the bind mount; record it for create-checked sources."""
     command = borg.snapshot_create_command(
         "borg",
@@ -432,7 +475,9 @@ def create_archive(config: BackupConfig, source: SnapshotSource, snapshot: str, 
             ) from error
         record = {**record, "create_seconds": seconds}
         try:
-            markers.publish_marker(_pending_record(config, source), _compact(record) + "\n")
+            markers.publish_marker(
+                _pending_record(config, source), _compact(record) + "\n"
+            )
         except OSError as error:
             raise ValueError(
                 f"Could not publish creation receipt; retaining {source.label} snapshot {snapshot}"
@@ -445,7 +490,14 @@ def create_archive(config: BackupConfig, source: SnapshotSource, snapshot: str, 
     return CreateResult(archive_id, original_bytes, seconds, stats)
 
 
-def check_archive(config: BackupConfig, source: SnapshotSource, snapshot: str, archive: str, details: tuple[str, int, int], created: CreateResult | None) -> dict[str, Any]:
+def check_archive(
+    config: BackupConfig,
+    source: SnapshotSource,
+    snapshot: str,
+    archive: str,
+    details: tuple[str, int, int],
+    created: CreateResult | None,
+) -> dict[str, Any]:
     """Check an archive of a source that is compared by content.
 
     A fresh create relies on the previous full comparison while that is under
@@ -455,11 +507,19 @@ def check_archive(config: BackupConfig, source: SnapshotSource, snapshot: str, a
     latest = _latest(config, source)
     mode = "full"
     if created is not None:
-        mode = create_record.choose_check_mode(latest, source.snapshot_directory, source.coverage)
+        mode = create_record.choose_check_mode(
+            latest, source.snapshot_directory, source.coverage
+        )
     return _content_check(config, source, archive, details[0], mode)
 
 
-def _content_check(config: BackupConfig, source: SnapshotSource, archive: str, snapshot_uuid: str, mode: str) -> dict[str, Any]:
+def _content_check(
+    config: BackupConfig,
+    source: SnapshotSource,
+    archive: str,
+    snapshot_uuid: str,
+    mode: str,
+) -> dict[str, Any]:
     return create_record.compare_archive(
         source.bind_path,
         archive,
@@ -471,7 +531,12 @@ def _content_check(config: BackupConfig, source: SnapshotSource, archive: str, s
     )
 
 
-def retire_snapshot(config: BackupConfig, source: SnapshotSource, row: tuple[str, str, int, int], lock: BorgLock) -> bool:
+def retire_snapshot(
+    config: BackupConfig,
+    source: SnapshotSource,
+    row: tuple[str, str, int, int],
+    lock: BorgLock,
+) -> bool:
     """Delete one acknowledged snapshot after rechecking it; the caller holds `lock`.
 
     Maintenance may have changed archives since the prune plan, so the
@@ -480,7 +545,9 @@ def retire_snapshot(config: BackupConfig, source: SnapshotSource, row: tuple[str
     """
     name, snapshot_uuid, generation, subvolume_id = row
     latest = _latest(config, source)
-    current = snapshots.verified_prune_candidate(*_queue_arguments(config, source), name)
+    current = snapshots.verified_prune_candidate(
+        *_queue_arguments(config, source), name
+    )
     if current != (name, snapshot_uuid, generation, subvolume_id):
         return False
     path = source.snapshot_directory / name
@@ -491,10 +558,14 @@ def retire_snapshot(config: BackupConfig, source: SnapshotSource, row: tuple[str
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            print(f"Retaining snapshot held by an independent audit: {name}", flush=True)
+            print(
+                f"Retaining snapshot held by an independent audit: {name}", flush=True
+            )
             return False
         actual = snapshots.snapshot_details(path)
-        marker_filesystem = (markers.read_marker(latest) or {}).get("filesystem_uuid", "")
+        marker_filesystem = (markers.read_marker(latest) or {}).get(
+            "filesystem_uuid", ""
+        )
         if snapshots.filesystem_identity(path) != marker_filesystem:
             raise ValueError(f"Snapshot filesystem changed; retaining {path}")
         if actual != (snapshot_uuid, generation, subvolume_id):

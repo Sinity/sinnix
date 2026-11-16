@@ -16,7 +16,8 @@ let
       "library/model/control-vector"
     ];
   };
-  backupJson = evaluated: builtins.fromJSON evaluated.config.environment.etc."sinnix/backup.json".text;
+  backupJson =
+    evaluated: builtins.fromJSON evaluated.config.environment.etc."sinnix/backup.json".text;
   # Every unit modules/lib/backup/units.nix declares.
   backupJobNames = [
     "btrbk"
@@ -155,8 +156,7 @@ assert lib.assertMsg (
                 in
                 service.script == ""
                 && (
-                  name == "borgbackup-capacity"
-                  || lib.hasInfix "/bin/sinnix-backup " service.serviceConfig.ExecStart
+                  name == "borgbackup-capacity" || lib.hasInfix "/bin/sinnix-backup " service.serviceConfig.ExecStart
                 )
               ) backupJobNames;
               message = "Every backup unit must run a sinnix-backup command from ExecStart, with no inline script";
@@ -183,8 +183,7 @@ assert lib.assertMsg (
                       runsBackup = contains "/bin/sinnix-backup " execStart;
                       invoked = lib.filter (
                         scriptName:
-                        contains "/bin/${scriptName}" execStart
-                        || (runsBackup && contains "\"${scriptName}\"" packageText)
+                        contains "/bin/${scriptName}" execStart || (runsBackup && contains "\"${scriptName}\"" packageText)
                       ) packagedScriptNames;
                     in
                     backupText
@@ -200,10 +199,7 @@ assert lib.assertMsg (
                     dirOf path == backup.state_directory
                     && (
                       contains base packageText
-                      || (
-                        (backup.sources ? ${stem} || contains "\"${stem}\"" packageText)
-                        && contains kind packageText
-                      )
+                      || ((backup.sources ? ${stem} || contains "\"${stem}\"" packageText) && contains kind packageText)
                     );
                   jobs = lib.filterAttrs (
                     name: surface: lib.hasPrefix "borgbackup-" name && surface.captures != [ ]
@@ -212,9 +208,7 @@ assert lib.assertMsg (
                 jobs != { }
                 && lib.all (
                   name:
-                  lib.all (
-                    lane: contains lane.path (writerText name) || stateMarker lane.path
-                  ) jobs.${name}.captures
+                  lib.all (lane: contains lane.path (writerText name) || stateMarker lane.path) jobs.${name}.captures
                 ) (lib.attrNames jobs);
               message = "Every Borg job's capture lane must point at a path its unit -- or a packaged script that unit runs -- actually writes";
             }
@@ -320,7 +314,9 @@ assert lib.assertMsg (
       services = backupRuntimeEval.config.systemd.services;
       timers = backupRuntimeEval.config.systemd.timers;
       backup = backupJson backupRuntimeEval;
-      runsCommand = name: command: lib.hasSuffix "/bin/sinnix-backup ${command}" services.${name}.serviceConfig.ExecStart;
+      runsCommand =
+        name: command:
+        lib.hasSuffix "/bin/sinnix-backup ${command}" services.${name}.serviceConfig.ExecStart;
 
       backupBorgHookRuntime =
         assert lib.assertMsg
@@ -352,20 +348,21 @@ assert lib.assertMsg (
             && verify.serviceConfig.TimeoutStartSec == "4h30m"
             && timers.borgbackup-verify.timerConfig.OnCalendar == "Sun 13:00:00"
             && runsCommand "borgbackup-verify" "check-repositories"
-            && lib.take 3 backup.jobs.integrity.repositories == [
-              {
-                repository = "persist";
-                seconds = 1800;
-              }
-              {
-                repository = "realm";
-                seconds = 7200;
-              }
-              {
-                repository = "sinex-blobs";
-                seconds = 1800;
-              }
-            ]
+            &&
+              lib.take 3 backup.jobs.integrity.repositories == [
+                {
+                  repository = "persist";
+                  seconds = 1800;
+                }
+                {
+                  repository = "realm";
+                  seconds = 7200;
+                }
+                {
+                  repository = "sinex-blobs";
+                  seconds = 1800;
+                }
+              ]
             && lib.hasInfix "MAX_DURATION=1800" checkScript
             && lib.hasInfix "VERIFY_DATA=0" checkScript
             && lib.hasInfix "file:///outer-realm/backup/borg-persist-v1" checkScript
@@ -385,20 +382,21 @@ assert lib.assertMsg (
         assert lib.assertMsg (
           services.borgbackup-drain-coordinator.serviceConfig.TimeoutStartSec == "80h15m"
           && services.borgbackup-job-realm.serviceConfig.TimeoutStartSec == "24h"
-          && services.borgbackup-drain-coordinator.unitConfig.PropagatesStopTo == [
-            "machine-telemetry-sqlite-backup.service"
-            "polylogue-sqlite-backup.service"
-            "btrbk.service"
-            "borgbackup-job-polylogue-state.service"
-            "borgbackup-job-sinex-blobs.service"
-            "borgbackup-job-realm.service"
-            "borgbackup-job-genome.service"
-            "borgbackup-job-persist.service"
-            "borgbackup-root-snapshots.service"
-            "borgbackup-maintenance.service"
-            "borgbackup-coverage-audit-realm.service"
-            "borgbackup-local-dumps.service"
-          ]
+          &&
+            services.borgbackup-drain-coordinator.unitConfig.PropagatesStopTo == [
+              "machine-telemetry-sqlite-backup.service"
+              "polylogue-sqlite-backup.service"
+              "btrbk.service"
+              "borgbackup-job-polylogue-state.service"
+              "borgbackup-job-sinex-blobs.service"
+              "borgbackup-job-realm.service"
+              "borgbackup-job-genome.service"
+              "borgbackup-job-persist.service"
+              "borgbackup-root-snapshots.service"
+              "borgbackup-maintenance.service"
+              "borgbackup-coverage-audit-realm.service"
+              "borgbackup-local-dumps.service"
+            ]
           && lib.all (name: !(builtins.hasAttr name timers)) [
             "polylogue-sqlite-backup"
             "borgbackup-root-snapshots"
@@ -545,7 +543,9 @@ assert lib.assertMsg (
       # The evaluated policy file of the fixture host above. Package tests
       # relocate its absolute paths into a scratch tree, so they run against
       # the schema and values production reads.
-      backupFixtureConfig = pkgs.writeText "backup-fixture-config.json" backupRuntimeEval.config.environment.etc."sinnix/backup.json".text;
+      backupFixtureConfig =
+        pkgs.writeText "backup-fixture-config.json"
+          backupRuntimeEval.config.environment.etc."sinnix/backup.json".text;
       # pytest over the package's tests (all of them, or the files named).
       mkBackupSuite =
         name: testPaths:

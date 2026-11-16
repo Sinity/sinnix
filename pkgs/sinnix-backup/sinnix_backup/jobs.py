@@ -39,7 +39,9 @@ def take_or_skip(lock: BorgLock, reason: str) -> bool:
     """Take the global lock without waiting; print the skip line when it is held."""
     if lock.try_take():
         return True
-    print(f"Another Borg operation is active; skipping {reason} and keeping work queued")
+    print(
+        f"Another Borg operation is active; skipping {reason} and keeping work queued"
+    )
     return False
 
 
@@ -52,17 +54,24 @@ def exclude_patterns(root: Path | str, patterns: list[str]) -> list[str]:
     prefix = str(root).removeprefix("/")
     arguments = []
     for pattern in patterns:
-        arguments += ["--exclude", pattern if pattern.startswith("**") else f"{prefix}/{pattern}"]
+        arguments += [
+            "--exclude",
+            pattern if pattern.startswith("**") else f"{prefix}/{pattern}",
+        ]
     return arguments
 
 
-def publish_daily_marker(config: BackupConfig, unit: str, fields: dict[str, object]) -> None:
+def publish_daily_marker(
+    config: BackupConfig, unit: str, fields: dict[str, object]
+) -> None:
     """Publish `<unit>`'s daily marker with the policy hash the coordinator compares."""
     marker, policy = config.nightly.daily_markers[unit]
     markers.make_directory(config.state_directory, 0o750, STATE_GROUP)
     markers.publish_marker(
         marker,
-        markers.marker_text({**fields, "epoch": int(time.time()), "policy_sha256": policy}),
+        markers.marker_text(
+            {**fields, "epoch": int(time.time()), "policy_sha256": policy}
+        ),
     )
 
 
@@ -78,7 +87,9 @@ def take_snapshots(config: BackupConfig) -> int:
     inventory = snapshots.observe_acquisitions(
         genome.snapshot_directory, genome.name_glob, genome.coverage, settings["source"]
     )
-    markers.publish_marker(Path(settings["acquisition_inventory"]), json.dumps(inventory) + "\n")
+    markers.publish_marker(
+        Path(settings["acquisition_inventory"]), json.dumps(inventory) + "\n"
+    )
     return 0
 
 
@@ -86,12 +97,19 @@ def root_snapshot_timestamp(name: str) -> str:
     """The initrd names root cuts in UTC, without btrbk's numeric offset."""
     cut = name.removeprefix("root.")
     moment = datetime(
-        int(cut[0:4]), int(cut[4:6]), int(cut[6:8]), int(cut[9:11]), int(cut[11:13]), int(cut[13:15])
+        int(cut[0:4]),
+        int(cut[4:6]),
+        int(cut[6:8]),
+        int(cut[9:11]),
+        int(cut[11:13]),
+        int(cut[13:15]),
     )
     return moment.strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def _delete_archived_root_snapshot(snapshot: Path, archive: str, snapshot_uuid: str, coverage: list[str]) -> bool:
+def _delete_archived_root_snapshot(
+    snapshot: Path, archive: str, snapshot_uuid: str, coverage: list[str]
+) -> bool:
     """Delete one root snapshot only after its archive matches it exactly.
 
     Archives without a UUID binding, writable snapshots and plain directories
@@ -104,7 +122,9 @@ def _delete_archived_root_snapshot(snapshot: Path, archive: str, snapshot_uuid: 
     except Exception as error:
         print(f"Snapshot retained: {error}", file=sys.stderr)
         return False
-    return subprocess.run(["btrfs", "subvolume", "delete", str(snapshot)]).returncode == 0
+    return (
+        subprocess.run(["btrfs", "subvolume", "delete", str(snapshot)]).returncode == 0
+    )
 
 
 def archive_root_snapshots(config: BackupConfig) -> int:
@@ -117,7 +137,13 @@ def archive_root_snapshots(config: BackupConfig) -> int:
     mount_root = Path(tempfile.mkdtemp())
     try:
         subprocess.run(
-            ["mount", "-o", "subvol=/", config.jobs["root_snapshots"]["device"], str(mount_root)],
+            [
+                "mount",
+                "-o",
+                "subvol=/",
+                config.jobs["root_snapshots"]["device"],
+                str(mount_root),
+            ],
             check=True,
         )
         initialize_repository(repository, env, lock)
@@ -135,14 +161,25 @@ def archive_root_snapshots(config: BackupConfig) -> int:
                     failed = True
                     continue
                 listed = subprocess.run(
-                    ["borg", "list", "--short", "--glob-archives", archive, repository.url],
+                    [
+                        "borg",
+                        "list",
+                        "--short",
+                        "--glob-archives",
+                        archive,
+                        repository.url,
+                    ],
                     env=env,
                     text=True,
                     stdout=subprocess.PIPE,
                 ).stdout
                 if archive in listed.splitlines():
-                    print(f"Archive {archive} already exists; verifying snapshot {snapshot.name}")
-                    if not _delete_archived_root_snapshot(snapshot, archive, snapshot_uuid, source.coverage):
+                    print(
+                        f"Archive {archive} already exists; verifying snapshot {snapshot.name}"
+                    )
+                    if not _delete_archived_root_snapshot(
+                        snapshot, archive, snapshot_uuid, source.coverage
+                    ):
                         failed = True
                     continue
                 try:
@@ -157,24 +194,38 @@ def archive_root_snapshots(config: BackupConfig) -> int:
                             "sinnix-snapshot-v1:" + snapshot_uuid,
                             "--lock-wait",
                             str(config.lock_wait_seconds),
-                            *(part for path in source.coverage for part in ("--exclude", f"{snapshot}/{path}")),
+                            *(
+                                part
+                                for path in source.coverage
+                                for part in ("--exclude", f"{snapshot}/{path}")
+                            ),
                             "::" + archive,
                             f"{snapshot}/./",
                         ],
                         env,
                     )
                 except BorgError:
-                    print(f"borg create failed for {snapshot.name}; subvolume kept on disk", file=sys.stderr)
+                    print(
+                        f"borg create failed for {snapshot.name}; subvolume kept on disk",
+                        file=sys.stderr,
+                    )
                     failed = True
                     continue
-                if not _delete_archived_root_snapshot(snapshot, archive, snapshot_uuid, source.coverage):
+                if not _delete_archived_root_snapshot(
+                    snapshot, archive, snapshot_uuid, source.coverage
+                ):
                     failed = True
         # Compaction is batched by the maintenance job.
         return 1 if failed else 0
     finally:
         try:
-            mounted = subprocess.run(["mountpoint", "-q", str(mount_root)]).returncode == 0
-            if not mounted or subprocess.run(["umount", str(mount_root)]).returncode == 0:
+            mounted = (
+                subprocess.run(["mountpoint", "-q", str(mount_root)]).returncode == 0
+            )
+            if (
+                not mounted
+                or subprocess.run(["umount", str(mount_root)]).returncode == 0
+            ):
                 mount_root.rmdir()
         finally:
             lock.release()
@@ -202,7 +253,9 @@ def archive_sinex_stores(config: BackupConfig) -> int:
             {**env, "BORG_EXIT_CODES": "modern"},
         )
     print(f"sinex blob backup complete: {archive}")
-    publish_daily_marker(config, "borgbackup-job-sinex-blobs.service", {"archive": archive})
+    publish_daily_marker(
+        config, "borgbackup-job-sinex-blobs.service", {"archive": archive}
+    )
     return 0
 
 
@@ -220,7 +273,11 @@ def dump_polylogue_databases(config: BackupConfig) -> int:
                 continue
             base = name.removesuffix(".db")
             subprocess.run(
-                ["sinnix-sqlite-backup", str(database), str(dump_root / f"{base}-{stamp}.db.zst")],
+                [
+                    "sinnix-sqlite-backup",
+                    str(database),
+                    str(dump_root / f"{base}-{stamp}.db.zst"),
+                ],
                 check=True,
             )
     finally:
@@ -265,29 +322,46 @@ def archive_polylogue_state(config: BackupConfig) -> int:
         with lock.held(), exported(env):
             status = hook_cut.archive(state_root, cut_root / "cuts", command)
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
-        print(f"could not archive Polylogue hooks from native cut: {error}", file=sys.stderr)
+        print(
+            f"could not archive Polylogue hooks from native cut: {error}",
+            file=sys.stderr,
+        )
         return 1
     if status:
         return status
     print(f"polylogue state backup complete: {archive}")
-    publish_daily_marker(config, "borgbackup-job-polylogue-state.service", {"archive": archive})
+    publish_daily_marker(
+        config, "borgbackup-job-polylogue-state.service", {"archive": archive}
+    )
     return 0
 
 
-def _publish_hourly_marker(config: BackupConfig, label: str, archive: str, started: int) -> None:
+def _publish_hourly_marker(
+    config: BackupConfig, label: str, archive: str, started: int
+) -> None:
     finished = int(time.time())
     markers.publish_marker(
         config.state_file(f"{label}.last-success"),
         markers.marker_text(
-            {"archive": archive, "epoch": finished, "elapsed_seconds": finished - started}
+            {
+                "archive": archive,
+                "epoch": finished,
+                "elapsed_seconds": finished - started,
+            }
         ),
     )
-    print(f"backup_phase=done label={label} archive={archive} elapsed_seconds={finished - started}")
+    print(
+        f"backup_phase=done label={label} archive={archive} elapsed_seconds={finished - started}"
+    )
 
 
-def _hourly_start(config: BackupConfig, repository_name: str) -> tuple[dict[str, str], int]:
+def _hourly_start(
+    config: BackupConfig, repository_name: str
+) -> tuple[dict[str, str], int]:
     env = borg_environment(
-        config, config.repository(repository_name), cache_directory=config.hourly_cache_directory
+        config,
+        config.repository(repository_name),
+        cache_directory=config.hourly_cache_directory,
     )
     markers.make_directory(config.hourly_cache_directory, 0o700)
     markers.make_directory(config.state_directory, 0o750, STATE_GROUP)
@@ -300,7 +374,11 @@ def _seed_hourly_cache(config: BackupConfig, repository_config: Path) -> None:
     Otherwise the first hourly run re-reads and re-chunks all of /persist and
     rebuilds every archive index from the target disk.
     """
-    lines = [line for line in repository_config.read_text().splitlines() if line.startswith("id = ")]
+    lines = [
+        line
+        for line in repository_config.read_text().splitlines()
+        if line.startswith("id = ")
+    ]
     if not lines:
         raise ValueError(f"repository configuration has no id: {repository_config}")
     repository_id = lines[0].split(" ")[2]
@@ -325,7 +403,10 @@ def archive_hourly_persist(config: BackupConfig) -> int:
     try:
         repository = config.repository("persist")
         if not repository.initialized:
-            print("persist repository is not initialized; the nightly drain creates it", file=sys.stderr)
+            print(
+                "persist repository is not initialized; the nightly drain creates it",
+                file=sys.stderr,
+            )
             return 1
         settings = config.jobs["hourly"]
         source = config.source("persist")
@@ -336,14 +417,24 @@ def archive_hourly_persist(config: BackupConfig) -> int:
             if subprocess.run(["mountpoint", "-q", str(bind)]).returncode == 0:
                 subprocess.run(["umount", str(bind)], check=True)
             if cut.is_dir():
-                subprocess.run(["btrfs", "-q", "subvolume", "delete", str(cut)], check=True)
+                subprocess.run(
+                    ["btrfs", "-q", "subvolume", "delete", str(cut)], check=True
+                )
 
         release_cut()
         try:
             _seed_hourly_cache(config, repository.path / "config")
             markers.make_directory(bind, 0o700)
             subprocess.run(
-                ["btrfs", "-q", "subvolume", "snapshot", "-r", settings["persist_source"], str(cut)],
+                [
+                    "btrfs",
+                    "-q",
+                    "subvolume",
+                    "snapshot",
+                    "-r",
+                    settings["persist_source"],
+                    str(cut),
+                ],
                 check=True,
             )
             subprocess.run(["mount", "--bind", str(cut), str(bind)], check=True)
@@ -360,7 +451,11 @@ def archive_hourly_persist(config: BackupConfig) -> int:
                     "--lock-wait",
                     str(config.lock_wait_seconds),
                     "--stats",
-                    *(part for pattern in source.coverage["borg_excludes"] for part in ("--exclude", pattern)),
+                    *(
+                        part
+                        for pattern in source.coverage["borg_excludes"]
+                        for part in ("--exclude", pattern)
+                    ),
                     "::" + archive,
                     f"{bind}/./",
                 ],
@@ -418,7 +513,10 @@ def archive_hourly_live(config: BackupConfig) -> int:
                 create_env,
             )
         tasks_root = settings["tasks_root"]
-        sources = [tasks_root, *(spool for spool in settings["sinex_spools"] if Path(spool).is_dir())]
+        sources = [
+            tasks_root,
+            *(spool for spool in settings["sinex_spools"] if Path(spool).is_dir()),
+        ]
         # Dolt's table files are immutable, its manifest is replaced
         # atomically and its journal only grows, so a file changing while
         # read is a journal or spool tail the next hour takes.
@@ -439,7 +537,9 @@ def archive_hourly_live(config: BackupConfig) -> int:
             accepted=LIVE_ACCEPTED_STATUSES,
         )
         if result.returncode == 100:
-            print("live-small: accepted files that changed while read (Dolt journals and spools)")
+            print(
+                "live-small: accepted files that changed while read (Dolt journals and spools)"
+            )
         _publish_hourly_marker(config, "live-small", archive, started)
         return 0
     finally:

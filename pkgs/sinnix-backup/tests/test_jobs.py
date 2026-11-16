@@ -7,7 +7,6 @@ import tempfile
 from pathlib import Path
 
 import pytest
-
 from fakes import FakeHost
 from sinnix_backup import cli, markers
 
@@ -56,7 +55,8 @@ def creates(host, archive_prefix):
     return [
         command
         for command in host.commands()
-        if command[:2] == ["borg", "create"] and any(arg.startswith("::" + archive_prefix) for arg in command)
+        if command[:2] == ["borg", "create"]
+        and any(arg.startswith("::" + archive_prefix) for arg in command)
     ]
 
 
@@ -68,13 +68,22 @@ def live_sources(config):
     settings = config.jobs["hourly"]
     tasks = Path(settings["tasks_root"])
     spool = Path(settings["sinex_spools"][0])
-    write_files(tasks, {"sinnix/.beads/metadata.json": "{}", "migration-backups/copy": "old", "sinnix/dolt-server.log": "log"})
+    write_files(
+        tasks,
+        {
+            "sinnix/.beads/metadata.json": "{}",
+            "migration-backups/copy": "old",
+            "sinnix/dolt-server.log": "log",
+        },
+    )
     write_files(spool, {"frame": "synthetic spool frame"})
     return tasks, spool
 
 
 @pytest.mark.parametrize("status", [0, 100])
-def test_hourly_live_accepts_only_the_changed_file_warning(fixture_config, host, backup_root, monkeypatch, capfd, status):
+def test_hourly_live_accepts_only_the_changed_file_warning(
+    fixture_config, host, backup_root, monkeypatch, capfd, status
+):
     config_path, config = fixture_config
     tasks, spool = live_sources(config)
     force_create_status(host, backup_root, monkeypatch, "live-small-", status)
@@ -101,13 +110,20 @@ def test_hourly_live_accepts_only_the_changed_file_warning(fixture_config, host,
     marker = markers.read_marker(config.state_file("live-small.last-success"))
     assert list(marker) == ["archive", "epoch", "elapsed_seconds"]
     assert marker["archive"] == archive
-    assert f"backup_phase=done label=live-small archive={archive} elapsed_seconds=" in output
-    accepted = "live-small: accepted files that changed while read (Dolt journals and spools)"
+    assert (
+        f"backup_phase=done label=live-small archive={archive} elapsed_seconds="
+        in output
+    )
+    accepted = (
+        "live-small: accepted files that changed while read (Dolt journals and spools)"
+    )
     assert (accepted in output) == (status == 100)
 
 
 @pytest.mark.parametrize("status", [1, 2, 101, 104])
-def test_hourly_live_fails_on_any_other_status(fixture_config, host, backup_root, monkeypatch, status):
+def test_hourly_live_fails_on_any_other_status(
+    fixture_config, host, backup_root, monkeypatch, status
+):
     config_path, config = fixture_config
     live_sources(config)
     force_create_status(host, backup_root, monkeypatch, "live-small-", status)
@@ -120,15 +136,20 @@ def hourly_persist_setup(config, host):
     host.borg("init", "--encryption=none", config.repository("persist").url)
     # The cut lives under /persist/.btrfs; a real snapshot omits it, so the
     # fixture source starts without that directory.
-    write_files(config.jobs["hourly"]["persist_source"], {"etc/keep": "synthetic persist state"})
-    return Path(config.jobs["hourly"]["persist_cut"]), config.source("persist").bind_path
+    write_files(
+        config.jobs["hourly"]["persist_source"], {"etc/keep": "synthetic persist state"}
+    )
+    return Path(config.jobs["hourly"]["persist_cut"]), config.source(
+        "persist"
+    ).bind_path
 
 
 def host_steps(host):
     return [
         command
         for command in host.commands()
-        if command[0] in ("btrfs", "mount", "umount") or command[:2] == ["borg", "create"]
+        if command[0] in ("btrfs", "mount", "umount")
+        or command[:2] == ["borg", "create"]
     ]
 
 
@@ -139,7 +160,15 @@ def test_hourly_persist_archives_the_cut_then_releases_it(fixture_config, host, 
     [command] = creates(host, "hourly-persist-")
     archive = archive_name(command)
     assert host_steps(host) == [
-        ["btrfs", "-q", "subvolume", "snapshot", "-r", config.jobs["hourly"]["persist_source"], str(cut)],
+        [
+            "btrfs",
+            "-q",
+            "subvolume",
+            "snapshot",
+            "-r",
+            config.jobs["hourly"]["persist_source"],
+            str(cut),
+        ],
         ["mount", "--bind", str(cut), str(bind)],
         [
             "borg",
@@ -153,7 +182,11 @@ def test_hourly_persist_archives_the_cut_then_releases_it(fixture_config, host, 
             "--lock-wait",
             "60",
             "--stats",
-            *(part for pattern in config.source("persist").coverage["borg_excludes"] for part in ("--exclude", pattern)),
+            *(
+                part
+                for pattern in config.source("persist").coverage["borg_excludes"]
+                for part in ("--exclude", pattern)
+            ),
             "::" + archive,
             f"{bind}/./",
         ],
@@ -162,11 +195,19 @@ def test_hourly_persist_archives_the_cut_then_releases_it(fixture_config, host, 
     ]
     assert not cut.exists()
     assert str(bind) not in json.loads((host.state / "mounts.json").read_text())
-    assert "etc/keep" in host.borg("list", "--short", f"{config.repository('persist').url}::{archive}").stdout.splitlines()
+    assert (
+        "etc/keep"
+        in host.borg(
+            "list", "--short", f"{config.repository('persist').url}::{archive}"
+        ).stdout.splitlines()
+    )
     marker = markers.read_marker(config.state_file("persist-hourly.last-success"))
     assert list(marker) == ["archive", "epoch", "elapsed_seconds"]
     assert marker["archive"] == archive
-    assert f"backup_phase=done label=persist-hourly archive={archive}" in capfd.readouterr().out
+    assert (
+        f"backup_phase=done label=persist-hourly archive={archive}"
+        in capfd.readouterr().out
+    )
 
 
 def test_hourly_persist_releases_the_cut_after_a_failed_archive(fixture_config, host):
@@ -174,7 +215,10 @@ def test_hourly_persist_releases_the_cut_after_a_failed_archive(fixture_config, 
     cut, bind = hourly_persist_setup(config, host)
     host.flag("fail-create").touch()
     assert run(config_path, "hourly-persist") != 0
-    assert host_steps(host)[-2:] == [["umount", str(bind)], ["btrfs", "-q", "subvolume", "delete", str(cut)]]
+    assert host_steps(host)[-2:] == [
+        ["umount", str(bind)],
+        ["btrfs", "-q", "subvolume", "delete", str(cut)],
+    ]
     assert not cut.exists()
     assert not config.state_file("persist-hourly.last-success").exists()
 
@@ -182,38 +226,67 @@ def test_hourly_persist_releases_the_cut_after_a_failed_archive(fixture_config, 
 def test_sinex_stores_archive_and_daily_marker(fixture_config, host):
     config_path, config = fixture_config
     [store] = config.jobs["sinex_store_paths"]
-    write_files(store, {"store/objects/ab/cdef": "synthetic CAS", "spool/producer/frame": "synthetic spool frame"})
+    write_files(
+        store,
+        {
+            "store/objects/ab/cdef": "synthetic CAS",
+            "spool/producer/frame": "synthetic spool frame",
+        },
+    )
     assert run(config_path, "sinex-stores") == 0
     [command] = creates(host, "sinex-blobs-")
     archive = archive_name(command)
-    assert command == ["borg", "create", "--compression", "auto,zstd,1", "--lock-wait", "60", "::" + archive, store]
-    marker_path, policy = config.nightly.daily_markers["borgbackup-job-sinex-blobs.service"]
+    assert command == [
+        "borg",
+        "create",
+        "--compression",
+        "auto,zstd,1",
+        "--lock-wait",
+        "60",
+        "::" + archive,
+        store,
+    ]
+    marker_path, policy = config.nightly.daily_markers[
+        "borgbackup-job-sinex-blobs.service"
+    ]
     marker = markers.read_marker(marker_path)
     assert list(marker) == ["archive", "epoch", "policy_sha256"]
     assert marker["archive"] == archive
     assert marker["policy_sha256"] == policy
-    members = host.borg("list", "--short", f"{config.repository('sinex-blobs').url}::{archive}").stdout
+    members = host.borg(
+        "list", "--short", f"{config.repository('sinex-blobs').url}::{archive}"
+    ).stdout
     assert store.lstrip("/") + "/store/objects/ab/cdef" in members.splitlines()
 
 
 @pytest.mark.parametrize("status", [1, 100])
-def test_sinex_stores_accept_no_warning(fixture_config, host, backup_root, monkeypatch, status):
+def test_sinex_stores_accept_no_warning(
+    fixture_config, host, backup_root, monkeypatch, status
+):
     config_path, config = fixture_config
     write_files(config.jobs["sinex_store_paths"][0], {"store/object": "synthetic CAS"})
     force_create_status(host, backup_root, monkeypatch, "sinex-blobs-", status)
     assert run(config_path, "sinex-stores") != 0
-    assert not config.nightly.daily_markers["borgbackup-job-sinex-blobs.service"][0].exists()
+    assert not config.nightly.daily_markers["borgbackup-job-sinex-blobs.service"][
+        0
+    ].exists()
 
 
 ROOT_SNAPSHOT = "root.20260913T101010"
 
 
-def test_root_snapshots_archive_then_delete(fixture_config, host, backup_root, monkeypatch, capfd):
+def test_root_snapshots_archive_then_delete(
+    fixture_config, host, backup_root, monkeypatch, capfd
+):
     config_path, config = fixture_config
     device = backup_root / "root-device"
     write_files(
         device / ".snapshots" / ROOT_SNAPSHOT,
-        {"etc/keep": "synthetic root state", "tmp/scratch": "excluded", "var/cache/item": "excluded"},
+        {
+            "etc/keep": "synthetic root state",
+            "tmp/scratch": "excluded",
+            "var/cache/item": "excluded",
+        },
     )
     host.map_device(config.jobs["root_snapshots"]["device"], device)
     # The job mounts the device at a temporary directory; fix its path so the
@@ -246,24 +319,36 @@ def test_root_snapshots_archive_then_delete(fixture_config, host, backup_root, m
             "sinnix-snapshot-v1:" + snapshot_uuid,
             "--lock-wait",
             "60",
-            *(part for path in config.source("root").coverage for part in ("--exclude", f"{snapshot}/{path}")),
+            *(
+                part
+                for path in config.source("root").coverage
+                for part in ("--exclude", f"{snapshot}/{path}")
+            ),
             "::" + archive,
             f"{snapshot}/./",
         ]
     ]
     commands = host.commands()
-    create_index = next(i for i, command in enumerate(commands) if command[:2] == ["borg", "create"])
+    create_index = next(
+        i for i, command in enumerate(commands) if command[:2] == ["borg", "create"]
+    )
     assert ["btrfs", "subvolume", "delete", str(snapshot)] in commands[create_index:]
     assert commands[-1] == ["umount", str(mount_root)]
     assert not mount_root.exists()
     repository = config.repository("root-snapshots").url
-    assert "etc/keep" in host.borg("list", "--short", f"{repository}::{archive}").stdout.splitlines()
+    assert (
+        "etc/keep"
+        in host.borg("list", "--short", f"{repository}::{archive}").stdout.splitlines()
+    )
 
     # The next mount shows the snapshot again: its archive exists, so it is
     # checked and deleted without a second archive.
     capfd.readouterr()
     assert run(config_path, "root-snapshots") == 0
-    assert f"Archive {archive} already exists; verifying snapshot {ROOT_SNAPSHOT}" in capfd.readouterr().out
+    assert (
+        f"Archive {archive} already exists; verifying snapshot {ROOT_SNAPSHOT}"
+        in capfd.readouterr().out
+    )
     assert len(creates(host, "root-")) == 1
     assert host.commands().count(["btrfs", "subvolume", "delete", str(snapshot)]) == 2
 
@@ -302,7 +387,11 @@ def test_polylogue_state_archives_hooks_from_a_cut(fixture_config, host, monkeyp
         "auto,zstd,1",
         "--lock-wait",
         "60",
-        *(part for pattern in settings["state_excludes"] for part in ("--exclude", f"{prefix}/{pattern}")),
+        *(
+            part
+            for pattern in settings["state_excludes"]
+            for part in ("--exclude", f"{prefix}/{pattern}")
+        ),
         "--exclude",
         f"{state}/hooks/**",
         "::" + archive,
@@ -316,12 +405,19 @@ def test_polylogue_state_archives_hooks_from_a_cut(fixture_config, host, monkeyp
     assert not any(path.endswith("/source.db") for path in members)
     assert not any("/.salvage-internals-20261008" in path for path in members)
     [vector] = [path for path in members if path.endswith("/2026-07-10-synthetic-3.db")]
-    assert host.borg("extract", "--stdout", location, vector).stdout == "synthetic purchased vectors"
+    assert (
+        host.borg("extract", "--stdout", location, vector).stdout
+        == "synthetic purchased vectors"
+    )
     [archived_hook] = [path for path in members if path.endswith("/" + hook)]
     assert host.borg("extract", "--stdout", location, archived_hook).stdout == original
-    assert (state / hook).read_text() == original + '{"event":"written-during-borg-create"}\n'
+    assert (
+        state / hook
+    ).read_text() == original + '{"event":"written-during-borg-create"}\n'
     assert list((Path(settings["hook_cut_directory"]) / "cuts").iterdir()) == []
-    marker_path, policy = config.nightly.daily_markers["borgbackup-job-polylogue-state.service"]
+    marker_path, policy = config.nightly.daily_markers[
+        "borgbackup-job-polylogue-state.service"
+    ]
     marker = markers.read_marker(marker_path)
     assert list(marker) == ["archive", "epoch", "policy_sha256"]
     assert marker["archive"] == archive

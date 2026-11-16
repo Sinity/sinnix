@@ -5,9 +5,8 @@ from __future__ import annotations
 import sys
 import time
 
-from sinnix_backup import cli, markers, nightly
-
 from fakes import FakeHost
+from sinnix_backup import cli, markers, nightly
 
 COORDINATOR_STEPS = [
     "machine-telemetry-sqlite-backup.service",
@@ -37,9 +36,14 @@ class Fixture:
         self.host.apply(monkeypatch)
         self.capfd = capfd
         for label in self.config.nightly.drain_sources:
-            self.config.source(label).snapshot_directory.mkdir(parents=True, exist_ok=True)
+            self.config.source(label).snapshot_directory.mkdir(
+                parents=True, exist_ok=True
+            )
         self.host.set_units(
-            {unit: [sys.executable, "-c", LOCK_FREE, str(self.config.lock_path)] for unit in COORDINATOR_STEPS}
+            {
+                unit: [sys.executable, "-c", LOCK_FREE, str(self.config.lock_path)]
+                for unit in COORDINATOR_STEPS
+            }
         )
 
     def run(self):
@@ -58,7 +62,9 @@ def test_sequence_from_local_markers(backup_root, fixture_config, monkeypatch, c
     state = config.state_directory
     code, captured, calls = fixture.run()
     assert code == 0, captured.out + captured.err
-    assert calls == EXPECTED_STARTS, "empty retries leave an ongoing integrity check alone"
+    assert calls == EXPECTED_STARTS, (
+        "empty retries leave an ongoing integrity check alone"
+    )
     acquisition_marker = state / "coordinator.acquisition"
     acquisition_text = acquisition_marker.read_text()
 
@@ -73,7 +79,9 @@ def test_sequence_from_local_markers(backup_root, fixture_config, monkeypatch, c
     (acknowledgements / acknowledged).write_bytes(latest.read_bytes())
     code, captured, calls = fixture.run()
     assert code == 0, captured.out + captured.err
-    assert calls == ARCHIVE_STARTS, "acknowledged snapshots do not stop checks or open Borg from the sequence"
+    assert calls == ARCHIVE_STARTS, (
+        "acknowledged snapshots do not stop checks or open Borg from the sequence"
+    )
 
     # A pending genome snapshot alone stops the resumable integrity check and
     # gets a drain attempt in the same run.
@@ -87,7 +95,7 @@ def test_sequence_from_local_markers(backup_root, fixture_config, monkeypatch, c
     code, captured, calls = fixture.run()
     assert code == 1, captured.out + captured.err
     assert ["start", "btrbk.service"] not in calls
-    assert calls[-len(ARCHIVE_STARTS):] == ARCHIVE_STARTS
+    assert calls[-len(ARCHIVE_STARTS) :] == ARCHIVE_STARTS
     assert "reason=dump-failure" in captured.err
 
     # Daily markers are checked at each unit, not against the time the
@@ -107,22 +115,34 @@ def test_sequence_from_local_markers(backup_root, fixture_config, monkeypatch, c
     code, captured, calls = fixture.run()
     assert code == 0, captured.out + captured.err
     assert ["start", "btrbk.service"] not in calls
-    for unit in ("borgbackup-job-polylogue-state.service", "borgbackup-job-sinex-blobs.service"):
+    for unit in (
+        "borgbackup-job-polylogue-state.service",
+        "borgbackup-job-sinex-blobs.service",
+    ):
         assert ["start", unit] in calls
 
 
-def test_daily_marker_skips_only_with_current_policy(backup_root, fixture_config, monkeypatch, capfd):
+def test_daily_marker_skips_only_with_current_policy(
+    backup_root, fixture_config, monkeypatch, capfd
+):
     fixture = Fixture(backup_root, fixture_config, monkeypatch, capfd)
     unit = "borgbackup-job-polylogue-state.service"
     marker, policy = fixture.config.nightly.daily_markers[unit]
     marker.parent.mkdir(parents=True, exist_ok=True)
     now = int(time.time())
-    markers.publish_marker(marker, f"archive=synthetic\nepoch={now}\npolicy_sha256={policy}\n")
+    markers.publish_marker(
+        marker, f"archive=synthetic\nepoch={now}\npolicy_sha256={policy}\n"
+    )
     code, captured, calls = fixture.run()
     assert code == 0, captured.out + captured.err
     assert ["start", unit] not in calls
-    assert f"backup_phase=coordinator unit={unit} status=skipped reason=already-fresh" in captured.out
-    markers.publish_marker(marker, f"archive=synthetic\nepoch={now}\npolicy_sha256={'0' * 64}\n")
+    assert (
+        f"backup_phase=coordinator unit={unit} status=skipped reason=already-fresh"
+        in captured.out
+    )
+    markers.publish_marker(
+        marker, f"archive=synthetic\nepoch={now}\npolicy_sha256={'0' * 64}\n"
+    )
     code, captured, calls = fixture.run()
     assert code == 0, captured.out + captured.err
     assert ["start", unit] in calls

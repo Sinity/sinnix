@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from sinnix_backup.config import BackupConfig, parse_config
 
 FIXTURE_CONFIG = os.environ.get("SINNIX_BACKUP_FIXTURE_CONFIG")
@@ -47,7 +46,9 @@ def fixture_config_data(root: Path) -> dict[str, Any]:
     return relocate(json.loads(Path(FIXTURE_CONFIG).read_text()), root)
 
 
-def write_fixture_config(root: Path, data: dict[str, Any] | None = None) -> tuple[Path, BackupConfig]:
+def write_fixture_config(
+    root: Path, data: dict[str, Any] | None = None
+) -> tuple[Path, BackupConfig]:
     """Write the relocated policy to root/backup.json; create its parent directories."""
     data = fixture_config_data(root) if data is None else data
     path = root / "backup.json"

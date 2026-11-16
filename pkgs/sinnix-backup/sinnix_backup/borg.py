@@ -23,7 +23,9 @@ CUT_NAME = re.compile(r"^[^.]+\.(\d{8}T\d{6}[+-]\d{4})$")
 
 class BorgError(RuntimeError):
     def __init__(self, args: list[str], returncode: int):
-        super().__init__(f"borg {args[0] if args else ''} exited with status {returncode}")
+        super().__init__(
+            f"borg {args[0] if args else ''} exited with status {returncode}"
+        )
         self.returncode = returncode
 
 
@@ -38,7 +40,9 @@ def host_identity(environment: dict[str, str]) -> str:
     try:
         machine_id = MACHINE_ID.read_text().strip()
     except OSError as error:
-        raise ValueError("machine identity is unavailable; refusing to start Borg") from error
+        raise ValueError(
+            "machine identity is unavailable; refusing to start Borg"
+        ) from error
     if re.fullmatch(r"[0-9a-f]{32}", machine_id) is None:
         raise ValueError("invalid machine identity; refusing to start Borg")
     return f"{os.uname().nodename}@{machine_id}"
@@ -105,7 +109,9 @@ def run_borg(
     return result
 
 
-def initialize_repository(repository: Repository, env: dict[str, str], lock: "BorgLock") -> None:
+def initialize_repository(
+    repository: Repository, env: dict[str, str], lock: "BorgLock"
+) -> None:
     """Create the repository directory and, under the lock, the repository itself."""
     repository.path.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(repository.path, 0o700)

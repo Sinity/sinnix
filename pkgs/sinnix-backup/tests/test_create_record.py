@@ -110,7 +110,9 @@ class ProducerReceiptFixture(unittest.TestCase):
                         bad["archive"]["stats"][name + "_size"] = invalid
                         with self.subTest(name=name, invalid=invalid):
                             with self.assertRaisesRegex(ValueError, "byte count"):
-                                create_record.record_create(source, archive, policy, bad)
+                                create_record.record_create(
+                                    source, archive, policy, bad
+                                )
                             receipt_path.write_text(
                                 json.dumps(
                                     receipt | {"create_" + name + "_bytes": invalid}

@@ -158,7 +158,9 @@ in
     serviceConfig = timeouts (if genomeRoot == null then "56h15m" else "80h15m");
     execStart = sinnixBackup "nightly";
     # The boot trigger also resumes a night interrupted after the calendar fired.
-    timer = calendar "*-*-* 03:05:00" true // { onBootSec = "45min"; };
+    timer = calendar "*-*-* 03:05:00" true // {
+      onBootSec = "45min";
+    };
   })
 
   # Root snapshots have their own repository, so they never hold up /persist.

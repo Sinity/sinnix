@@ -227,4 +227,3 @@ class CutTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 self.create()
         self.assertEqual(len(list(self.cuts.glob("cut-*"))), 1)
-

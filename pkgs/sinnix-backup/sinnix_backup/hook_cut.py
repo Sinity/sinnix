@@ -110,4 +110,3 @@ def archive(state: Path, cuts: Path, command: list[str]) -> int:
         ) or not stat.S_ISDIR(current.st_mode):
             raise OSError(f"private archive view replaced, refusing cleanup: {view}")
         shutil.rmtree(view)
-

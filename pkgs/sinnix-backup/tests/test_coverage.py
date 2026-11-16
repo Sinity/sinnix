@@ -1319,7 +1319,9 @@ class CoverageFixture(unittest.TestCase):
         )
         with (
             patch.object(
-                snapshots, "snapshot_details", return_value=(self.snapshot_uuid, 17, 117)
+                snapshots,
+                "snapshot_details",
+                return_value=(self.snapshot_uuid, 17, 117),
             ),
             self.assertRaisesRegex(ValueError, "content mismatch"),
         ):

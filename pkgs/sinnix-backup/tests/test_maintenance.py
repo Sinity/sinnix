@@ -9,7 +9,9 @@ from fakes import FakeHost
 from sinnix_backup import cli
 
 
-def test_retention_preview_expiry_restore_cadence_and_contention(fixture_config, backup_root, monkeypatch, capfd):
+def test_retention_preview_expiry_restore_cadence_and_contention(
+    fixture_config, backup_root, monkeypatch, capfd
+):
     config_path, config = fixture_config
     host = FakeHost(backup_root, config.lock_path)
     host.apply(monkeypatch)
@@ -38,9 +40,18 @@ def test_retention_preview_expiry_restore_cadence_and_contention(fixture_config,
     ]:
         moment = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=age)
         if "day-" in name:
-            moment = moment.replace(hour=12, minute=10 if name.endswith("-a") else 20, second=0)
+            moment = moment.replace(
+                hour=12, minute=10 if name.endswith("-a") else 20, second=0
+            )
         stamp = moment.strftime("%Y-%m-%dT%H:%M:%S")
-        host.borg("create", "--timestamp", stamp, f"{repo}::{name}", "payload", cwd=backup_root)
+        host.borg(
+            "create",
+            "--timestamp",
+            stamp,
+            f"{repo}::{name}",
+            "payload",
+            cwd=backup_root,
+        )
     sinex_repositories = []
     for name in ("sinex-core", "sinex-keys"):
         sinex = config.repository(name).path
@@ -48,7 +59,9 @@ def test_retention_preview_expiry_restore_cadence_and_contention(fixture_config,
         for suffix, age in (("current", 0), ("old", 400), ("day-a", 30), ("day-b", 30)):
             moment = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=age)
             if suffix.startswith("day-"):
-                moment = moment.replace(hour=12, minute=10 if suffix.endswith("a") else 20, second=0)
+                moment = moment.replace(
+                    hour=12, minute=10 if suffix.endswith("a") else 20, second=0
+                )
             host.borg(
                 "create",
                 "--timestamp",
@@ -60,14 +73,23 @@ def test_retention_preview_expiry_restore_cadence_and_contention(fixture_config,
         sinex_repositories.append(sinex)
 
     def archives(repository=repo):
-        return {a["name"] for a in json.loads(host.borg("list", "--json", str(repository)).stdout)["archives"]}
+        return {
+            a["name"]
+            for a in json.loads(host.borg("list", "--json", str(repository)).stdout)[
+                "archives"
+            ]
+        }
 
     def maintain(*options):
         assert cli.main(["maintain", *options, "--config", str(config_path)]) == 0
 
-    before = {repository: archives(repository) for repository in [repo, *sinex_repositories]}
+    before = {
+        repository: archives(repository) for repository in [repo, *sinex_repositories]
+    }
     maintain("--dry-run")
-    assert all(archives(repository) == names for repository, names in before.items()), "preview changed archives"
+    assert all(archives(repository) == names for repository, names in before.items()), (
+        "preview changed archives"
+    )
     maintain()
     # Borg preserves the oldest endpoint while fewer than six months exist.
     assert archives() == {
@@ -82,11 +104,19 @@ def test_retention_preview_expiry_restore_cadence_and_contention(fixture_config,
         "sinnix-prime-realm-c",
         "unrelated",
     }, archives()
-    restored = host.borg("extract", "--stdout", f"{repo}::realm-current", "payload").stdout
+    restored = host.borg(
+        "extract", "--stdout", f"{repo}::realm-current", "payload"
+    ).stdout
     assert restored == payload.read_text()
     for sinex in sinex_repositories:
-        assert archives(sinex) == {"sinex-core-current", "sinex-core-old", "sinex-core-day-b"}, archives(sinex)
-        restored = host.borg("extract", "--stdout", f"{sinex}::sinex-core-current", "payload").stdout
+        assert archives(sinex) == {
+            "sinex-core-current",
+            "sinex-core-old",
+            "sinex-core-day-b",
+        }, archives(sinex)
+        restored = host.borg(
+            "extract", "--stdout", f"{sinex}::sinex-core-current", "payload"
+        ).stdout
         assert restored == payload.read_text()
     marker = Path(config.jobs["maintenance"]["marker"])
     stamp = marker.read_bytes()
@@ -102,7 +132,9 @@ def test_retention_preview_expiry_restore_cadence_and_contention(fixture_config,
         "borg-sinex-keys-v1.before.json",
     ]
     maintain()
-    assert marker.read_bytes() == stamp, "completed pass should not repeat while not due"
+    assert marker.read_bytes() == stamp, (
+        "completed pass should not repeat while not due"
+    )
     marker.unlink()
     capfd.readouterr()
     with config.lock_path.open("w") as lock:

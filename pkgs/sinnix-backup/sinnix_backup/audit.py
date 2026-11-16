@@ -35,19 +35,26 @@ def audit_realm(config: BackupConfig) -> int:
     env = borg_environment(config, config.repository(source.repository))
     with exported(env):
         try:
-            audit_status(record, source.coverage, settings["max_age_seconds"], mode="sampled")
+            audit_status(
+                record, source.coverage, settings["max_age_seconds"], mode="sampled"
+            )
             return 0
         except Exception:
             pass
         markers.make_directory(config.state_directory, 0o750, "users")
         lock = BorgLock(config.lock_path)
         if not lock.try_take():
-            print("Another Borg operation is active; realm coverage selection remains due", file=sys.stderr)
+            print(
+                "Another Borg operation is active; realm coverage selection remains due",
+                file=sys.stderr,
+            )
             markers.publish_marker(
                 Path(settings["attempt"]),
                 f'{{"status":"deferred","reason":"borg-lock-contention","epoch":{int(time.time())}}}\n',
             )
-            print("backup_phase=independent_coverage_audit status=deferred reason=borg-lock-contention remains_due=true")
+            print(
+                "backup_phase=independent_coverage_audit status=deferred reason=borg-lock-contention remains_due=true"
+            )
             return 0
         scratch = Path(settings["scratch_directory"])
         scratch.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -68,16 +75,24 @@ def audit_realm(config: BackupConfig) -> int:
             if not readiness["ready"]:
                 markers.publish_marker(
                     Path(settings["attempt"]),
-                    json.dumps(readiness | {"status": "deferred", "epoch": int(time.time())}, indent=2) + "\n",
+                    json.dumps(
+                        readiness | {"status": "deferred", "epoch": int(time.time())},
+                        indent=2,
+                    )
+                    + "\n",
                 )
-                print("backup_phase=independent_coverage_audit status=deferred remains_due=true")
+                print(
+                    "backup_phase=independent_coverage_audit status=deferred remains_due=true"
+                )
                 return 0
             snapshot = readiness["snapshot"]
             pin = os.open(source.snapshot_directory / snapshot, os.O_RDONLY)
             try:
                 fcntl.flock(pin, fcntl.LOCK_SH | fcntl.LOCK_NB)
             except BlockingIOError:
-                print("backup_phase=independent_coverage_audit status=deferred reason=snapshot-in-use remains_due=true")
+                print(
+                    "backup_phase=independent_coverage_audit status=deferred reason=snapshot-in-use remains_due=true"
+                )
                 return 0
             # The selected marker copy is fixed for this run; the snapshot pin
             # keeps its source, and Borg's own locking protects the archive.

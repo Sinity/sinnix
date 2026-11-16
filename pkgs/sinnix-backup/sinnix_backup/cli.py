@@ -16,18 +16,54 @@ from .config import DEFAULT_PATH, BackupConfig, load_config
 
 # Each entry: command name, help text, handler(config, args) -> exit status.
 UNIT_COMMANDS = {
-    "nightly": ("run dumps, snapshots, archives and maintenance in sequence", lambda c, a: nightly.run_nightly(c)),
-    "take-snapshots": ("take btrbk snapshots and record genome acquisitions", lambda c, a: jobs.take_snapshots(c)),
-    "root-snapshots": ("archive and delete the initrd's root snapshots", lambda c, a: jobs.archive_root_snapshots(c)),
-    "sinex-stores": ("archive the retained Sinex stores", lambda c, a: jobs.archive_sinex_stores(c)),
-    "polylogue-dumps": ("dump Polylogue's live SQLite databases", lambda c, a: jobs.dump_polylogue_databases(c)),
-    "polylogue-state": ("archive Polylogue state, its hooks and the purchased vectors", lambda c, a: jobs.archive_polylogue_state(c)),
-    "hourly-persist": ("archive a fresh /persist snapshot", lambda c, a: jobs.archive_hourly_persist(c)),
-    "hourly-live": ("archive Polylogue's archive database, Beads and Sinex spools", lambda c, a: jobs.archive_hourly_live(c)),
-    "expire-dumps": ("expire local dumps whose archived copy restores", lambda c, a: jobs.expire_local_dumps(c)),
-    "check-repositories": ("weekly repository integrity check", lambda c, a: checks.check_repositories(c)),
-    "check-beads-restore": ("restore every Beads store from the latest realm archive", lambda c, a: checks.check_beads_restore(c)),
-    "audit-realm": ("compare the latest realm archive's metadata and a content sample", lambda c, a: audit.audit_realm(c)),
+    "nightly": (
+        "run dumps, snapshots, archives and maintenance in sequence",
+        lambda c, a: nightly.run_nightly(c),
+    ),
+    "take-snapshots": (
+        "take btrbk snapshots and record genome acquisitions",
+        lambda c, a: jobs.take_snapshots(c),
+    ),
+    "root-snapshots": (
+        "archive and delete the initrd's root snapshots",
+        lambda c, a: jobs.archive_root_snapshots(c),
+    ),
+    "sinex-stores": (
+        "archive the retained Sinex stores",
+        lambda c, a: jobs.archive_sinex_stores(c),
+    ),
+    "polylogue-dumps": (
+        "dump Polylogue's live SQLite databases",
+        lambda c, a: jobs.dump_polylogue_databases(c),
+    ),
+    "polylogue-state": (
+        "archive Polylogue state, its hooks and the purchased vectors",
+        lambda c, a: jobs.archive_polylogue_state(c),
+    ),
+    "hourly-persist": (
+        "archive a fresh /persist snapshot",
+        lambda c, a: jobs.archive_hourly_persist(c),
+    ),
+    "hourly-live": (
+        "archive Polylogue's archive database, Beads and Sinex spools",
+        lambda c, a: jobs.archive_hourly_live(c),
+    ),
+    "expire-dumps": (
+        "expire local dumps whose archived copy restores",
+        lambda c, a: jobs.expire_local_dumps(c),
+    ),
+    "check-repositories": (
+        "weekly repository integrity check",
+        lambda c, a: checks.check_repositories(c),
+    ),
+    "check-beads-restore": (
+        "restore every Beads store from the latest realm archive",
+        lambda c, a: checks.check_beads_restore(c),
+    ),
+    "audit-realm": (
+        "compare the latest realm archive's metadata and a content sample",
+        lambda c, a: audit.audit_realm(c),
+    ),
 }
 
 
@@ -91,7 +127,9 @@ def parser() -> argparse.ArgumentParser:
         sub.add_argument("--config", type=Path, default=DEFAULT_PATH)
         return sub
 
-    drain_command = command("drain", "archive one source's queued snapshots, then delete archived ones")
+    drain_command = command(
+        "drain", "archive one source's queued snapshots, then delete archived ones"
+    )
     drain_command.add_argument("label")
     drain_command.set_defaults(handler=lambda c, a: drain.drain(c, a.label))
     plan_command = command("plan", "print what the drain would archive, read-only")
@@ -101,14 +139,20 @@ def parser() -> argparse.ArgumentParser:
         command(name, help_text).set_defaults(handler=handler)
     maintain_command = command("maintain", "prune and compact the repositories")
     maintain_command.add_argument("--dry-run", action="store_true")
-    maintain_command.set_defaults(handler=lambda c, a: maintenance.maintain(c, a.dry_run))
-    freshness_command = command("freshness", "probe: the latest archived snapshot is within its budget")
+    maintain_command.set_defaults(
+        handler=lambda c, a: maintenance.maintain(c, a.dry_run)
+    )
+    freshness_command = command(
+        "freshness", "probe: the latest archived snapshot is within its budget"
+    )
     freshness_command.add_argument("label")
     freshness_command.set_defaults(handler=_freshness)
-    command("acquisition-freshness", "probe: genome acquisitions are archived within budget").set_defaults(
-        handler=_acquisition_freshness
+    command(
+        "acquisition-freshness", "probe: genome acquisitions are archived within budget"
+    ).set_defaults(handler=_acquisition_freshness)
+    command("audit-status", "probe: the realm coverage audit is current").set_defaults(
+        handler=_audit_status
     )
-    command("audit-status", "probe: the realm coverage audit is current").set_defaults(handler=_audit_status)
     return root
 
 

@@ -51,7 +51,9 @@ def maintain(config: BackupConfig, dry_run: bool) -> int:
         if not lock.try_take():
             print("status=deferred reason=borg-lock-contention remains_due=true")
             return 0
-        run_directory = Path(settings["retention_directory"]) / f"{utc_stamp()}-{os.getpid()}"
+        run_directory = (
+            Path(settings["retention_directory"]) / f"{utc_stamp()}-{os.getpid()}"
+        )
         markers.make_directory(run_directory, 0o700)
         prune_options = ["--dry-run"] if dry_run else ["--stats"]
         for entry in settings["repositories"]:
@@ -61,7 +63,9 @@ def maintain(config: BackupConfig, dry_run: bool) -> int:
                 continue
             url = repository.url
             name = repository.path.name
-            listing = run_borg(["list", "--json", "--lock-wait", lock_wait, url], env, capture=True)
+            listing = run_borg(
+                ["list", "--json", "--lock-wait", lock_wait, url], env, capture=True
+            )
             (run_directory / f"{name}.before.json").write_text(listing.stdout)
             for series in entry["active"]:
                 run_borg(
@@ -87,7 +91,12 @@ def maintain(config: BackupConfig, dry_run: bool) -> int:
                 )
             for series in entry["retired"]:
                 subprocess.run(
-                    ["sinnix-borg-expire", url, series, *(["--dry-run"] if dry_run else [])],
+                    [
+                        "sinnix-borg-expire",
+                        url,
+                        series,
+                        *(["--dry-run"] if dry_run else []),
+                    ],
                     env=env,
                     check=True,
                 )
@@ -108,13 +117,19 @@ def maintain(config: BackupConfig, dry_run: bool) -> int:
                 )
             if not dry_run:
                 if compact_due:
-                    run_borg(["compact", "--lock-wait", lock_wait, "--progress", url], env)
-                listing = run_borg(["list", "--json", "--lock-wait", lock_wait, url], env, capture=True)
+                    run_borg(
+                        ["compact", "--lock-wait", lock_wait, "--progress", url], env
+                    )
+                listing = run_borg(
+                    ["list", "--json", "--lock-wait", lock_wait, url], env, capture=True
+                )
                 (run_directory / f"{name}.after.json").write_text(listing.stdout)
         if not dry_run:
             markers.publish_marker(marker, f"{int(time.time())}\n", mode=0o600)
             if compact_due:
-                markers.publish_marker(compact_marker, f"{int(time.time())}\n", mode=0o600)
+                markers.publish_marker(
+                    compact_marker, f"{int(time.time())}\n", mode=0o600
+                )
         return 0
     finally:
         lock.release()

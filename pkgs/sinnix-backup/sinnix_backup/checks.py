@@ -62,7 +62,9 @@ def check_repositories(config: BackupConfig) -> int:
                 "state": state,
                 "updated_at": local_timestamp(),
             }
-            markers.publish_marker(Path(settings["record"]), compact_json(record) + "\n")
+            markers.publish_marker(
+                Path(settings["record"]), compact_json(record) + "\n"
+            )
 
         # Any failure before completion records "failed"; a later
         # sinnix-borg-check failure leaves the completed record in place.
@@ -88,12 +90,17 @@ def check_repositories(config: BackupConfig) -> int:
         # it here would make that check always skip.
         lock.release()
     return subprocess.run(
-        ["sinnix-borg-check"], env={**env, "SINNIX_BORG_GLOBAL_LOCK": str(config.lock_path)}
+        ["sinnix-borg-check"],
+        env={**env, "SINNIX_BORG_GLOBAL_LOCK": str(config.lock_path)},
     ).returncode
 
 
 def _restore_record(
-    restore_root: Path, store: str, project_uuid: str | None, archive: str, env: dict[str, str]
+    restore_root: Path,
+    store: str,
+    project_uuid: str | None,
+    archive: str,
+    env: dict[str, str],
 ) -> dict[str, Any]:
     """Check one restored store and read its latest commit and first task offline."""
     beads = restore_root / store
@@ -117,7 +124,9 @@ def _restore_record(
         raise fail("metadata.json names another project")
     # A server-mode store keeps its databases under dolt/, an embedded one
     # under embeddeddolt/.
-    database_root = beads / ("dolt" if metadata.get("dolt_mode") == "server" else "embeddeddolt")
+    database_root = beads / (
+        "dolt" if metadata.get("dolt_mode") == "server" else "embeddeddolt"
+    )
     if not (database_root / database / ".dolt").is_dir():
         raise fail("the Dolt database did not restore")
     # A restored server configuration can name a live port, so the database
@@ -128,7 +137,18 @@ def _restore_record(
 
     def first_row(query: str) -> Any:
         output = subprocess.run(
-            ["dolt", "--data-dir", str(offline_root), "--use-db", database, "sql", "-q", query, "-r", "json"],
+            [
+                "dolt",
+                "--data-dir",
+                str(offline_root),
+                "--use-db",
+                database,
+                "sql",
+                "-q",
+                query,
+                "-r",
+                "json",
+            ],
             env=env,
             text=True,
             stdout=subprocess.PIPE,
@@ -174,15 +194,22 @@ def check_beads_restore(config: BackupConfig) -> int:
     try:
         archives = sorted(
             run_borg(
-                ["list", "--short", "--glob-archives", "realm-*", repository.url], env, capture=True
+                ["list", "--short", "--glob-archives", "realm-*", repository.url],
+                env,
+                capture=True,
             ).stdout.splitlines()
         )
         if not archives:
-            print("no realm Borg archive is available for the Beads restore check", file=sys.stderr)
+            print(
+                "no realm Borg archive is available for the Beads restore check",
+                file=sys.stderr,
+            )
             return 1
         archive = archives[-1]
         location = f"{repository.url}::{archive}"
-        declared = {store["path"]: store["project_uuid"] for store in settings["stores"]}
+        declared = {
+            store["path"]: store["project_uuid"] for store in settings["stores"]
+        }
         # Only store metadata files are listed: a listing of every file under
         # state/tasks holds millions of names in memory.
         members = run_borg(
@@ -191,7 +218,11 @@ def check_beads_restore(config: BackupConfig) -> int:
                 "--short",
                 "--pattern",
                 r"+ re:^state/tasks/[^/]+/\.beads/metadata\.json$",
-                *(part for path in declared for part in ("--pattern", f"+ pf:{path}/metadata.json")),
+                *(
+                    part
+                    for path in declared
+                    for part in ("--pattern", f"+ pf:{path}/metadata.json")
+                ),
                 "--pattern",
                 "- re:.*",
                 location,
@@ -204,7 +235,11 @@ def check_beads_restore(config: BackupConfig) -> int:
         archived = set(members)
         stores = sorted(
             set(declared)
-            | {member.removesuffix("/metadata.json") for member in members if BEADS_METADATA.match(member)}
+            | {
+                member.removesuffix("/metadata.json")
+                for member in members
+                if BEADS_METADATA.match(member)
+            }
         )
         for store in stores:
             if f"{store}/metadata.json" not in archived:
@@ -213,11 +248,14 @@ def check_beads_restore(config: BackupConfig) -> int:
         # The stores together are a few gigabytes, too much for the /tmp tmpfs.
         restore_parent = Path(settings["restore_parent"])
         restore_parent.mkdir(parents=True, exist_ok=True)
-        restore_root = Path(tempfile.mkdtemp(prefix="beads-restore.", dir=restore_parent))
+        restore_root = Path(
+            tempfile.mkdtemp(prefix="beads-restore.", dir=restore_parent)
+        )
         try:
             run_borg(["extract", location, *stores], env, cwd=restore_root)
             records = [
-                _restore_record(restore_root, store, declared.get(store), archive, env) for store in stores
+                _restore_record(restore_root, store, declared.get(store), archive, env)
+                for store in stores
             ]
         finally:
             shutil.rmtree(restore_root)

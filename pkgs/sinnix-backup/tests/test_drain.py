@@ -20,13 +20,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 import sinnix_backup
-from sinnix_backup import borg, cli, drain, markers, snapshots
-from sinnix_backup.config import SnapshotSource
-
 from conftest import fixture_config_data, write_fixture_config
 from fakes import FakeHost
+from sinnix_backup import borg, cli, drain, markers, snapshots
+from sinnix_backup.config import SnapshotSource
 
 # Every task store the fixture configuration declares, plus one tracker it
 # does not name, which the restore check must find in the archive.
@@ -46,7 +44,10 @@ for store, database, project in (
         {
             root_path + "/metadata.json": json.dumps(metadata),
             root_path + "/config.yaml": "issue-prefix: " + database,
-            root_path + "/embeddeddolt/" + database + "/.dolt/HEAD": "0123456789abcdefghijklmnopqrstuv",
+            root_path
+            + "/embeddeddolt/"
+            + database
+            + "/.dolt/HEAD": "0123456789abcdefghijklmnopqrstuv",
             root_path + "/embeddeddolt/" + database + "/issue.json": json.dumps(
                 {"id": database + "-task", "title": "Current task"}
             ),
@@ -56,7 +57,9 @@ for store, database, project in (
 # buffer of names follows the sinnix metadata file, so a membership test that
 # stops reading early fails here as on the host.
 for index in range(1500):
-    BEADS_STORES["state/tasks/sinnix/.beads/dolt/sinnix/.dolt/noms/" + f"{index:064d}"] = ""
+    BEADS_STORES[
+        "state/tasks/sinnix/.beads/dolt/sinnix/.dolt/noms/" + f"{index:064d}"
+    ] = ""
 
 BUSY = "full avg10=20.00 avg60=20.00 avg300=20.00 total=1\n"
 SETTLED = "full avg10=0.00 avg60=0.00 avg300=0.00 total=1\n"
@@ -73,7 +76,9 @@ CHILD_DRAIN = (
 
 def borg_output(*args: str) -> str:
     """Run Borg through the fake command directory, so the call is logged."""
-    return subprocess.run(["borg", *args], check=True, text=True, stdout=subprocess.PIPE).stdout
+    return subprocess.run(
+        ["borg", *args], check=True, text=True, stdout=subprocess.PIPE
+    ).stdout
 
 
 def test_backlog_restart_collision_and_exclusions(backup_root, monkeypatch, capfd):
@@ -88,7 +93,8 @@ def test_backlog_restart_collision_and_exclusions(backup_root, monkeypatch, capf
     monkeypatch.setenv("TMPDIR", str(config.scratch_directory))
     package_parent = str(Path(sinnix_backup.__file__).resolve().parent.parent)
     monkeypatch.setenv(
-        "PYTHONPATH", os.pathsep.join(filter(None, [package_parent, os.environ.get("PYTHONPATH")]))
+        "PYTHONPATH",
+        os.pathsep.join(filter(None, [package_parent, os.environ.get("PYTHONPATH")])),
     )
     state = config.state_directory
     realm = config.source("realm")
@@ -112,7 +118,9 @@ def test_backlog_restart_collision_and_exclusions(backup_root, monkeypatch, capf
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
-                raise AssertionError("pressure wait ran inside the locked section") from None
+                raise AssertionError(
+                    "pressure wait ran inside the locked section"
+                ) from None
         sleeps.append(seconds)
         if removal.exists():
             request = json.loads(removal.read_text())
@@ -123,7 +131,9 @@ def test_backlog_restart_collision_and_exclusions(backup_root, monkeypatch, capf
         pressure.write_text(SETTLED)
 
     monkeypatch.setattr(
-        drain, "time", SimpleNamespace(time=time.time, monotonic=time.monotonic, sleep=settle)
+        drain,
+        "time",
+        SimpleNamespace(time=time.time, monotonic=time.monotonic, sleep=settle),
     )
 
     for name in ("realm", "persist", "sinex-blobs", "polylogue-state"):
@@ -198,9 +208,21 @@ def test_backlog_restart_collision_and_exclusions(backup_root, monkeypatch, capf
     for cut in (old, new):
         entry = next(a for a in inventory if a["name"] == "realm-" + cut.name)
         recorded = datetime.fromisoformat(entry["time"])
-        assert int(recorded.replace(tzinfo=timezone.utc).timestamp()) == snapshots.snapshot_epoch(cut.name)
+        assert int(
+            recorded.replace(tzinfo=timezone.utc).timestamp()
+        ) == snapshots.snapshot_epoch(cut.name)
     selection = subprocess.run(
-        ["borg", "prune", "--dry-run", "--list", "--keep-daily", "1", "--glob-archives", "realm-*", repo],
+        [
+            "borg",
+            "prune",
+            "--dry-run",
+            "--list",
+            "--keep-daily",
+            "1",
+            "--glob-archives",
+            "realm-*",
+            repo,
+        ],
         text=True,
         capture_output=True,
         check=True,
@@ -223,13 +245,19 @@ def test_backlog_restart_collision_and_exclusions(backup_root, monkeypatch, capf
     local_expiry = run("expire-dumps")
     assert '"outcome": "ok"' in local_expiry.out
     assert '"removed_logical_bytes": 0' in local_expiry.out
-    assert "realm-" + old.name in borg_output("list", "--short", realm_repo).splitlines()
+    assert (
+        "realm-" + old.name in borg_output("list", "--short", realm_repo).splitlines()
+    )
     assert extract(new.name, "same-name") == "new"
     assert extract(old.name, "old-only") == "historical"
     assert extract(old.name, "same-name") == "old"
-    realm_members = borg_output("list", "--short", realm_repo + "::realm-" + new.name).splitlines()
+    realm_members = borg_output(
+        "list", "--short", realm_repo + "::realm-" + new.name
+    ).splitlines()
     assert not any(
-        path.endswith("state/cache/polylogue-backup-hooks/state/polylogue/hooks/sealed.ndjson")
+        path.endswith(
+            "state/cache/polylogue-backup-hooks/state/polylogue/hooks/sealed.ndjson"
+        )
         for path in realm_members
     )
     for relative, content in {
@@ -253,7 +281,8 @@ def test_backlog_restart_collision_and_exclusions(backup_root, monkeypatch, capf
     realm_creates = [
         entry
         for entry in commands
-        if entry[:2] == ["borg", "create"] and any(arg.startswith("::realm-") for arg in entry)
+        if entry[:2] == ["borg", "create"]
+        and any(arg.startswith("::realm-") for arg in entry)
     ]
     assert realm_creates
     for entry in realm_creates:
@@ -264,7 +293,9 @@ def test_backlog_restart_collision_and_exclusions(backup_root, monkeypatch, capf
         assert [
             entry[index + 1] for index, arg in enumerate(entry) if arg == "--exclude"
         ] == realm.coverage["borg_excludes"]
-    deleted = [entry[-1] for entry in commands if entry[:3] == ["btrfs", "subvolume", "delete"]]
+    deleted = [
+        entry[-1] for entry in commands if entry[:3] == ["btrfs", "subvolume", "delete"]
+    ]
     assert deleted == [str(old)]
     assert len(sleeps) == 1
 
@@ -332,7 +363,9 @@ def test_backlog_restart_collision_and_exclusions(backup_root, monkeypatch, capf
     # next run reuses that exact archive instead of creating another one.
     acknowledged = markers.read_marker(latest_marker)
     latest_marker.write_bytes(before)
-    creates_before = sum(1 for entry in host.commands() if entry[:2] == ["borg", "create"])
+    creates_before = sum(
+        1 for entry in host.commands() if entry[:2] == ["borg", "create"]
+    )
     run("drain", "realm")
     repeated = markers.read_marker(latest_marker)
     assert repeated["archive"] == acknowledged["archive"]
@@ -340,7 +373,10 @@ def test_backlog_restart_collision_and_exclusions(backup_root, monkeypatch, capf
         json.loads(repeated["coverage"])["create_receipt_sha256"]
         == json.loads(acknowledged["coverage"])["create_receipt_sha256"]
     )
-    assert sum(1 for entry in host.commands() if entry[:2] == ["borg", "create"]) == creates_before
+    assert (
+        sum(1 for entry in host.commands() if entry[:2] == ["borg", "create"])
+        == creates_before
+    )
 
     # Retained Sinex stores keep both content-addressed objects and producer
     # state; Polylogue state leaves out its mutable databases.
@@ -355,9 +391,12 @@ def test_backlog_restart_collision_and_exclusions(backup_root, monkeypatch, capf
         sinex_frame: "synthetic spool frame",
         polylogue_blob: "synthetic blob",
         polylogue_root / "source.db": "mutable database",
-        polylogue_root / ".salvage-internals-20261008/embeddings.db": "inert synthetic salvage",
-        polylogue_root / "hooks/codex-session-live.jsonl": '{"event":"sealed-before-create"}\n',
-        polylogue_root / "hooks/carriers/codex/2026-09-27/4242.ndjson": '{"event":"carrier-before-create"}\n',
+        polylogue_root
+        / ".salvage-internals-20261008/embeddings.db": "inert synthetic salvage",
+        polylogue_root
+        / "hooks/codex-session-live.jsonl": '{"event":"sealed-before-create"}\n',
+        polylogue_root
+        / "hooks/carriers/codex/2026-09-27/4242.ndjson": '{"event":"carrier-before-create"}\n',
         vector_root / "2026-07-10-synthetic-3.db": "synthetic purchased vectors",
     }.items():
         file.parent.mkdir(parents=True, exist_ok=True)
@@ -379,12 +418,16 @@ def test_backlog_restart_collision_and_exclusions(backup_root, monkeypatch, capf
     ):
         names = borg_output("list", "--short", repo_path).splitlines()
         assert len(names) == 1
-        entries = borg_output("list", "--short", repo_path + "::" + names[0]).splitlines()
+        entries = borg_output(
+            "list", "--short", repo_path + "::" + names[0]
+        ).splitlines()
         ending = f"{base.name}/{file.relative_to(base)}"
         member = next(path for path in entries if path.endswith(ending))
         if repo_path == polylogue_repo:
             assert not any("/.salvage-internals-20261008" in path for path in entries)
-        contents = borg_output("extract", "--stdout", repo_path + "::" + names[0], member)
+        contents = borg_output(
+            "extract", "--stdout", repo_path + "::" + names[0], member
+        )
         assert contents == file.read_text()
         if excluded:
             assert not any(path.endswith("/" + excluded) for path in entries)
@@ -392,27 +435,43 @@ def test_backlog_restart_collision_and_exclusions(backup_root, monkeypatch, capf
     # The purchased vectors travel in the nightly Polylogue state archive.
     vector_members = [
         path
-        for path in borg_output("list", "--short", polylogue_repo + "::" + polylogue_archive).splitlines()
+        for path in borg_output(
+            "list", "--short", polylogue_repo + "::" + polylogue_archive
+        ).splitlines()
         if path.endswith(f"{vector_root.name}/2026-07-10-synthetic-3.db")
     ]
     assert len(vector_members) == 1
     assert (
-        borg_output("extract", "--stdout", polylogue_repo + "::" + polylogue_archive, vector_members[0])
+        borg_output(
+            "extract",
+            "--stdout",
+            polylogue_repo + "::" + polylogue_archive,
+            vector_members[0],
+        )
         == "synthetic purchased vectors"
     )
     for relative, original in (
         ("hooks/codex-session-live.jsonl", '{"event":"sealed-before-create"}\n'),
-        ("hooks/carriers/codex/2026-09-27/4242.ndjson", '{"event":"carrier-before-create"}\n'),
+        (
+            "hooks/carriers/codex/2026-09-27/4242.ndjson",
+            '{"event":"carrier-before-create"}\n',
+        ),
     ):
         members = [
             path
-            for path in borg_output("list", "--short", polylogue_repo + "::" + polylogue_archive).splitlines()
+            for path in borg_output(
+                "list", "--short", polylogue_repo + "::" + polylogue_archive
+            ).splitlines()
             if path.endswith("/" + relative)
         ]
         assert len(members) == 1
-        archived = borg_output("extract", "--stdout", polylogue_repo + "::" + polylogue_archive, members[0])
+        archived = borg_output(
+            "extract", "--stdout", polylogue_repo + "::" + polylogue_archive, members[0]
+        )
         assert archived == original
-        assert (polylogue_root / relative).read_text() == original + '{"event":"written-during-borg-create"}\n'
+        assert (
+            polylogue_root / relative
+        ).read_text() == original + '{"event":"written-during-borg-create"}\n'
     # Repeated archives read the read-only cut directly. No staged hook copy
     # remains, and each successful command deletes its cut.
     hook = polylogue_root / "hooks/codex-session-live.jsonl"
@@ -431,7 +490,9 @@ def test_backlog_restart_collision_and_exclusions(backup_root, monkeypatch, capf
     empty_hooks_archive = archive_names[-1]
     empty_hook_members = [
         path
-        for path in borg_output("list", "--short", polylogue_repo + "::" + empty_hooks_archive).splitlines()
+        for path in borg_output(
+            "list", "--short", polylogue_repo + "::" + empty_hooks_archive
+        ).splitlines()
         if "/hooks/" in path
     ]
     assert empty_hook_members == []
@@ -444,7 +505,10 @@ def test_backlog_restart_collision_and_exclusions(backup_root, monkeypatch, capf
     assert not any(realm_root.rglob("borg_beads_drill.jsonl"))
     run("check-beads-restore")
     log = next(realm_root.rglob("borg_beads_drill.jsonl"))
-    records = {record["store"]: record for record in map(json.loads, log.read_text().splitlines())}
+    records = {
+        record["store"]: record
+        for record in map(json.loads, log.read_text().splitlines())
+    }
     assert sorted(records) == sorted(
         "state/tasks/" + store + "/.beads"
         for store in ("sinnix", "sinex-next", "polylogue-next", "lynchpin", "stashbox")
@@ -557,12 +621,19 @@ def test_backlog_restart_collision_and_exclusions(backup_root, monkeypatch, capf
     assert stale_name + "-coverage-v2" in realm_archives
     assert stale_name + "-coverage-v3" in realm_archives
     assert (
-        borg_output("extract", "--stdout", realm_repo + "::" + stale_name + "-coverage-v3", "inbox/download/media")
+        borg_output(
+            "extract",
+            "--stdout",
+            realm_repo + "::" + stale_name + "-coverage-v3",
+            "inbox/download/media",
+        )
         == "canonical download"
     )
 
     older_gap = snapshot("realm.20260406T023000+0000", {"same-name": "older"})
-    gap = snapshot("realm.20260406T030000+0000", {"project/build/precious": "canonical"})
+    gap = snapshot(
+        "realm.20260406T030000+0000", {"project/build/precious": "canonical"}
+    )
     gap_uuid = host.identity(gap)
     for suffix in ("", "-coverage-v2"):
         borg_output(
@@ -590,7 +661,11 @@ def test_backlog_restart_collision_and_exclusions(backup_root, monkeypatch, capf
 
     collision = snapshot("realm.20260406T033000+0000", {"same-name": "collision"})
     for suffix in ("", "-coverage-v2"):
-        borg_output("create", repo + "::realm-" + collision.name + suffix, str(collision) + "/./")
+        borg_output(
+            "create",
+            repo + "::realm-" + collision.name + suffix,
+            str(collision) + "/./",
+        )
     run("drain", "realm")
     assert collision.exists()
     collision_archives = borg_output("list", "--short", repo).splitlines()
@@ -635,7 +710,10 @@ def test_backlog_restart_collision_and_exclusions(backup_root, monkeypatch, capf
     run("drain", "persist", ok=False)
     assert persist.exists()
     assert not persist_marker.exists()
-    assert borg_output("list", "--short", persist_repo).splitlines() == [old_name, old_name + "-coverage-v2"]
+    assert borg_output("list", "--short", persist_repo).splitlines() == [
+        old_name,
+        old_name + "-coverage-v2",
+    ]
     host.flag("fail-create").unlink()
     run("drain", "persist")
     assert persist.exists()
@@ -650,12 +728,18 @@ def test_backlog_restart_collision_and_exclusions(backup_root, monkeypatch, capf
     run("drain", "persist")
     assert borg_output("list", "--short", persist_repo).splitlines() == archived
     assert not any(
-        command[:3] == ["borg", "debug", "dump-archive"] and command[3] == "::" + old_name
+        command[:3] == ["borg", "debug", "dump-archive"]
+        and command[3] == "::" + old_name
         for command in host.commands()
     )
     kept_path = f"{chrome}/Default/WebStorage/7/CacheStorage/site-entry"
     assert (
-        borg_output("extract", "--stdout", persist_repo + "::" + old_name + "-coverage-v3", kept_path)
+        borg_output(
+            "extract",
+            "--stdout",
+            persist_repo + "::" + old_name + "-coverage-v3",
+            kept_path,
+        )
         == "site data"
     )
     # A realm drain whose snapshot directory is empty refuses: the latest
@@ -699,15 +783,27 @@ def test_backlog_restart_collision_and_exclusions(backup_root, monkeypatch, capf
     run("drain", "genome")
     assert not genome_old.exists()
     assert genome_new.exists()
-    for cut, expected in [(genome_old, "historical result"), (genome_new, "updated result")]:
-        assert borg_output("extract", "--stdout", repo + "::genome-" + cut.name, "outputs/analysis") == expected
-    members = borg_output("list", "--short", repo + "::genome-" + genome_old.name).splitlines()
+    for cut, expected in [
+        (genome_old, "historical result"),
+        (genome_new, "updated result"),
+    ]:
+        assert (
+            borg_output(
+                "extract", "--stdout", repo + "::genome-" + cut.name, "outputs/analysis"
+            )
+            == expected
+        )
+    members = borg_output(
+        "list", "--short", repo + "::genome-" + genome_old.name
+    ).splitlines()
     assert "genotype/original" in members
     assert "cache/personal-derived" in members
     assert "cache/reference" not in members
     assert not any(x.startswith(".direnv/") for x in members)
     run("drain", "genome")
-    assert genome_new.exists(), "the latest audit source on a separate disk survives runs with no work"
+    assert genome_new.exists(), (
+        "the latest audit source on a separate disk survives runs with no work"
+    )
 
     # The nightly sequence: a failed drain unit does not stop later units, and
     # a boot catch-up reuses the completed acquisition.
@@ -731,20 +827,37 @@ def test_backlog_restart_collision_and_exclusions(backup_root, monkeypatch, capf
     archive_starts = expected_starts[3:]
     expected_calls = [
         ["systemctl", *call]
-        for call in expected_starts[:3] + [["stop", "borgbackup-verify.service"]] + archive_starts
+        for call in expected_starts[:3]
+        + [["stop", "borgbackup-verify.service"]]
+        + archive_starts
     ]
     host.set_units(
         {
             f"borgbackup-job-{label}.service": [
-                sys.executable, "-c", CHILD_DRAIN, str(pressure), "drain", label, "--config", str(config_path),
+                sys.executable,
+                "-c",
+                CHILD_DRAIN,
+                str(pressure),
+                "drain",
+                label,
+                "--config",
+                str(config_path),
             ]
             for label in ("realm", "persist", "genome")
         }
     )
-    queued_persist = snapshot("persist.20260406T010000+0000", {"unique": "persist after retry"}, label="persist")
-    queued_realm = snapshot("realm.20260407T010000+0000", {"unique": "realm after persist failure"})
+    queued_persist = snapshot(
+        "persist.20260406T010000+0000",
+        {"unique": "persist after retry"},
+        label="persist",
+    )
+    queued_realm = snapshot(
+        "realm.20260407T010000+0000", {"unique": "realm after persist failure"}
+    )
     queued_genome = snapshot(
-        "genome.20260407T010000+0000", {"outputs/retained": "genome after retry"}, label="genome"
+        "genome.20260407T010000+0000",
+        {"outputs/retained": "genome after retry"},
+        label="genome",
     )
     host.flag("fail-unit-borgbackup-job-genome.service").touch()
     host.flag("fail-unit-borgbackup-job-persist.service").touch()
@@ -753,18 +866,27 @@ def test_backlog_restart_collision_and_exclusions(backup_root, monkeypatch, capf
     assert queued_realm.exists()
     assert queued_genome.exists()
     calls = [entry for entry in host.commands() if entry[0] == "systemctl"]
-    assert calls[-len(expected_calls):] == expected_calls, "failed drain units do not stop later independent jobs"
-    assert not any(call[1] == "stop" and "borgbackup-coverage-audit-realm.service" in call for call in calls)
+    assert calls[-len(expected_calls) :] == expected_calls, (
+        "failed drain units do not stop later independent jobs"
+    )
+    assert not any(
+        call[1] == "stop" and "borgbackup-coverage-audit-realm.service" in call
+        for call in calls
+    )
     host.flag("fail-unit-borgbackup-job-persist.service").unlink()
     host.flag("fail-unit-borgbackup-job-genome.service").unlink()
     previous_calls = len(calls)
     run("nightly")
     assert queued_persist.exists()
-    restarted_calls = [entry for entry in host.commands() if entry[0] == "systemctl"][previous_calls:]
+    restarted_calls = [entry for entry in host.commands() if entry[0] == "systemctl"][
+        previous_calls:
+    ]
     assert not any(call[-1] in coordinator_steps[:3] for call in restarted_calls)
-    assert restarted_calls[-len(archive_starts):] == [
+    assert restarted_calls[-len(archive_starts) :] == [
         ["systemctl", *call] for call in archive_starts
-    ], "a boot catch-up after an interrupted archive phase reuses the completed dumps and snapshots"
+    ], (
+        "a boot catch-up after an interrupted archive phase reuses the completed dumps and snapshots"
+    )
 
 
 def test_choose_archive_name():
@@ -790,15 +912,30 @@ def test_choose_archive_name():
     assert drain.choose_archive_name(realm, cut, set()) == plain
     assert drain.choose_archive_name(realm, cut, {plain}) == plain + "-coverage-v3"
     # A create-checked source never resumes a coverage retry archive.
-    assert drain.choose_archive_name(realm, cut, {plain, plain + "-coverage-v3", plain + "-coverage-v4"}) == plain + "-coverage-v3"
+    assert (
+        drain.choose_archive_name(
+            realm, cut, {plain, plain + "-coverage-v3", plain + "-coverage-v4"}
+        )
+        == plain + "-coverage-v3"
+    )
     cut = "persist.20260402T010000+0000"
     plain = "persist-" + cut
     assert drain.choose_archive_name(persist, cut, set()) == plain
     assert drain.choose_archive_name(persist, cut, {plain}) == plain + "-coverage-v2"
-    assert drain.choose_archive_name(persist, cut, {plain + "-coverage-v3"}) == plain + "-coverage-v3"
+    assert (
+        drain.choose_archive_name(persist, cut, {plain + "-coverage-v3"})
+        == plain + "-coverage-v3"
+    )
     assert (
         drain.choose_archive_name(
-            persist, cut, {plain, plain + "-coverage-v2", plain + "-coverage-v3", plain + "-coverage-v4"}
+            persist,
+            cut,
+            {
+                plain,
+                plain + "-coverage-v2",
+                plain + "-coverage-v3",
+                plain + "-coverage-v4",
+            },
         )
         == plain + "-coverage-v4"
     )
@@ -806,7 +943,9 @@ def test_choose_archive_name():
     assert drain.choose_archive_name(genome, cut, {"genome-" + cut}) == "genome-" + cut
 
 
-def test_stable_host_identity_and_explicit_override(tmp_path, monkeypatch, fixture_config):
+def test_stable_host_identity_and_explicit_override(
+    tmp_path, monkeypatch, fixture_config
+):
     identity = tmp_path / "machine-id"
     monkeypatch.setattr(borg, "MACHINE_ID", identity)
     monkeypatch.delenv("BORG_HOST_ID", raising=False)
@@ -818,14 +957,19 @@ def test_stable_host_identity_and_explicit_override(tmp_path, monkeypatch, fixtu
     for label in ("realm", "persist", "genome"):
         source = config.source(label)
         repository = config.repository(source.repository)
-        env = borg.borg_environment(config, repository, files_cache_suffix=source.files_cache_suffix)
+        env = borg.borg_environment(
+            config, repository, files_cache_suffix=source.files_cache_suffix
+        )
         assert env["BORG_HOST_ID"] == first
         assert env["BORG_REPO"] == repository.url
         assert env["BORG_PASSCOMMAND"] == f"cat {config.passphrase_path}"
         assert env["BORG_CACHE_DIR"] == str(config.cache_directory)
         assert env.get("BORG_FILES_CACHE_SUFFIX") == source.files_cache_suffix
     identity.unlink()
-    assert borg.host_identity({"BORG_HOST_ID": "explicit-fixture@stable"}) == "explicit-fixture@stable"
+    assert (
+        borg.host_identity({"BORG_HOST_ID": "explicit-fixture@stable"})
+        == "explicit-fixture@stable"
+    )
     with pytest.raises(ValueError):
         borg.host_identity({})
     identity.write_text("invalid\n")

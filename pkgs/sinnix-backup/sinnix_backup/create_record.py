@@ -21,9 +21,12 @@ def previous_proof(marker, policy_hash, now, snapshot_directory):
     try:
         proof = json.loads(fields["coverage"])
         full_epoch = proof["full_proof_epoch"]
-        details = snapshots.snapshot_details(Path(snapshot_directory) / fields["snapshot"])
+        details = snapshots.snapshot_details(
+            Path(snapshot_directory) / fields["snapshot"]
+        )
         if (
-            fields.get("filesystem_uuid") != snapshots.filesystem_identity(snapshot_directory)
+            fields.get("filesystem_uuid")
+            != snapshots.filesystem_identity(snapshot_directory)
             or proof["policy_sha256"] != policy_hash
             or proof["proof_mode"] not in ("full", "created")
             or not re.fullmatch(r"[0-9a-f]{64}", proof["full_proof_content_sha256"])

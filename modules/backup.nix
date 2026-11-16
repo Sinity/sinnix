@@ -128,9 +128,7 @@ let
     {
       noncanonical = map (e: e.path) (lib.filter (e: e.mayBeMissing) exclusions);
       chrome_extension_caches = label == "persist";
-      borg_excludes = borgExcludePatterns "${borgSnapshotBindRoot}/${label}" (
-        map (e: e.path) exclusions
-      );
+      borg_excludes = borgExcludePatterns "${borgSnapshotBindRoot}/${label}" (map (e: e.path) exclusions);
     }
     // lib.optionalAttrs (label != "persist") { producer_contract = "realm-borg-create-v2"; };
 
@@ -638,8 +636,7 @@ in
             }
             {
               assertion =
-                backupCfg.genomeRoot == null
-                || lib.hasPrefix "${neoOuterRealm}/" (toString backupCfg.genomeRoot);
+                backupCfg.genomeRoot == null || lib.hasPrefix "${neoOuterRealm}/" (toString backupCfg.genomeRoot);
               message = "The genome backup source must be a subvolume on neo-outer-realm.";
             }
           ];
@@ -707,8 +704,7 @@ in
             borgbackup-coverage-audit-realm = watchedUnit "borgbackup-coverage-audit-realm" {
               captures = [
                 (
-                  capture "borg-realm-independent-coverage-audit" backupConfig.jobs.audit.record
-                    691200
+                  capture "borg-realm-independent-coverage-audit" backupConfig.jobs.audit.record 691200
                   // probe "audit-status" 10
                 )
               ];

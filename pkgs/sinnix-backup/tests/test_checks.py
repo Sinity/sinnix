@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from conftest import fixture_config_data, write_fixture_config
 from fakes import FakeHost
 from sinnix_backup import cli
@@ -41,7 +40,9 @@ for store, database, project in (
 # More than a pipe buffer of names follows the sinnix metadata file, so a
 # membership test that stops reading early fails here as on the host.
 for index in range(1500):
-    BEADS_STORES["state/tasks/sinnix/.beads/dolt/sinnix/.dolt/noms/" + f"{index:064d}"] = ""
+    BEADS_STORES[
+        "state/tasks/sinnix/.beads/dolt/sinnix/.dolt/noms/" + f"{index:064d}"
+    ] = ""
 DECOY = {"project/sinex/.beads/issues.jsonl": '{"id":"stale-checkout-decoy"}\n'}
 
 
@@ -67,17 +68,27 @@ def add_realm_archive(host, config, root, name, files):
         file.write_text(data)
     # Archive paths are relative to the snapshot root, as the realm drain stores them.
     tops = sorted({relative.split("/")[0] for relative in files})
-    host.borg("create", f"{config.repository('realm').url}::realm-{name}", *tops, cwd=source)
+    host.borg(
+        "create", f"{config.repository('realm').url}::realm-{name}", *tops, cwd=source
+    )
 
 
 def check(config_path):
     return cli.main(["check-beads-restore", "--config", str(config_path)])
 
 
-def test_beads_restore_records_every_store_only_after_all_restore(beads, backup_root, capfd):
+def test_beads_restore_records_every_store_only_after_all_restore(
+    beads, backup_root, capfd
+):
     config_path, config, host = beads
     log = Path(config.jobs["beads"]["log"])
-    add_realm_archive(host, config, backup_root, "realm.20260402T010000+0000", {**DECOY, **BEADS_STORES})
+    add_realm_archive(
+        host,
+        config,
+        backup_root,
+        "realm.20260402T010000+0000",
+        {**DECOY, **BEADS_STORES},
+    )
 
     # A held Borg lock past the wait fails the check instead of reporting
     # success without a restore.
@@ -97,14 +108,24 @@ def test_beads_restore_records_every_store_only_after_all_restore(beads, backup_
         for store in ("sinnix", "sinex-next", "polylogue-next", "lynchpin", "stashbox")
     )
     sinex = evidence["state/tasks/sinex-next/.beads"]
-    assert list(sinex) == ["ts", "type", "archive", "store", "dolt_commit", "issue", "ok"]
+    assert list(sinex) == [
+        "ts",
+        "type",
+        "archive",
+        "store",
+        "dolt_commit",
+        "issue",
+        "ok",
+    ]
     assert sinex["ok"] is True
     assert sinex["type"] == "beads_restore_drill"
     assert sinex["archive"] == "realm-realm.20260402T010000+0000"
     assert sinex["issue"] == {"id": "sxnext-task", "title": "Current task"}
     assert sinex["dolt_commit"] == COMMIT
     assert "stale-checkout-decoy" not in log.read_text()
-    assert list(Path(config.jobs["beads"]["restore_parent"]).glob("beads-restore.*")) == []
+    assert (
+        list(Path(config.jobs["beads"]["restore_parent"]).glob("beads-restore.*")) == []
+    )
 
     # The latest archive lacks the stores: the check fails and logs nothing.
     add_realm_archive(host, config, backup_root, "realm.20260402T090000+0000", DECOY)
@@ -125,7 +146,9 @@ def test_beads_restore_records_every_store_only_after_all_restore(beads, backup_
     )
     assert check(config_path) == 1
     assert len(log.read_text().splitlines()) == 5
-    assert list(Path(config.jobs["beads"]["restore_parent"]).glob("beads-restore.*")) == []
+    assert (
+        list(Path(config.jobs["beads"]["restore_parent"]).glob("beads-restore.*")) == []
+    )
 
 
 @pytest.fixture
@@ -178,9 +201,18 @@ def test_integrity_check_records_completion_then_releases_the_lock(integrity):
     assert record["expected_jobs"] == config.jobs["integrity"]["expected_jobs"]
     assert record["deadline_epoch"] == record["start_epoch"] + 3 * 3600
     assert record["state"] == "completed"
-    checks = [command for command in host.commands() if command[:2] == ["borg", "check"]]
+    checks = [
+        command for command in host.commands() if command[:2] == ["borg", "check"]
+    ]
     assert checks == [
-        ["borg", "check", "--repository-only", "--max-duration", str(entry["seconds"]), config.repository(entry["repository"]).url]
+        [
+            "borg",
+            "check",
+            "--repository-only",
+            "--max-duration",
+            str(entry["seconds"]),
+            config.repository(entry["repository"]).url,
+        ]
         for entry in config.jobs["integrity"]["repositories"]
     ]
     assert check_log.read_text() == "free\n"
@@ -200,6 +232,9 @@ def test_integrity_check_skips_while_the_lock_is_held(integrity, capfd):
     with config.lock_path.open("w") as held:
         fcntl.flock(held, fcntl.LOCK_EX)
         assert cli.main(["check-repositories", "--config", str(config_path)]) == 0
-    assert "skipping Borg repository check and keeping work queued" in capfd.readouterr().out
+    assert (
+        "skipping Borg repository check and keeping work queued"
+        in capfd.readouterr().out
+    )
     assert not Path(config.jobs["integrity"]["record"]).exists()
     assert not check_log.exists()

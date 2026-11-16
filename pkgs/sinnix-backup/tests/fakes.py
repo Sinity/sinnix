@@ -16,7 +16,7 @@ import sys
 import uuid
 from pathlib import Path
 
-FAKE_COMMAND = r'''#!PYTHON
+FAKE_COMMAND = r"""#!PYTHON
 import fcntl, json, os, pathlib, shutil, subprocess, sys, uuid
 root = pathlib.Path(os.environ["FAKE_ROOT"])
 state = root / "fake"
@@ -160,9 +160,18 @@ elif command == "dolt":
         sys.exit(1)
 save("identities.json", identities)
 save("generations.json", generations)
-'''
+"""
 
-FAKED = ("findmnt", "mountpoint", "mount", "umount", "btrfs", "borg", "systemctl", "dolt")
+FAKED = (
+    "findmnt",
+    "mountpoint",
+    "mount",
+    "umount",
+    "btrfs",
+    "borg",
+    "systemctl",
+    "dolt",
+)
 
 
 class FakeHost:
@@ -178,7 +187,9 @@ class FakeHost:
         real_borg = shutil.which("borg")
         assert real_borg, "real borg must be on PATH"
         self.real_borg = real_borg
-        script = FAKE_COMMAND.replace("PYTHON", sys.executable).replace("REAL_BORG", repr(real_borg))
+        script = FAKE_COMMAND.replace("PYTHON", sys.executable).replace(
+            "REAL_BORG", repr(real_borg)
+        )
         for name in FAKED:
             (self.bin / name).write_text(script)
             (self.bin / name).chmod(0o755)
@@ -203,13 +214,23 @@ class FakeHost:
         value.update(changes)
         path.write_text(json.dumps(value))
 
-    def register(self, path: Path, *, generation: int | None = None, identity: str | None = None) -> None:
+    def register(
+        self, path: Path, *, generation: int | None = None, identity: str | None = None
+    ) -> None:
         """Give an existing directory a subvolume identity and creation generation."""
-        generations = json.loads((self.state / "generations.json").read_text()) if (self.state / "generations.json").exists() else {}
+        generations = (
+            json.loads((self.state / "generations.json").read_text())
+            if (self.state / "generations.json").exists()
+            else {}
+        )
         self._update("identities.json", {str(path): identity or str(uuid.uuid4())})
         self._update(
             "generations.json",
-            {str(path): generation if generation is not None else max(generations.values(), default=0) + 1},
+            {
+                str(path): generation
+                if generation is not None
+                else max(generations.values(), default=0) + 1
+            },
         )
 
     def snapshot(self, directory: Path, name: str, files: dict[str, str]) -> Path:
@@ -230,7 +251,9 @@ class FakeHost:
         self._update("generations.json", {str(path): generation})
 
     def set_subvolume_ids(self, ids: dict[Path, int]) -> None:
-        self._update("subvolume-ids.json", {str(path): value for path, value in ids.items()})
+        self._update(
+            "subvolume-ids.json", {str(path): value for path, value in ids.items()}
+        )
 
     def map_device(self, device: str, directory: Path) -> None:
         """Make `mount ... <device> <target>` copy `directory` instead."""
@@ -246,12 +269,21 @@ class FakeHost:
         return self.state / name
 
     def commands(self) -> list[list[str]]:
-        return [json.loads(line) for line in (self.root / "logs/commands").read_text().splitlines()]
+        return [
+            json.loads(line)
+            for line in (self.root / "logs/commands").read_text().splitlines()
+        ]
 
     def borg(self, *args: str, **kwargs) -> subprocess.CompletedProcess[str]:
         """Run the real Borg directly (not logged), for test setup and inspection."""
         # Repositories the jobs create use the fixture passphrase (conftest).
-        env = {**os.environ, **self.env, "BORG_PASSPHRASE": "synthetic fixture passphrase"}
-        result = subprocess.run([self.real_borg, *args], env=env, text=True, capture_output=True, **kwargs)
+        env = {
+            **os.environ,
+            **self.env,
+            "BORG_PASSPHRASE": "synthetic fixture passphrase",
+        }
+        result = subprocess.run(
+            [self.real_borg, *args], env=env, text=True, capture_output=True, **kwargs
+        )
         assert result.returncode == 0, (args, result.stderr)
         return result

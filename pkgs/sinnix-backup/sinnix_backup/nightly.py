@@ -66,7 +66,9 @@ def run_nightly(config: BackupConfig) -> int:
         failed = True
         return False
 
-    if markers.daily_marker_fresh(acquisition_marker, nightly.acquisition_policy, _now()):
+    if markers.daily_marker_fresh(
+        acquisition_marker, nightly.acquisition_policy, _now()
+    ):
         _print("backup_phase=coordinator acquisition=already-fresh")
     else:
         dumps_succeeded = True
@@ -82,7 +84,10 @@ def run_nightly(config: BackupConfig) -> int:
                     markers.publish_marker(
                         acquisition_marker,
                         markers.marker_text(
-                            {"epoch": _now(), "policy_sha256": nightly.acquisition_policy}
+                            {
+                                "epoch": _now(),
+                                "policy_sha256": nightly.acquisition_policy,
+                            }
                         ),
                     )
                 except OSError as error:
@@ -100,7 +105,9 @@ def run_nightly(config: BackupConfig) -> int:
     for unit in (*nightly.archive_units, *nightly.final_units):
         daily = nightly.daily_markers.get(unit)
         if daily is not None and markers.daily_marker_fresh(daily[0], daily[1], _now()):
-            _print(f"backup_phase=coordinator unit={unit} status=skipped reason=already-fresh")
+            _print(
+                f"backup_phase=coordinator unit={unit} status=skipped reason=already-fresh"
+            )
             continue
         run_step(unit)
     return 1 if failed else 0
