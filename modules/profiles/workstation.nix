@@ -369,6 +369,10 @@ in
           # limit; oomd then kills the job or tool command using the most swap.
           settings.OOM.SwapUsedLimit = "80%";
         };
+        # oomd reads its configuration only at start.
+        systemd.services.systemd-oomd.restartTriggers = [
+          config.environment.etc."systemd/oomd.conf".text
+        ];
 
         # Devshell/agent scratch belongs on /realm NVMe, not the RAM-backed /tmp
         # tmpfs: `nix develop` uses `nix-shell.*` and `nix-develop-*` scratch

@@ -129,6 +129,10 @@ mkFeatureModule {
               # `agentctl-run` child enters the slice named by its declared
               # pool, so pool concurrency and cgroup budgets remain separate.
               Service.Slice = "agent-ctl-work.slice";
+              # Every running job's agentctl-run wrapper is a child of the
+              # daemon, so killing it ends every job at once. oomd monitors the
+              # whole job plane and picks the jobs themselves, never this unit.
+              Service.ManagedOOMPreference = "omit";
               # state.json carries every task's full client environment; an
               # interactive `pueue add` writes the shell's API keys into it.
               Service.UMask = "0077";
