@@ -14,6 +14,12 @@
 # Sinnix instead: the hooks in dots/claude/managed-settings.json and
 # modules/features/dev/agents/hooks.nix, the Inbox server in
 # flake/data/mcp-registry.nix.
+#
+# The data directory is fixed as well. Unset, Plannotator picks ~/.plannotator
+# or $XDG_DATA_HOME/plannotator from the caller's environment, and an agent's
+# tool-server environment carries no XDG_DATA_HOME, so the Inbox an agent
+# starts would keep its threads outside the persisted directory
+# (modules/features/dev/agents/clis.nix).
 {
   lib,
   stdenvNoCC,
@@ -45,7 +51,8 @@ stdenvNoCC.mkDerivation (finalAttrs: {
       --set PLANNOTATOR_UPDATE_CHECK 0 \
       --set PLANNOTATOR_AUTO_UPDATE 0 \
       --set PLANNOTATOR_INBOX_CONNECT 0 \
-      --set PLANNOTATOR_INBOX_NOTES 0
+      --set PLANNOTATOR_INBOX_NOTES 0 \
+      --run 'export PLANNOTATOR_DATA_DIR="''${PLANNOTATOR_DATA_DIR:-$HOME/.local/share/plannotator}"'
     runHook postInstall
   '';
 
