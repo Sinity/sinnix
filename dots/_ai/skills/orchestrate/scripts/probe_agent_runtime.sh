@@ -50,16 +50,12 @@ resolve_agent_bin() {
   case "${agent}" in
   claude) command -v claude 2>/dev/null ;;
   codex) command -v codex 2>/dev/null ;;
-  grok) command -v grok-sinnix 2>/dev/null || command -v grok 2>/dev/null ;;
   *) return 1 ;;
   esac
 }
 
-if [[ -z ${model} ]]; then
-  case "${agent}" in
-  codex) model="$(sed -n 's/^model *= *"\(.*\)"/\1/p' "${CODEX_HOME:-$HOME/.codex}/config.toml" | head -n 1)" ;;
-  grok) model="grok-4.5" ;;
-  esac
+if [[ -z ${model} && ${agent} == "codex" ]]; then
+  model="$(sed -n 's/^model *= *"\(.*\)"/\1/p' "${CODEX_HOME:-$HOME/.codex}/config.toml" | head -n 1)"
 fi
 
 agent_bin="$(resolve_agent_bin || true)"
@@ -86,15 +82,11 @@ if [[ ${probe_model} -eq 1 ]]; then
   if [[ ${have_agent} -ne 1 ]]; then
     model_probe_message="${agent} not available"
   else
-    # Codex and Grok have a documented non-interactive probe.
-    if [[ ${agent} == "codex" || ${agent} == "grok" ]]; then
+    # Codex has a documented non-interactive probe.
+    if [[ ${agent} == "codex" ]]; then
       tmp_msg="$(mktemp)"
       tmp_log="$(mktemp)"
-      if [[ ${agent} == "codex" ]]; then
-        probe_cmd=("${agent_bin}" exec --model "${model}" --skip-git-repo-check -C "${workdir}" --output-last-message "${tmp_msg}" "Reply with exactly: MODEL_OK")
-      else
-        probe_cmd=("${agent_bin}" --cwd "${workdir}" --model "${model}" --single "Reply with exactly: MODEL_OK" --tools "" --no-memory --no-subagents)
-      fi
+      probe_cmd=("${agent_bin}" exec --model "${model}" --skip-git-repo-check -C "${workdir}" --output-last-message "${tmp_msg}" "Reply with exactly: MODEL_OK")
       if [[ ${skip_agents_render} -eq 1 ]]; then
         set +e
         SINNIX_SKIP_AGENTS_RENDER=1 "${probe_cmd[@]}" >"${tmp_log}" 2>&1
@@ -107,8 +99,7 @@ if [[ ${probe_model} -eq 1 ]]; then
         set -e
       fi
       if [[ ${probe_rc} -eq 0 ]]; then
-        if [[ ${agent} == "codex" && -f ${tmp_msg} ]] && grep -q '^MODEL_OK$' "${tmp_msg}" ||
-          [[ ${agent} != "codex" ]] && grep -q 'MODEL_OK' "${tmp_log}"; then
+        if [[ -f ${tmp_msg} ]] && grep -q '^MODEL_OK$' "${tmp_msg}"; then
           model_probe_ok=1
           model_probe_message="model responded with MODEL_OK"
         else
@@ -135,19 +126,11 @@ supports_model=false
 supports_effort=false
 
 # Check native headless capabilities where the CLI exposes them.
-if [[ ${have_agent} -eq 1 && (${agent} == "codex" || ${agent} == "grok") ]]; then
+if [[ ${have_agent} -eq 1 && ${agent} == "codex" ]]; then
   if [[ ${skip_agents_render} -eq 1 ]]; then
-    if [[ ${agent} == "codex" ]]; then
-      agent_exec_help="$(SINNIX_SKIP_AGENTS_RENDER=1 "${agent_bin}" exec --help 2>&1 || true)"
-    else
-      agent_exec_help="$(SINNIX_SKIP_AGENTS_RENDER=1 "${agent_bin}" --help 2>&1 || true)"
-    fi
+    agent_exec_help="$(SINNIX_SKIP_AGENTS_RENDER=1 "${agent_bin}" exec --help 2>&1 || true)"
   else
-    if [[ ${agent} == "codex" ]]; then
-      agent_exec_help="$("${agent_bin}" exec --help 2>&1 || true)"
-    else
-      agent_exec_help="$("${agent_bin}" --help 2>&1 || true)"
-    fi
+    agent_exec_help="$("${agent_bin}" exec --help 2>&1 || true)"
   fi
   if grep -q -- '--ephemeral' <<<"${agent_exec_help}"; then
     supports_ephemeral=true

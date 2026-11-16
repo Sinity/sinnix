@@ -265,7 +265,6 @@ in
           pkgs.zsh
         ];
         homeFiles = laneWrapperFiles ++ [
-          ".local/bin/grok-sinnix"
           ".local/bin/hermes"
           ".local/bin/mcp-firecrawl"
           ".local/bin/mcp-chrome-devtools"
@@ -862,7 +861,6 @@ in
             for wrapper in \
               ${lib.concatMapStringsSep " \\\n              " (f: ''"$HOME/${f}"'') laneWrapperFiles} \
               "$HOME/.local/bin/pi" \
-              "$HOME/.local/bin/grok-sinnix" \
               "$HOME/.local/bin/hermes"; do
               test -x "$wrapper"
               bash -n "$wrapper"

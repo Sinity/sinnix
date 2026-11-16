@@ -403,22 +403,6 @@ let
     executable = true;
     force = true;
   };
-  mkGrokWrapper = {
-    text = ''
-      #!/usr/bin/env bash
-      set -euo pipefail
-
-      ${agentScopePrelude}
-
-      if [ ! -x "$HOME/.grok/bin/grok" ]; then
-        echo "grok-sinnix: install the official Grok CLI first: curl -fsSL https://x.ai/cli/install.sh | bash" >&2
-        exit 1
-      fi
-      exec "$HOME/.grok/bin/grok" "$@"
-    '';
-    executable = true;
-    force = true;
-  };
   # Env-only prelude for Hermes wrappers. PATH/HERMES_HOME/HERMES_INSTALL_DIR
   # must be exported here rather than in a subprocess: the final `exec` of the
   # hermes binary inherits them, and scripts/sinnix-ensure-hermes (which does
@@ -491,7 +475,6 @@ in
     mkClaudeCodeWrapper
     mkCodexWrapper
     mkPiWrapper
-    mkGrokWrapper
     hermesBootstrap
     ensureHermes
     mkHermesWrapper

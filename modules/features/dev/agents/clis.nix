@@ -1,4 +1,4 @@
-# AI agent CLI wrappers (claude/codex/pi/grok/hermes), shared skills, and
+# AI agent CLI wrappers (claude/codex/pi/hermes), shared skills, and
 # per-agent runtime state. Wrapper-builder machinery lives in backends.nix.
 {
   mkFeatureModule,
@@ -257,7 +257,6 @@ mkFeatureModule {
         mkClaudeCodeWrapper
         mkCodexWrapper
         mkPiWrapper
-        mkGrokWrapper
         agentScopePrelude
         hermesBootstrap
         ensureHermes
@@ -314,10 +313,6 @@ mkFeatureModule {
             ".local/state/claude-code"
             ".local/state/codex"
             ".local/state/pi"
-            {
-              directory = ".grok";
-              mode = "0700";
-            }
             ".hermes"
           ];
         };
@@ -458,11 +453,6 @@ mkFeatureModule {
                 # Pi uses its own ChatGPT Plus/Pro OAuth flow. It is a
                 # context-engineering surface, not a second job scheduler.
                 ".local/bin/pi" = mkPiWrapper;
-
-                # Vendor-managed CLIs self-update in place. Keep their canonical
-                # binaries untouched and route use through distinct Nix-managed
-                # wrappers so launches share agent-cli.slice containment.
-                ".local/bin/grok-sinnix" = mkGrokWrapper;
 
                 ".config/hermes/skills" = {
                   source = mkDotsFile "/_ai/skills";
