@@ -237,6 +237,13 @@ mkServiceModule {
               # The daemon exits 78 when it refuses the archive (a schema it
               # cannot migrate); restarting cannot change that.
               RestartPreventExitStatus = 78;
+              # A clean stop during an index build syncs the private build
+              # file so the next start resumes it; a SIGKILL leaves it torn
+              # and the build starts over from stored bytes (Polylogue
+              # docs/architecture.md, Durability). Syncing a large unsynced
+              # file on a busy disk can take minutes, longer than the 90 s
+              # default.
+              TimeoutStopSec = "15min";
             };
             Install.WantedBy = [ "default.target" ];
           };
