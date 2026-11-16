@@ -139,15 +139,9 @@ class AuditService:
             raise ValueError("action and idempotency key are required")
         now = time.time()
         identity = (action, idempotency_key)
-        descriptor = os.open(
-            self._lock_path(action, idempotency_key), os.O_CREAT | os.O_RDWR, 0o600
-        )
+        lock_path = self._lock_path(action, idempotency_key)
+        descriptor = self._acquire_lock(lock_path)
         try:
-            try:
-                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                os.close(descriptor)
-                descriptor = None
             with self._connect() as connection:
                 connection.execute("begin immediate")
                 row = connection.execute(
@@ -197,7 +191,7 @@ class AuditService:
                 return "replay", response
         finally:
             if descriptor is not None:
-                os.close(descriptor)
+                self._release_lock(lock_path, descriptor)
 
     def complete_idempotency(
         self,
@@ -249,6 +243,49 @@ class AuditService:
     def release_idempotency(self, action: str, idempotency_key: str) -> None:
         descriptor = self._claims.pop((action, idempotency_key), None)
         if descriptor is not None:
+            self._release_lock(self._lock_path(action, idempotency_key), descriptor)
+
+    @staticmethod
+    def _path_names(path: Path, descriptor: int) -> bool:
+        try:
+            named = os.stat(path)
+        except FileNotFoundError:
+            return False
+        held = os.fstat(descriptor)
+        return (named.st_dev, named.st_ino) == (held.st_dev, held.st_ino)
+
+    def _acquire_lock(self, path: Path) -> int | None:
+        """Lock the key's lock file; None while another call holds it.
+
+        A release removes the file, so a descriptor opened just before one
+        can lock a file the path no longer names. Such a lock proves nothing
+        to a reader of the path and is taken again on the current file.
+        """
+        while True:
+            descriptor = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                os.close(descriptor)
+                return None
+            except BaseException:
+                os.close(descriptor)
+                raise
+            if self._path_names(path, descriptor):
+                return descriptor
+            os.close(descriptor)
+
+    def _release_lock(self, path: Path, descriptor: int) -> None:
+        """Remove the lock file, then drop its lock.
+
+        Only the holder of the lock on the file the path names removes it, so
+        the removal cannot take a file another call has locked. A claimant
+        that ended without releasing leaves its file, unlocked.
+        """
+        try:
+            if self._path_names(path, descriptor):
+                os.unlink(path)
+        finally:
             os.close(descriptor)
 
     def _lock_path(self, action: str, idempotency_key: str) -> Path:

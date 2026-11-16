@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 
@@ -112,6 +113,76 @@ def test_pending_contention_and_confirmed_response_replay(tmp_path):
         )
         == response
     )
+
+
+def lock_files(config):
+    return sorted((config.state_dir / "audit").glob("*.lock"))
+
+
+def test_a_released_key_leaves_no_lock_file(tmp_path):
+    """Fails if any way of ending or retrying a claim leaves its lock file."""
+    config = GatewayConfig(projects={}, state_dir=tmp_path)
+    first = AuditService(config)
+    second = AuditService(config)
+    response = {"receipt": {"receipt_id": "receipt"}, "data": {}}
+
+    assert first.claim_idempotency("fixture.change", "done", "a" * 64)[0] == "new"
+    assert len(lock_files(config)) == 1
+    # A contending caller neither takes nor removes the live claim's file.
+    assert second.claim_idempotency("fixture.change", "done", "a" * 64)[0] == "pending"
+    assert len(lock_files(config)) == 1
+    assert second.operation("fixture.change", "done")["state"] == "pending"
+    first.complete_idempotency("fixture.change", "done", "a" * 64, response)
+    assert lock_files(config) == []
+
+    # Retries of a finished key lock the file only for the lookup.
+    assert second.claim_idempotency("fixture.change", "done", "a" * 64)[0] == "replay"
+    assert second.claim_idempotency("fixture.change", "done", "b" * 64)[0] == "conflict"
+    assert lock_files(config) == []
+
+    assert first.claim_idempotency("fixture.change", "left", "a" * 64)[0] == "new"
+    first.abandon_idempotency("fixture.change", "left")
+    assert lock_files(config) == []
+    assert second.operation("fixture.change", "left")["state"] == "indeterminate"
+    assert second.claim_idempotency("fixture.change", "left", "a" * 64) == (
+        "indeterminate",
+        None,
+    )
+    assert lock_files(config) == []
+
+
+def test_a_claim_never_rests_on_a_removed_lock_file(tmp_path, monkeypatch):
+    """Fails if a claimant keeps a lock on a file a release already removed.
+
+    The claimant opened the file, then the previous holder removed it and let
+    go: the lock succeeds on a file no reader of the path can see.
+    """
+    from sinnix_agent_gateway import audit as audit_module
+
+    config = GatewayConfig(projects={}, state_dir=tmp_path)
+    service = AuditService(config)
+    path = service._lock_path("fixture.change", "key")
+    real_open = os.open
+    opened = []
+
+    def open_then_lose_the_file(target, flags, mode=0o777):
+        descriptor = real_open(target, flags, mode)
+        if target == path and not opened:
+            os.unlink(path)
+        if target == path:
+            opened.append(descriptor)
+        return descriptor
+
+    monkeypatch.setattr(audit_module.os, "open", open_then_lose_the_file)
+    assert service.claim_idempotency("fixture.change", "key", "a" * 64)[0] == "new"
+    monkeypatch.undo()
+
+    assert len(opened) == 2
+    held = service._claims[("fixture.change", "key")]
+    assert os.fstat(held).st_ino == os.stat(path).st_ino
+    assert AuditService(config).operation("fixture.change", "key")["state"] == "pending"
+    service.release_idempotency("fixture.change", "key")
+    assert lock_files(config) == []
 
 
 def test_package_manifest_checks_code_separately_from_connector(tmp_path):
