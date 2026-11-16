@@ -720,6 +720,24 @@ def test_tool_cache_that_ignores_its_own_contents_is_disposable(owned):
     assert clean(owned)["removed"] == ["candidate"]
 
 
+def test_ignored_directory_of_tool_caches_is_disposable(owned):
+    _, _, path = owned
+    common = git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    with open(common + "/info/exclude", "a") as handle:
+        handle.write("\n.tooling/\n")
+    for tool in ("ruff", "mypy"):
+        cache_dir = path / ".tooling" / "cache" / tool
+        cache_dir.mkdir(parents=True)
+        (cache_dir / "CACHEDIR.TAG").write_bytes(native.CACHE_TAG)
+        (cache_dir / "state").write_bytes(b"derived cache")
+    (path / ".tooling" / "cache" / "empty").mkdir()
+    valuable = path / ".tooling" / "notes.txt"
+    valuable.write_text("unpublished bytes")
+    assert clean(owned)["kept"] and valuable.read_text() == "unpublished bytes"
+    valuable.unlink()
+    assert clean(owned)["removed"] == ["candidate"]
+
+
 def test_spent_time_budget_defers_removal_to_the_next_pass(owned):
     import time
 

@@ -151,6 +151,30 @@ def _tagged_cache(path: Path) -> bool:
         return False
 
 
+def _only_caches(directory: Path) -> bool:
+    """An ignored directory holding nothing but tool caches and empty directories.
+
+    A project can keep its tools' caches under one ignored directory (for
+    example `.lynchpin/cache/{ruff,mypy,pytest}`), which Git lists as that
+    one directory.
+    """
+    pending, visited = [directory], 0
+    try:
+        while pending:
+            current = pending.pop()
+            visited += 1
+            if visited > 256:
+                return False
+            for child in current.iterdir():
+                if child.is_symlink() or not child.is_dir():
+                    return False
+                if not (_tagged_cache(child) or _bytecode_cache(child)):
+                    pending.append(child)
+    except OSError:
+        return False
+    return True
+
+
 def _ignored_caches(path: Path) -> tuple[Path, ...]:
     names = _git(
         path,
@@ -576,6 +600,12 @@ def _cleanup_obstacle(
         mode = candidate.lstat().st_mode
         if stat.S_ISDIR(mode):
             if candidate not in covered_dirs and _empty_tree(candidate):
+                continue
+            if (
+                kind == "ignored"
+                and candidate not in covered_dirs
+                and _only_caches(candidate)
+            ):
                 continue
             if candidate not in covered_dirs:
                 return f"worktree kept; {kind} directory is not preserved: {str(candidate)!r}"
