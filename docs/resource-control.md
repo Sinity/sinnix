@@ -88,8 +88,10 @@ systemd-oomd ends sustained thrash before the kernel has to: it kills the job
 with the most reclaim when the job plane's memory pressure stays above 40% for
 15 s (pytest and bulk pools: 50% for 30 s), the tool command with the most
 reclaim when `agent-tool.slice` stays above 50% for 20 s, and the job or tool
-command using the most swap when swap is 80% used. No oomd policy covers a
-slice that holds an agent CLI, the desktop or a service.
+command using the most swap when swap is 80% used. pueued, whose children
+are every running job's wrapper, is omitted from oomd's choices
+(`ManagedOOMPreference=omit`). No oomd policy covers a slice that holds an
+agent CLI, the desktop or a service.
 
 The same scores apply if the host as a whole runs out (a service or the
 desktop far above its line): job units and tool commands rank above Chrome's
