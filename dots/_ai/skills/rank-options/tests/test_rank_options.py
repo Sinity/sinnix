@@ -381,6 +381,31 @@ def test_status_text_output_names_the_unsettled_reasons(rank: Rank):
 
 
 # -- criterion 6: private option text never reaches tracked output -----------
+
+
+def text_contains(root: Path, needle: str) -> list[str]:
+    hits = []
+    for path in root.rglob("*"):
+        if not path.is_file() or path.is_symlink():
+            continue
+        if ".git" in path.parts:
+            continue
+        try:
+            if needle in path.read_text(encoding="utf-8", errors="ignore"):
+                hits.append(str(path))
+        except OSError:
+            continue
+    return hits
+
+
+def seed_private_options(rank: Rank, canary: str) -> None:
+    options = [(f"opt-private-{i}", f"{canary} option {i}") for i in range(1, 5)]
+    assert rank.add("private", options).returncode == 0
+    rank.record("private", options[0][0], options[1][0], options[0][0])
+    rank.record("private", options[1][0], options[2][0], options[1][0])
+    rank.record("private", options[2][0], options[3][0], options[2][0])
+
+
 def test_private_option_text_stays_out_of_the_tree(rank: Rank, tmp_path: Path):
     canary = f"canary-{uuid.uuid4().hex}"
     seed_private_options(rank, canary)
