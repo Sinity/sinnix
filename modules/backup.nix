@@ -202,7 +202,7 @@ let
       builtins.toJSON {
         root = polylogueStateRoot;
         excludes = polylogueDbExcludes;
-        hooks = builtins.readFile ./lib/backup/cut-polylogue-hooks.py;
+        hooks = builtins.readFile ../pkgs/sinnix-backup/sinnix_backup/hook_cut.py;
       }
     );
     sinex = builtins.hashString "sha256" (builtins.toJSON sinexStorePaths);
@@ -212,6 +212,340 @@ let
         policy = realmCoveragePolicy;
       }
     );
+  };
+
+  sinexCoreRepository = lib.findFirst (repo: repo != null) null (lib.take 1 sinexBackupRepositories);
+  sinexKeysRepository = lib.findFirst (repo: repo != null) null (lib.drop 1 sinexBackupRepositories);
+  sinexRepositoryNames =
+    lib.optional (sinexCoreRepository != null) "sinex-core"
+    ++ lib.optional (sinexKeysRepository != null) "sinex-keys";
+
+  persistCoverage = mkCoverage {
+    label = "persist";
+    bindTarget = borgPersistSnapshotBind;
+    exclude = persistExcludes;
+    noncanonical = persistNoncanonical;
+  };
+  realmCoverage = mkCoverage {
+    label = "realm";
+    bindTarget = borgRealmSnapshotBind;
+    exclude = realmExcludes;
+    noncanonical = realmNoncanonical;
+  };
+  genomeCoverage = mkCoverage {
+    label = "genome";
+    bindTarget = "${borgSnapshotBindRoot}/genome";
+    exclude = genomeExcludes;
+    noncanonical = genomeExcludes;
+    producerProof = true;
+  };
+  # Root snapshot paths left out of the archive; the same list is the
+  # coverage policy, so an excluded root is never reported missing.
+  rootSnapshotExcludes = [
+    "dev"
+    "home/${username}/.cache"
+    "mnt"
+    "neo-outer-realm"
+    "nix"
+    "outer-realm"
+    "persist"
+    "proc"
+    "realm"
+    "root/.cache"
+    "run"
+    "swap"
+    "sys"
+    "tmp"
+    "var/cache"
+  ];
+
+  # A disabled producer module contributes no unit to the nightly sequence.
+  configuredUnits = lib.filter (
+    name: builtins.hasAttr name config.systemd.services && config.systemd.services.${name}.enable
+  );
+  dumpUnits = configuredUnits (
+    lib.optional config.sinnix.services.machine-telemetry.enable "machine-telemetry-sqlite-backup"
+    ++ lib.optional config.sinnix.services.polylogue.enable "polylogue-sqlite-backup"
+  );
+  # Daily direct-path archives run before the snapshot drains, so a long
+  # snapshot backlog cannot push them past their start window.
+  archiveUnits = configuredUnits (
+    lib.optional config.sinnix.services.polylogue.enable "borgbackup-job-polylogue-state"
+    ++ [
+      "borgbackup-job-sinex-blobs"
+      "borgbackup-job-realm"
+      "borgbackup-job-genome"
+      "borgbackup-job-persist"
+      "borgbackup-root-snapshots"
+    ]
+  );
+  finalUnits = configuredUnits [
+    "borgbackup-maintenance"
+    "borgbackup-coverage-audit-realm"
+    "borgbackup-local-dumps"
+  ];
+  acquisitionPolicy = builtins.hashString "sha256" (
+    builtins.toJSON {
+      dumps = map (
+        name:
+        let
+          service = config.systemd.services.${name};
+        in
+        if service.script != "" then service.script else service.serviceConfig.ExecStart
+      ) dumpUnits;
+      snapshots = config.environment.etc."btrbk/btrbk.conf".text;
+    }
+  );
+
+  # The policy every `sinnix-backup` command reads from /etc/sinnix/backup.json.
+  # Each `coverage` object is hashed into stored archive records: changing an
+  # entry, its order or a key makes the next archive of that source a new
+  # policy (see docs/backups.md, "Exclusions and why").
+  backupConfig = {
+    state_directory = borgDrainStateRoot;
+    lock_path = borgGlobalLock;
+    cache_directory = borgCacheDir;
+    hourly_cache_directory = borgHourlyCacheDir;
+    passphrase_path = borgPassphrasePath;
+    scratch_directory = "${realmRoot}/tmp/work";
+    lock_wait_seconds = borgLockWaitSec;
+    repositories =
+      lib.mapAttrs
+        (_: url: {
+          inherit url;
+          path = lib.removePrefix "file://" url;
+        })
+        (
+          {
+            persist = borgRepoPersist;
+            realm = borgRepoRealm;
+            root-snapshots = borgRepoRootSnapshots;
+            sinex-blobs = borgRepoSinexBlobs;
+            polylogue-state = borgRepoPolylogueState;
+            live-small = borgRepoLiveSmall;
+          }
+          // lib.optionalAttrs (sinexCoreRepository != null) { sinex-core = sinexCoreRepository; }
+          // lib.optionalAttrs (sinexKeysRepository != null) { sinex-keys = sinexKeysRepository; }
+        );
+    sources = {
+      persist = {
+        repository = "persist";
+        snapshot_directory = persistSnapshots;
+        name_glob = "persist.*";
+        bind_path = borgPersistSnapshotBind;
+        archive_prefix = "persist";
+        replacement_suffix = "-coverage-v2";
+        coverage = persistCoverage;
+        create_check = false;
+        files_cache_suffix = null;
+      };
+      realm = {
+        repository = "realm";
+        snapshot_directory = realmSnapshots;
+        name_glob = "realm.*";
+        bind_path = borgRealmSnapshotBind;
+        archive_prefix = "realm";
+        replacement_suffix = "-coverage-v3";
+        coverage = realmCoverage;
+        create_check = true;
+        files_cache_suffix = null;
+      };
+      # Initrd snapshots of the ephemeral root, relative to the top-level
+      # subvolume of jobs.root_snapshots.device mounted for the job.
+      root = {
+        repository = "root-snapshots";
+        snapshot_directory = ".snapshots";
+        name_glob = "root.*";
+        bind_path = null;
+        archive_prefix = "root";
+        replacement_suffix = "";
+        coverage = rootSnapshotExcludes;
+        create_check = false;
+        files_cache_suffix = null;
+      };
+    }
+    // lib.optionalAttrs (backupCfg.genomeRoot != null) {
+      genome = {
+        repository = "realm";
+        snapshot_directory = genomeSnapshots;
+        name_glob = "genome.*";
+        bind_path = "${borgSnapshotBindRoot}/genome";
+        archive_prefix = "genome";
+        replacement_suffix = "";
+        coverage = genomeCoverage;
+        create_check = true;
+        # Realm backlogs must not age genome entries out of Borg's files
+        # cache; the repository and chunk cache stay shared.
+        files_cache_suffix = "genome";
+      };
+    };
+    nightly = {
+      dump_units = map (name: "${name}.service") dumpUnits;
+      archive_units = map (name: "${name}.service") archiveUnits;
+      final_units = map (name: "${name}.service") finalUnits;
+      drain_sources = [
+        "realm"
+        "persist"
+      ]
+      ++ lib.optional (backupCfg.genomeRoot != null) "genome";
+      verify_unit = "borgbackup-verify.service";
+      acquisition_policy = acquisitionPolicy;
+      daily_markers = {
+        "borgbackup-job-polylogue-state.service" = [
+          "${borgDrainStateRoot}/polylogue-state.last-success"
+          coordinatorPolicies.polylogue
+        ];
+        "borgbackup-job-sinex-blobs.service" = [
+          "${borgDrainStateRoot}/sinex-blobs.last-success"
+          coordinatorPolicies.sinex
+        ];
+        "borgbackup-local-dumps.service" = [
+          "${borgDrainStateRoot}/local-dumps.last-success"
+          coordinatorPolicies.localDumps
+        ];
+      };
+    };
+    jobs = {
+      freshness_seconds = borgDataFreshnessMaxAgeSec;
+      sinex_store_paths = sinexStorePaths;
+      polylogue = {
+        user = username;
+        state_root = polylogueStateRoot;
+        dump_root = polylogueBackupRoot;
+        database_names = polylogueDbNames;
+        state_excludes = polylogueDbExcludes ++ [ ".salvage-internals-20261008" ];
+        hook_cut_directory = "${realmRoot}/state/cache/polylogue-backup-hooks";
+        paid_vector_root = paidVectorRoot;
+      };
+      hourly = {
+        user = username;
+        persist_source = "/persist";
+        persist_cut = "/persist/.btrfs/borg-hourly-cut";
+        polylogue_archive_database = "${polylogueArchiveRoot}/archive.db";
+        tasks_root = "${realmRoot}/state/tasks";
+        tasks_excludes = [
+          "migration-backups"
+          "**/dolt-server.log"
+        ];
+        sinex_spools = sinexSpoolPaths;
+      };
+      local_dumps_root = "${realmRoot}/state/db-dumps";
+      root_snapshots.device = "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02";
+      genome = lib.optionalAttrs (backupCfg.genomeRoot != null) {
+        source = toString backupCfg.genomeRoot;
+        acquisition_inventory = genomeAcquisitionInventory;
+        max_observation_age_seconds = borgAcquisitionObservationMaxAgeSec;
+        producer_unit = "btrbk.service";
+      };
+      audit = {
+        record = realmCoverageAuditReceipt;
+        attempt = "${borgDrainStateRoot}/realm.independent-coverage-audit-attempt.json";
+        max_age_seconds = 604800;
+        status_max_age_seconds = 691200;
+        sample_bytes = 1073741824;
+        sample_files = 128;
+        scratch_directory = "${borgCacheDir}/coverage-scratch";
+      };
+      beads = {
+        stores = map (store: {
+          inherit (store) path database;
+          project_uuid = store.projectUuid;
+        }) beadsArchivePaths;
+        log = beadsCheckLog;
+        lock_wait_seconds = beadsCheckLockWaitSec;
+        restore_parent = "${realmRoot}/tmp";
+      };
+      maintenance = {
+        marker = "${borgDrainStateRoot}/maintenance.last-success";
+        compact_marker = "${borgDrainStateRoot}/compact.last-success";
+        retention_directory = "${borgDrainStateRoot}/retention";
+        # Each repository's active series keep recent, daily, weekly and
+        # monthly points; retired series keep six monthly ones and expire.
+        repositories = [
+          {
+            repository = "persist";
+            active = [
+              "persist-*"
+              "hourly-persist-*"
+            ];
+            retired = [ "sinnix-prime-persist-*" ];
+          }
+          {
+            repository = "realm";
+            active = [
+              "realm-*"
+              "genome-genome.*"
+            ];
+            retired = [
+              "sinnix-prime-realm-*"
+              "machine-telemetry-dumps-*"
+            ];
+          }
+          {
+            repository = "sinex-blobs";
+            active = [ "sinex-blobs-*" ];
+            retired = [ ];
+          }
+        ]
+        ++ map (repository: {
+          inherit repository;
+          active = [ "sinex-core-*" ];
+          retired = [ ];
+        }) sinexRepositoryNames
+        ++ [
+          {
+            repository = "root-snapshots";
+            active = [ "root-*" ];
+            retired = [ ];
+          }
+          {
+            repository = "polylogue-state";
+            active = [ "polylogue-state-*" ];
+            retired = [ ];
+          }
+          {
+            repository = "live-small";
+            active = [
+              "live-small-*"
+              "polylogue-archive-*"
+            ];
+            retired = [ ];
+          }
+        ];
+      };
+      integrity = {
+        record = borgIntegrityReceipt;
+        # --max-duration makes each pass incremental: successive weekly runs
+        # cycle through a repository without holding its lock for a day.
+        repositories = [
+          {
+            repository = "persist";
+            seconds = 1800;
+          }
+          {
+            repository = "realm";
+            seconds = 7200;
+          }
+          {
+            repository = "sinex-blobs";
+            seconds = 1800;
+          }
+        ]
+        ++ map (repository: {
+          inherit repository;
+          seconds = 900;
+        }) sinexRepositoryNames;
+        expected_jobs = [
+          "persist"
+          "realm"
+          "sinex-blobs"
+        ]
+        ++ lib.optionals (sinexRepositoryNames != [ ]) [
+          "sinex"
+          "sinex-keys"
+        ];
+      };
+    };
   };
 
   mkBackupJob =
@@ -369,9 +703,9 @@ let
   # not inherit the workstation session's TMPDIR; default to Realm scratch.
   # The independent full audit overrides it with Borg's cache on persist so
   # its inventory cannot consume the audited filesystem's remaining space.
-  snapshotCoverage = "${pkgs.coreutils}/bin/env TMPDIR=\"\${TMPDIR:-${realmRoot}/tmp/work}\" ${pkgs.python3}/bin/python3 ${./lib/backup/snapshot-coverage.py}";
+  snapshotCoverage = "${pkgs.coreutils}/bin/env TMPDIR=\"\${TMPDIR:-${realmRoot}/tmp/work}\" ${pkgs.python3}/bin/python3 ${../pkgs/sinnix-backup/sinnix_backup/coverage.py}";
 
-  mkCoveragePolicy =
+  mkCoverage =
     {
       label,
       bindTarget,
@@ -379,18 +713,16 @@ let
       noncanonical,
       producerProof ? label == "realm",
     }:
-    pkgs.writeText "${label}-snapshot-coverage.json" (
-      builtins.toJSON (
-        {
-          inherit noncanonical;
-          chrome_extension_caches = label == "persist";
-          borg_excludes = borgExcludePatterns bindTarget exclude;
-        }
-        // lib.optionalAttrs producerProof {
-          producer_contract = "realm-borg-create-v2";
-        }
-      )
-    );
+    {
+      inherit noncanonical;
+      chrome_extension_caches = label == "persist";
+      borg_excludes = borgExcludePatterns bindTarget exclude;
+    }
+    // lib.optionalAttrs producerProof {
+      producer_contract = "realm-borg-create-v2";
+    };
+  mkCoveragePolicy =
+    args: pkgs.writeText "${args.label}-snapshot-coverage.json" (builtins.toJSON (mkCoverage args));
 
   genomeExcludes = [
     "cache/reference"
@@ -1509,8 +1841,8 @@ in
             pkgs.borgbackup
           ];
 
-          # btrbk configuration
           environment.etc."btrbk/btrbk.conf".text = btrbkConfig;
+          environment.etc."sinnix/backup.json".text = builtins.toJSON backupConfig;
         }
 
       ]

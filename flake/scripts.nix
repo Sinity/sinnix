@@ -20,6 +20,12 @@ let
   externalPackages = import ./package-set.nix {
     inherit inputs pkgs;
     scorePackage = discovered.registry.sinnix-score.package;
+    backupScriptPackages = lib.genAttrs [
+      "sinnix-borg-check"
+      "sinnix-borg-expire"
+      "sinnix-borg-prune-dumps"
+      "sinnix-sqlite-backup"
+    ] (name: discovered.registry.${name}.package);
   };
   discovery = import ./script-discovery.nix {
     inherit lib pkgs;
@@ -50,6 +56,13 @@ let
   discovered = discovery.discover (inputs.self + "/scripts");
 
   registry = discovered.registry // {
+    sinnix-backup = {
+      description = "Archive snapshots into Borg, run the nightly backup sequence, checks and maintenance";
+      package = externalPackages.sinnix-backup;
+      runtimeInputs = [ ];
+      owner = "pkgs/sinnix-backup";
+      docs = "docs/backups.md";
+    };
     sinnix-fs = {
       description = "Inspect, classify, catalog and maintain the filesystem";
       package = externalPackages.sinnix-fs;

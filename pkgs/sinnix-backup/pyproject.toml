@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sinnix-backup"
+version = "0.1.0"
+description = "Snapshot archives, nightly sequence, checks and maintenance for the workstation's Borg backups"
+requires-python = ">=3.12"
+
+[project.scripts]
+sinnix-backup = "sinnix_backup.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["sinnix_backup*"]

@@ -303,7 +303,7 @@ in
       install -d -m 0700 -o root -g root "$stage_root"
       install -d -m 0700 -o root -g root "$stage_root/cuts"
       echo "polylogue state backup phase: creating archive"
-      with_borg_lock ${pkgs.python3}/bin/python3 ${./cut-polylogue-hooks.py} \
+      with_borg_lock ${pkgs.python3}/bin/python3 ${../../../pkgs/sinnix-backup/sinnix_backup/hook_cut.py} \
         ${lib.escapeShellArg polylogueStateRoot} "$stage_root/cuts" -- borg create \
         --compression auto,zstd,1 \
         --lock-wait ${toString borgLockWaitSec} \
