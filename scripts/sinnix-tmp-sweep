@@ -443,6 +443,11 @@ def paced_remove(path: str, budget: list[int], deadline: float) -> bool:
         time.sleep(0.001)
         return True
     for _, dirs, files, fd in os.fwalk(path, topdown=False, follow_symlinks=False):
+        # Test fixtures often leave read-only directories. Every entry was
+        # checked to belong to the owner, who may make it writable to empty it.
+        mode = os.fstat(fd).st_mode
+        if (files or dirs) and mode & 0o300 != 0o300:
+            os.fchmod(fd, stat.S_IMODE(mode) | 0o300)
         for name in files + dirs:
             if budget[0] <= 0 or time.monotonic() >= deadline:
                 return False

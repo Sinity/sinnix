@@ -726,6 +726,15 @@ class ManagedSweepTest(unittest.TestCase):
         self.assertTrue(MODULE["paced_remove"](str(path), [20], time.monotonic() + 10))
         self.assertEqual((self.root / "keeper").read_text(), "keep")
 
+    def test_paced_removal_empties_an_owned_read_only_directory(self):
+        path = self.root / "lane"
+        (path / "fixture").mkdir(parents=True)
+        (path / "fixture" / "seed.jsonl").write_text("synthetic")
+        os.chmod(path / "fixture", 0o500)
+        self.addCleanup(lambda: path.exists() and os.chmod(path / "fixture", 0o700))
+        self.assertTrue(MODULE["paced_remove"](str(path), [20], time.monotonic() + 10))
+        self.assertFalse(path.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
