@@ -334,7 +334,10 @@ def enqueue(
         "result_kind": result_kind,
         "log_path": str(log_path),
         "event_spool_path": str(config.event_spool),
+        "enqueued_at": datetime.now(UTC).isoformat(timespec="seconds"),
     }
+    if caller := caller_from_environment():
+        launch["caller"] = caller
     if idempotency_key is not None:
         launch["idempotency_key"] = idempotency_key
         launch["request_digest"] = request_digest
@@ -388,6 +391,35 @@ def enqueue(
     )
     view.update(job_queries.launch_selection(launch))
     return view
+
+
+# The harness variables that name the agent session a job was started from.
+CALLER_SESSION_VARIABLES = (
+    ("claude", "CLAUDE_CODE_SESSION_ID"),
+    ("codex", "CODEX_THREAD_ID"),
+)
+
+
+def caller_from_environment(
+    environ: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """Who started this job, as far as the launching process can say.
+
+    The operator view reads it to answer "for whom is this running": the agent
+    session and, when the launcher exported one, the Bead it works on.
+    """
+    environ = os.environ if environ is None else environ
+    caller: dict[str, str] = {}
+    for harness, variable in CALLER_SESSION_VARIABLES:
+        if session := environ.get(variable, "").strip():
+            caller["harness"] = harness
+            caller["session"] = session[:128]
+            break
+    if bead := environ.get("AGENTCTL_LANE_BEAD", "").strip():
+        caller["bead"] = bead[:128]
+    if principal := environ.get("AGENTCTL_PRINCIPAL", "").strip():
+        caller["principal"] = principal[:128]
+    return caller
 
 
 def _idempotent_job_id(key: str) -> str:

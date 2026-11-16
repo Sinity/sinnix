@@ -185,6 +185,13 @@ def test_job_snapshot_bounds_terminal_history_without_hiding_active_jobs(
     assert cli.main(["--json", "job", "snapshot", "--limit", "3"]) == 0
     snapshot = json.loads(capsys.readouterr().out)
     assert [row["task_id"] for row in snapshot["jobs"][:2]] == [queued, running]
+    # A queued row says why it waits, from the same queue snapshot.
+    assert snapshot["jobs"][0]["wait"] == {
+        "reason": "dependencies",
+        "waiting_for": [running],
+        "group": "agent",
+    }
+    assert "wait" not in snapshot["jobs"][1]
     assert snapshot["groups"]["agent"]["running"] == 1
     assert snapshot["groups"]["agent"]["queued"] == 1
     assert snapshot["groups"]["normal"]["terminal"] == 80

@@ -94,6 +94,15 @@ input. Launch summaries and `job get` show the retained `descriptor_path`,
 `timeout_seconds`. Human output labels all four; JSON includes the same fields.
 Historical inputs lacking a field do not reconstruct it from today's descriptor.
 Environment values and credentials are not part of this public selection view.
+
+The launch input also records when the job was enqueued and, when the
+launching process can say, who started it: `caller.harness` and
+`caller.session` from the agent session variable (`CLAUDE_CODE_SESSION_ID`,
+`CODEX_THREAD_ID`), `caller.bead` from `AGENTCTL_LANE_BEAD`, and
+`caller.principal`. Both ride on the job's `queue-task` events. `job snapshot`
+shows them on unfinished rows with the command and checkout, and gives each
+queued row a `wait` reason: `group-paused`, `dependencies`, `pool-full` (with
+the jobs holding the pool), `priority-order` or `ready`.
 `job start --idempotency-key` binds a caller's request to one launch:
 a replay reuses the accepted launch, and an unprovable submission raises
 instead of resubmitting.

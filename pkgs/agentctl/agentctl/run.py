@@ -734,6 +734,10 @@ def _run(
         "unit": None,
         "working_directory": launch["working_directory"],
     }
+    # Optional launch facts: older inputs carry neither.
+    for key in ("caller", "enqueued_at"):
+        if launch.get(key):
+            event[key] = launch[key]
 
     def publish_outcome(record: Mapping[str, Any]) -> None:
         # Inventories stay with the attempt owner. The finish event references

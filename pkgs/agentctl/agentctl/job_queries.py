@@ -427,6 +427,7 @@ def snapshot_jobs(limit: int, config: Config | None = None) -> dict[str, Any]:
             active.append(task)
     active.sort(key=lambda task: task.task_id, reverse=True)
     terminal.sort(key=lambda task: task.task_id, reverse=True)
+    waits = wait_reasons(active, queue.groups)
     selected = [*active, *terminal][:limit]
     returned_active = sum(not task.terminal for task in selected)
     returned_terminal = len(selected) - returned_active
@@ -434,7 +435,10 @@ def snapshot_jobs(limit: int, config: Config | None = None) -> dict[str, Any]:
         "schema": "sinnix.agentctl.job-snapshot.v1",
         "limit": limit,
         "groups": groups,
-        "jobs": [_snapshot_row(task, config) for task in selected],
+        "jobs": [
+            {**_snapshot_row(task, config), **waits.get(task.task_id, {})}
+            for task in selected
+        ],
         "omitted": {
             "total": len(queue.tasks) - len(selected),
             "active": len(active) - returned_active,
@@ -448,11 +452,93 @@ def snapshot_jobs(limit: int, config: Config | None = None) -> dict[str, Any]:
     }
 
 
+def wait_reasons(
+    active: Sequence[Task], groups: Mapping[str, Mapping[str, Any]]
+) -> dict[int, dict[str, Any]]:
+    """Why each queued task has not started, from one queue snapshot.
+
+    The reasons match ``job_queue``: a paused group, an unfinished dependency,
+    a full pool (naming the jobs that hold it), or queue order (naming the
+    jobs ahead).
+    """
+
+    def brief(task: Task) -> dict[str, Any]:
+        return {
+            "task_id": task.task_id,
+            "label": task.label[:MAX_SNAPSHOT_TEXT],
+            "job_id": job_id_of(task),
+            "started_at": task.started_at,
+        }
+
+    live_ids = {task.task_id for task in active}
+    reasons: dict[int, dict[str, Any]] = {}
+    by_group: dict[str, list[Task]] = {}
+    for task in active:
+        by_group.setdefault(task.group, []).append(task)
+    for name, members in by_group.items():
+        detail = groups.get(name) or {}
+        holding = [task for task in members if task.status in {"Running", "Paused"}]
+        width = int(detail.get("parallel_tasks") or 0)
+        paused = str(detail.get("status") or "") == "Paused"
+        queued = sorted(
+            (task for task in members if task.status == "Queued"),
+            key=lambda task: (-task.priority, task.task_id),
+        )
+        eligible = [
+            task
+            for task in queued
+            if not any(dep in live_ids for dep in task.dependencies)
+        ]
+        free = max(0, width - len(holding)) if width else len(eligible)
+        for task in queued:
+            waiting_for = [dep for dep in task.dependencies if dep in live_ids]
+            if paused:
+                wait: dict[str, Any] = {"reason": "group-paused"}
+            elif waiting_for:
+                wait = {"reason": "dependencies", "waiting_for": waiting_for}
+            else:
+                position = eligible.index(task)
+                if position < free:
+                    wait = {"reason": "ready"}
+                elif not free:
+                    wait = {
+                        "reason": "pool-full",
+                        "occupied_by": [brief(item) for item in holding[:4]],
+                    }
+                else:
+                    wait = {"reason": "priority-order"}
+                wait["position"] = position + 1
+                if position:
+                    wait["ahead"] = [brief(item) for item in eligible[:position][:4]]
+            reasons[task.task_id] = {"wait": {**wait, "group": name}}
+    return reasons
+
+
 def _snapshot_row(task: Task, config: Config | None = None) -> dict[str, Any]:
     """One snapshot row with foreign queue strings bounded for transport."""
     row = job_view(task)
     if config is not None:
-        row["attempt"] = artifact_view(config, task)["attempt"]
+        view = artifact_view(config, task)
+        row["attempt"] = view["attempt"]
+        if not task.terminal:
+            # What an unfinished job runs and for whom, from its launch input.
+            document = read_launch_input(config, task) or {}
+            argv = document.get("argv")
+            if isinstance(argv, list):
+                command = " ".join(str(word) for word in argv)
+                row["command"] = (
+                    command
+                    if len(command) <= MAX_SNAPSHOT_TEXT
+                    else command[: MAX_SNAPSHOT_TEXT - 1] + "…"
+                )
+            if isinstance(document.get("caller"), dict):
+                row["caller"] = document["caller"]
+            if isinstance(document.get("working_directory"), str):
+                row["working_directory"] = document["working_directory"][
+                    :MAX_SNAPSHOT_TEXT
+                ]
+            if log := view["artifacts"].get("log"):
+                row["log_path"] = log
     shortened = []
     for key in ("label", "operation", "path", "job_id"):
         value = row.get(key)

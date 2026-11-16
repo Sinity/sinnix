@@ -118,6 +118,27 @@ def test_operation_started_by_an_agent_preserves_its_routing_principal(
     assert written["environment"]["AGENTCTL_LANE_BEAD"] == "fx-1"
 
 
+def test_launch_input_records_the_calling_session_and_bead(
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "session-fixture")
+    monkeypatch.setenv("AGENTCTL_LANE_BEAD", "fixture-1")
+    adapter = load_project_adapter(project_root)
+    job = launch.start_operation(config, adapter, adapter.operation("check"))
+
+    document = read_launch(config, fake_pueue.task(job["task_id"]))
+    assert document["caller"] == {
+        "harness": "claude",
+        "session": "session-fixture",
+        "bead": "fixture-1",
+    }
+    assert document["enqueued_at"]
+    assert launch.caller_from_environment({}) == {}
+
+
 def test_extra_argv_is_appended_after_the_declared_exec(
     fake_pueue: FakePueue, config: Config, project_root: Path
 ) -> None:

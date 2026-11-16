@@ -421,6 +421,9 @@ def _no_inherited_launcher(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.delenv("AGENTCTL_POOL", raising=False)
     monkeypatch.delenv("AGENTCTL_PRINCIPAL", raising=False)
+    # The agent session running this suite must not appear as a job's caller.
+    for variable in ("CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "AGENTCTL_LANE_BEAD"):
+        monkeypatch.delenv(variable, raising=False)
 
 
 @pytest.fixture
