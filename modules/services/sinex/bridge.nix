@@ -25,6 +25,7 @@
 # running binary after a deploy.
 {
   config,
+  helpers,
   inputs,
   lib,
   options,
@@ -32,6 +33,10 @@
   ...
 }:
 let
+  # Each live unit's protected line in the host memory budget
+  # (docs/resource-control.md).
+  budget = helpers.data.runtimeDefaults.memoryBudget;
+  mib = value: "${toString value}M";
   cfg = config.sinnix.services.sinex;
   operator = config.sinnix.user.name;
   secrets = config.sinnix.secrets.paths;
@@ -160,9 +165,10 @@ in
           # own page cache first, so a daemon held there rereads its segment
           # and spool files from disk at the live weight for as long as it
           # stays; at the ceiling it is killed and restarted instead.
+          # Its resident peak over two weeks was 6.0G with 2G more swapped.
           MemoryMax = "8G";
           # Keep the daemon's working set resident: every producer frame waits for its acknowledgment.
-          MemoryLow = "1G";
+          MemoryLow = mib budget.sinexd;
         };
         notifyOnFailure = true;
         operatorRestart = false;
@@ -170,9 +176,11 @@ in
       sinex-nats = {
         unit = "sinex-nats.service";
         resourceClass = "live";
+        # Peaks of 0.5-0.7G over two weeks.
         resources = {
-          MemoryHigh = "6G";
-          MemoryMax = "8G";
+          MemoryLow = mib budget.nats;
+          MemoryHigh = "1G";
+          MemoryMax = "1536M";
         };
         notifyOnFailure = true;
         operatorRestart = false;
@@ -180,9 +188,11 @@ in
       sinex-capture-journald = {
         unit = "sinex-capture-journald.service";
         resourceClass = "live";
+        # Its peaks (1-2G) are page cache of the journal files it reads.
         resources = {
-          MemoryHigh = "6G";
-          MemoryMax = "8G";
+          MemoryLow = mib budget.journaldCapture;
+          MemoryHigh = "1G";
+          MemoryMax = "2G";
         };
         notifyOnFailure = true;
         operatorRestart = false;
@@ -192,11 +202,13 @@ in
         unit = "postgresql.service";
         resourceClass = "live";
         resources = {
+          # The huge pages of shared buffers (4.3G) are charged here; the rest
+          # of the band is backends and page cache of the cluster.
           MemoryHigh = "8G";
-          # Shared buffers (4GB) plus working memory stay resident when the
-          # host reclaims; swapping them turns every buffer hit into a
-          # swap-in. Needs live.slice's MemoryLow (runtime-defaults.nix).
-          MemoryLow = "5G";
+          MemoryMax = "9G";
+          # The huge pages plus 1.2G of backends and cache stay resident when
+          # the host reclaims. Needs live.slice's MemoryLow (runtime-defaults.nix).
+          MemoryLow = mib budget.postgresql;
         };
         notifyOnFailure = true;
         operatorRestart = false;
@@ -207,7 +219,7 @@ in
         manager = "user";
         resourceClass = "live";
         # Keep the session producer's working set resident because it waits on acknowledgments.
-        resources.MemoryLow = "256M";
+        resources.MemoryLow = mib budget.sessionProducer;
         notifyOnFailure = true;
         operatorRestart = false;
       };

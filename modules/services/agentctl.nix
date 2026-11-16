@@ -55,35 +55,35 @@ mkServiceModule {
         };
       }
     );
+    # Widths keep builds efficient inside the job plane's memory ceiling
+    # (agent-ctl.slice, runtime-defaults.nix); the ceiling, not the widths,
+    # keeps the host alive. Jobs beyond what the plane holds are throttled
+    # and then killed, which wastes their work, so the memory-heavy pools
+    # admit what fits: one test build beside one check.
     default = {
-      # Claude workers running focused tests reach 2-3 GiB each; six fit the
-      # 8G agent-ctl-agent slice without sustained pressure.
-      agent.parallel = 6;
-      # Codex workers mostly wait on builds; 32 fit beside the job plane
-      # without filling zram.
-      codex.parallel = 32;
-      pytest.parallel = 2;
-      pytest-heavy = {
-        parallel = 1;
-      };
-      # Focused jobs run one pytest process (p99 about 550 MiB, max about 1 GiB),
-      # so eight fit under the quick slice's 9G MemoryHigh.
-      pytest-quick = {
-        parallel = 8;
-      };
-      # Cargo pool widths bound concurrent builds to four, two metadata-only:
-      # /realm sustains 25-50 MB/s writes, while each test build writes 1-6 GB.
+      # Claude workers running focused tests reach 2-3 GiB each.
+      agent.parallel = 2;
+      # Codex workers, ~136 MB each, mostly wait on builds in other pools;
+      # sixteen fit their slice's 3G MemoryHigh.
+      codex.parallel = 16;
+      pytest.parallel = 1;
+      pytest-heavy.parallel = 1;
+      # Focused jobs run one pytest process (p99 about 550 MiB, max about
+      # 1 GiB), so four fit under the quick slice's 4G MemoryHigh.
+      pytest-quick.parallel = 4;
+      # Focused Cargo test builds, 2-7 GiB each: one at a time. /realm also
+      # sustains only 25-50 MB/s of writes, and each test build writes 1-6 GB.
       normal.parallel = 1;
       # Full checks and arbitrary commands, the longest builds: one at a time.
       bulk.parallel = 1;
       # Long-lived development dependencies must not occupy short-job capacity.
       service.parallel = 2;
-      interactive.parallel = 4;
+      interactive.parallel = 2;
       # The gateway's shell.run groups: agent CLIs and commands declared
       # long go to shell-long, so quick commands don't wait behind them.
-      shell-quick.parallel = 8;
-      # ChatGPT sessions launch 10-60 minute Claude workers here, four at once.
-      shell-long.parallel = 4;
+      shell-quick.parallel = 4;
+      # ChatGPT sessions launch 10-60 minute Claude workers here, 2-3 GiB each.
+      shell-long.parallel = 2;
       # Long I/O-heavy maintenance (copies between disks, offloads) that must
       # yield the disk to builds and interactive work; its slice carries the
       # lowest I/O weight in the job plane.
@@ -92,9 +92,9 @@ mkServiceModule {
       # checks can run beside them; prebuilt benchmarks use `measure_run`.
       measure.parallel = 1;
       system-build.parallel = 1;
-      # Rust type and lint checks write only metadata and have their own pool;
-      # two at once, each peaking at 3-4 GiB, fit in the compile slice's 8G.
-      compile.parallel = 2;
+      # Rust type and lint checks (3-4 GiB each) have their own pool, so they
+      # never wait behind test builds; one runs beside a test build.
+      compile.parallel = 1;
     };
     description = "Each pueue group's width and cross-pool admission policy.";
   };

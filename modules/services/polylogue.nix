@@ -155,15 +155,18 @@ mkServiceModule {
           lib.stringToCharacters (builtins.substring 0 32 (builtins.hashString "sha256" extensionDir))
         );
 
-      # The live class prioritizes daemon disk access; its memory limits trade slower startup under reclaim for host responsiveness.
+      # The live class prioritizes daemon disk access. The ceiling is what the
+      # host memory budget can afford beside agent work
+      # (docs/resource-control.md): the daemon, its index build included,
+      # fits 4G resident and 1G swapped, or the kernel ends it inside this unit.
       liveServiceClass = lib.sinnix.mkRuntimeServiceConfig {
         runtimeInventory = config.sinnix.runtime.inventory;
         unit = "polylogue-live.service";
         manager = "user";
         overrides = {
-          MemoryHigh = "6G";
-          MemoryMax = "9G";
-          MemorySwapMax = "2G";
+          MemoryHigh = "3584M";
+          MemoryMax = "4G";
+          MemorySwapMax = "1G";
         };
       };
     in
@@ -261,7 +264,7 @@ mkServiceModule {
         resourceClass = "live";
         # Its indexes and caches stay resident beside the session producer
         # within the user live slice's protection (runtime-defaults.nix).
-        resources.MemoryLow = "2500M";
+        resources.MemoryLow = "${toString args.helpers.data.runtimeDefaults.memoryBudget.polylogue}M";
         notifyOnFailure = true;
         operatorRestart = true;
       };

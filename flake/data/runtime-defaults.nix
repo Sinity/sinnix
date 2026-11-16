@@ -33,8 +33,57 @@ let
     totalMin = appMin + sessionMin + shellMin;
     totalLow = appLow + sessionLow + shellLow;
   };
-  # Protect the user services that process live session data, in MiB.
-  userLiveLow = 3072;
+
+  # The host's memory budget, in MiB (docs/resource-control.md). Every line
+  # outside agent work is memory the kernel keeps for its owner (MemoryMin,
+  # or MemoryLow sized to the owner's working set); agent work's hard
+  # ceiling is what remains. Agents therefore meet their own ceiling before
+  # the host runs out, and anything that grows past its line is paid for by
+  # reclaiming and then killing agent work, never the desktop or a service.
+  hostMemory = rec {
+    # MemTotal on sinnix-prime.
+    ram = 31923;
+    # Kernel memory no cgroup is charged for (slab, vmalloc, stacks, about
+    # 1.3 GiB) and the free-page watermarks (min_free_kbytes 256 MiB).
+    kernel = 2048;
+    # The zram store's resident limit (workstation.nix): swapped pages of
+    # every cgroup, compressed about 3:1, are held in RAM here.
+    zram = 3072;
+    desktop = desktopMemory.totalMin;
+    # The huge-page reservation for shared buffers (bridge.nix: 2,202 pages,
+    # 4.3 GiB, charged to the unit) plus 1.2 GiB of backends and cache.
+    postgresql = 5632;
+    sinexd = 1024;
+    nats = 128;
+    journaldCapture = 128;
+    # The Polylogue daemon (1.5 GiB) and the session producer.
+    polylogue = 1536;
+    sessionProducer = 256;
+    userLive = polylogue + sessionProducer;
+    systemLive = postgresql + sinexd + nats + journaldCapture;
+    # Other system daemons (system.slice, 0.9 GiB median) and recovery tools.
+    systemServices = 1024;
+    systemCritical = 256;
+    # The user capture producers and ActivityWatch (0.3 GiB together).
+    captureProducers = 512;
+    protected =
+      desktop + systemLive + userLive + systemServices + systemCritical + captureProducers;
+    agents = ram - kernel - zram - protected;
+  };
+  # The ceiling actually set on agent.slice, rounded down from the remainder.
+  agentMemory = rec {
+    max = 9216;
+    high = 8192;
+    # Interactive sessions: protected up to their measured p95 (3.0 GiB).
+    cliLow = 3072;
+    cliHigh = 6144;
+    cliMax = 7168;
+    toolHigh = 4608;
+    toolMax = 5120;
+    # The job plane: what the sessions leave of the ceiling.
+    planeHigh = 6144;
+    planeMax = 7168;
+  };
   mib = value: "${toString value}M";
 
   surfaceType = surface: if surface.manager == "user" then "user" else surface.kind;
@@ -155,6 +204,16 @@ rec {
   # Read by the Chrome launcher and the Hyprland unit, which claim their
   # share of the desktop guarantee on their own units.
   inherit desktopMemory;
+  # Read by the live units' resources (bridge.nix, polylogue.nix). Agent
+  # work's ceiling never exceeds what the budget leaves it.
+  memoryBudget =
+    assert lib.assertMsg (
+      agentMemory.max <= hostMemory.agents
+      && agentMemory.cliMax <= agentMemory.max
+      && agentMemory.planeMax <= agentMemory.max
+      && agentMemory.toolMax <= agentMemory.max
+    ) "agent memory ceilings exceed what the host memory budget leaves for agent work";
+    hostMemory;
 
   # Global earlyoom is only the last-resort floor. Per-scope cgroups own
   # workload containment; this process-name fallback protects only surfaces
@@ -234,6 +293,7 @@ rec {
       # Input and other critical system services share this accounted ancestor.
       system = {
         IOAccounting = true;
+        MemoryLow = mib memoryBudget.systemServices;
       };
       # The live class's system units (Sinex PostgreSQL, sinexd, NATS, the
       # journald capture). Equal to user.slice for the disk; see the live
@@ -242,8 +302,9 @@ rec {
         IOAccounting = true;
         CPUWeight = 400;
         IOWeight = 400;
-        # PostgreSQL memory protection also requires protection on this ancestor.
-        MemoryLow = "6G";
+        # memory.low is limited by every ancestor, so the live units' own
+        # protection counts only up to this slice's.
+        MemoryLow = mib memoryBudget.systemLive;
       };
       # memory.min and memory.low are limited by every ancestor. This
       # carries the desktop's guarantee (app, session and shell slices) to
@@ -254,8 +315,11 @@ rec {
         # Give the desktop equal disk weight with live system services.
         IOWeight = 400;
         MemoryMin = mib desktopMemory.totalMin;
-        # The user manager's live slice is protected only within this.
-        MemoryLow = mib (desktopMemory.totalLow + userLiveLow);
+        # The user manager's live and capture slices are protected only
+        # within this.
+        MemoryLow = mib (
+          desktopMemory.totalLow + memoryBudget.userLive + memoryBudget.captureProducers
+        );
       };
       # Individual units set memory limits; the shared slice yields IO.
       background = {
@@ -274,12 +338,19 @@ rec {
         IOAccounting = true;
         CPUWeight = 400;
         IOWeight = 300;
-        MemoryLow = "2G";
+        MemoryLow = mib memoryBudget.systemCritical;
       };
     };
     user = {
-      # Agent slices share a budget alongside the protected desktop, live
-      # services and kernel; MemoryHigh is 3G below MemoryMax.
+      # The agent budget: every kind of agent work runs below this one slice
+      # (interactive CLIs, their tool commands and MCP servers, and the
+      # agentctl job plane). Its MemoryMax is the remainder of the host
+      # budget (memoryBudget above, docs/resource-control.md), so agent work
+      # meets this ceiling before the host runs short: reclaim and the
+      # out-of-memory killer then act inside this slice, where the victim is
+      # the job or tool with the highest OOM score (agentctl sets 900 on job
+      # units, claude-tool-scope 800 on tool commands, the CLIs 300).
+      # MemoryHigh 1G below the ceiling throttles agent work before a kill.
       agent = {
         IOAccounting = true;
         # Below app and session (100) and the shell (400). The quota equals
@@ -289,32 +360,10 @@ rec {
         CPUQuota = "1600%";
         # IOCost lends idle shares while favoring the desktop under contention.
         IOWeight = 25;
-        # At 20G/22G the host hit a global OOM twice on 2026-11-02 (03:25,
-        # 03:50): agents near their ceiling beside live and rehearsal
-        # PostgreSQL and the desktop left the kernel nothing, and it killed a
-        # build's rustc from outside any agent slice. 19G leaves the desktop's
-        # 6.5G guarantee, live services (5-9G) and the kernel their share, so
-        # agent work is throttled or killed inside this slice first. Swap
-        # stays small: agents are reclaimed or killed, never paged to the QLC
-        # NVMe.
-        #
-        # 19G was sized against 31 GiB. Since 2026-11-09 PostgreSQL's shared
-        # buffers hold 4.5 GiB of that as huge pages, which no cgroup is
-        # charged for and reclaim cannot touch. On 2026-11-16 the budget
-        # stood at 12.3G anonymous plus its 2G of swap, far below 16G, while
-        # the host had 17.4G anonymous, 9.5G in zram and 2.2G of page cache
-        # in total: this slice kept 0.6G of page cache and spent 98% of the
-        # time stalled re-reading its own binaries, at under 1% memory
-        # pressure, so neither oomd nor earlyoom acted for half an hour.
-        # What the host can give agents beside huge pages (4.5G), kernel
-        # slab and page tables (2.6G), the zram store (3-4G when full), the
-        # desktop and the live services is about 12.5G, page cache included.
-        # The ceiling sits below that so agents meet their own limit, where
-        # the stall counts as this budget's memory pressure and the job
-        # plane's oomd policy ends it. More swap lets idle sessions compress
-        # (about 3:1) instead of pinning RAM.
-        MemoryHigh = "10G";
-        MemoryMax = "12G";
+        MemoryHigh = mib agentMemory.high;
+        MemoryMax = mib agentMemory.max;
+        # Idle sessions compress into zram (about 3:1) instead of pinning RAM;
+        # 4G of swapped agent pages hold about 1.3G of the zram store.
         MemorySwapMax = "4G";
         TasksMax = 16384;
       };
@@ -325,23 +374,19 @@ rec {
         # responsive during a wave.
         CPUWeight = 100;
         IOWeight = 100;
-        # The agent processes themselves stay resident while tools and jobs
-        # fill the budget (~0.6 GB for a coordinator with twenty forks; all
-        # sessions together 1.9 GB on 2026-10-27; fourteen sessions held
-        # 5.1G resident and 1.5G swapped on 2026-11-16). The protection
-        # covers the sessions in use, so reclaim at the budget's MemoryHigh
-        # lands on jobs and tools first.
-        MemoryLow = "5G";
+        # The sessions' measured p95 (all sessions, 3.0G) stays resident, so
+        # reclaim inside the budget lands on jobs and tools first.
+        MemoryLow = mib agentMemory.cliLow;
         # Throttle, never kill: every in-process subagent shell is a child of
         # the coordinator's Claude process in the same scope, so an oomd
         # policy here would take the session down with its runaway child.
-        # At 6G, fourteen sessions sat on the limit with 0.16G of page cache
-        # between them and every keystroke re-read the CLI from disk.
-        MemoryHigh = "8G";
+        # The band between Low and High keeps page cache for the CLIs
+        # themselves, so a keystroke never re-reads the CLI from disk.
+        MemoryHigh = mib agentMemory.cliHigh;
         # Hard backstop only if throttling cannot hold: the kernel's
         # cgroup-local OOM then picks the largest single process, which for
         # a runaway build is the build, not a ~1 GB agent process.
-        MemoryMax = "10G";
+        MemoryMax = mib agentMemory.cliMax;
         MemorySwapMax = "4G";
         TasksMax = 8192;
       };
@@ -355,14 +400,14 @@ rec {
         IOWeight = 90;
         # Pressure killing selects a command scope; the ceiling and swap limit
         # bound total tool memory.
-        MemoryHigh = "8G";
-        MemoryMax = "10G";
+        MemoryHigh = mib agentMemory.toolHigh;
+        MemoryMax = mib agentMemory.toolMax;
         MemorySwapMax = "2G";
         ManagedOOMMemoryPressure = "kill";
         ManagedOOMMemoryPressureLimit = "50%";
         ManagedOOMMemoryPressureDurationSec = "20s";
-        # Global swap exhaustion can precede this slice's pressure threshold.
-        # Offer command scopes (not coordinator sessions) to oomd's swap ranking.
+        # At oomd's global swap threshold, offer command scopes (not
+        # coordinator sessions) to its swap ranking.
         ManagedOOMSwap = "kill";
         TasksMax = 8192;
       };
@@ -373,7 +418,7 @@ rec {
         IOAccounting = true;
         CPUWeight = 200;
         IOWeight = 300;
-        MemoryLow = mib userLiveLow;
+        MemoryLow = mib memoryBudget.userLive;
       };
       app = {
         IOAccounting = true;
@@ -417,34 +462,32 @@ rec {
         MemoryHigh = "8G";
         MemoryMax = "12G";
       };
+      # The user capture producers and ActivityWatch. Their working set is
+      # protected; the ceiling, six times what they use together, ends a
+      # leak or a bulk job started here instead of in the job plane.
       background = {
         IOAccounting = true;
         CPUWeight = 20;
         IOWeight = 20;
+        MemoryLow = mib memoryBudget.captureProducers;
+        MemoryMax = "3G";
       };
       # The agentctl job plane: pueued (agent-ctl-work.slice) and every pool
-      # slice below it. Its own ceiling leaves the agent CLIs' and tools'
-      # share of the budget; the budget, not this slice, bounds it against
-      # the desktop.
+      # slice below it, in what the sessions leave of the agent budget.
+      # Peak memory per job, page cache included: Polylogue focused p50 3.6G
+      # p90 5.5G, Sinex focused p90 6.9G, compile and Clippy 2.0-3.4G. The
+      # plane holds one test build beside one check; more running jobs are
+      # throttled at MemoryHigh and then ended by the kernel or oomd, and the
+      # owner sees "out of memory" (docs/agentctl.md).
       agent-ctl = {
         IOAccounting = true;
         # Give queued work enough CPU to make progress alongside the desktop.
         CPUWeight = 90;
         IOWeight = 100;
-        # Builds, up to four by pool width (normal 1, bulk 1, compile 2).
-        # Peak memory per job since 2026-11-01, page cache included: Polylogue
-        # focused p50 3.6G p90 5.5G, Sinex focused/exec p90 6.8-6.9G, compile
-        # and Clippy p90 2.0-3.4G, so four typical builds would sum to ~13G,
-        # which the host does not have beside the sessions: the plane holds
-        # two typical builds or one large one, and a third is throttled and
-        # then ended by the oomd policy below instead of stalling the host.
-        # The plane sits 2G below the agent budget.
-        MemoryHigh = "8G";
-        MemoryMax = "10G";
-        # Bounded swap for the plane as a whole. With none, a job at its
-        # ceiling could only drop page cache (6 TiB of re-reads over one
-        # 11-day uptime). A job's own cold pages are the cheaper thing to
-        # page. Within the budget's own 2G.
+        MemoryHigh = mib agentMemory.planeHigh;
+        MemoryMax = mib agentMemory.planeMax;
+        # A job's own cold pages are cheaper to page than its page cache is to
+        # re-read.
         MemorySwapMax = "2G";
         # MemoryHigh can hold the plane in reclaim indefinitely below MemoryMax.
         # Monitor the whole plane so every pool contributes eligible job units.
@@ -452,14 +495,12 @@ rec {
         # the sampling window; 15s above it tolerates short allocation bursts
         # but sacrifices the job with most reclaim before minutes of thrash.
         # Only descendants are selected, so pueued and job units are candidates;
-        # agent-cli and the desktop are outside this tree. Do not monitor agent.
+        # agent-cli and the desktop are outside this tree.
         ManagedOOMMemoryPressure = "kill";
         ManagedOOMMemoryPressureLimit = "40%";
         ManagedOOMMemoryPressureDurationSec = "15s";
-        # At oomd's global RAM/swap threshold (SwapUsedLimit, default 90%),
-        # rank eligible descendants by swap use, even without local pressure.
-        # oomd requires a victim to use >5% of total swap; small jobs may be
-        # ineligible, so earlyoom remains the global stalled-host fallback.
+        # At oomd's global swap threshold (workstation.nix), rank eligible
+        # descendants by swap use, even without local pressure.
         ManagedOOMSwap = "kill";
       };
       agent-ctl-work = {
@@ -467,49 +508,40 @@ rec {
         CPUWeight = 100;
         IOWeight = 100;
       };
-      # Pueue tasks run in pool slices; the parent monitors their combined
-      # pressure and limits total swap. Pool widths limit concurrent tasks.
+      # Pueue tasks run in pool slices under the plane's ceiling. A pool sets
+      # its own memory limit only where it is tighter than the plane's.
       agent-ctl-agent = {
         IOAccounting = true;
         CPUWeight = 400;
         IOWeight = 300;
-        # Worker count, not this ceiling, is the lever: see agent.parallel in
-        # modules/services/agentctl.nix.
-        MemoryHigh = "8G";
         MemorySwapMax = "1G";
       };
-
-      # Codex workers (`codex` operation): many light processes, ~136 MB
-      # resident each, that spend most of their time waiting on builds in
-      # other pools. Width, not this ceiling, is the lever.
+      # Codex workers (`codex` operation): light processes, ~136 MB resident
+      # each, that spend most of their time waiting on builds in other pools.
       agent-ctl-codex = {
         IOAccounting = true;
         CPUWeight = 100;
         IOWeight = 100;
-        MemoryHigh = "8G";
-        MemoryMax = "10G";
+        MemoryHigh = "3G";
+        MemoryMax = "4G";
         MemorySwapMax = "1G";
       };
-
-      # Four test workers at about 2263 MiB each plus a 1 GiB master need 10 GiB;
-      # 12G high adds 20% margin shared by pytest, heavy and quick pools.
+      # The parent of the pytest-heavy and pytest-quick pools as well, by
+      # slice-name hierarchy.
       agent-ctl-pytest = {
         IOAccounting = true;
         # Tests are the wave's critical path; agent processes mostly wait on
         # the API, so the test pools outrank them.
         CPUWeight = 200;
         IOWeight = 200;
-        MemoryHigh = "12G";
-        MemoryMax = "14G";
         MemorySwapMax = "2G";
       };
-      # Full corpus tests share the parent ceiling and have pressure monitoring.
+      # The corpus gate: one xdist worker peaks at 2.3 GiB, so the plane holds
+      # two workers and the collecting process.
       agent-ctl-pytest-heavy = {
         IOAccounting = true;
         CPUWeight = 200;
         IOWeight = 200;
-        MemoryHigh = "12G";
-        MemoryMax = "14G";
         MemorySwapMax = "2G";
         ManagedOOMMemoryPressure = "kill";
         ManagedOOMMemoryPressureLimit = "50%";
@@ -517,42 +549,32 @@ rec {
       };
       # Short, bounded pytest selections (one file, one worker's focused
       # check): a separate pool so they never queue behind the corpus.
-      # The ceiling is shared by every running quick job. Keep it above their
-      # measured combined peak so memory.high does not create sustained reclaim
-      # that triggers oomd for healthy focused runs. The 12G parent arbitrates
-      # this pool against concurrent heavy tests.
       agent-ctl-pytest-quick = {
         IOAccounting = true;
         CPUWeight = 200;
         IOWeight = 200;
-        MemoryHigh = "9G";
-        MemoryMax = "10G";
+        MemoryHigh = "4G";
+        MemoryMax = "5G";
         MemorySwapMax = "1G";
         ManagedOOMMemoryPressure = "kill";
         ManagedOOMMemoryPressureLimit = "50%";
         ManagedOOMMemoryPressureDurationSec = "30s";
       };
-      # Bulk work yields to interactive reads; separate high and max limits
-      # allow reclaim and swap before reaching the hard ceiling.
+      # Bulk work yields to interactive reads.
       agent-ctl-bulk = {
         IOAccounting = true;
         CPUWeight = 20;
         IOWeight = 10;
-        MemoryHigh = "12G";
-        MemoryMax = "14G";
         MemorySwapMax = "2G";
         ManagedOOMMemoryPressure = "kill";
         ManagedOOMMemoryPressureLimit = "50%";
         ManagedOOMMemoryPressureDurationSec = "30s";
       };
+      # Focused Cargo test builds, 2-7 GiB each.
       agent-ctl-normal = {
         IOAccounting = true;
         CPUWeight = 50;
         IOWeight = 50;
-        # Focused Cargo test builds peak at 2-7 GiB each and the pool runs
-        # one; the plane's own ceiling bounds normal and bulk together.
-        MemoryHigh = "12G";
-        MemoryMax = "14G";
         MemorySwapMax = "2G";
       };
       agent-ctl-interactive = {
@@ -564,17 +586,15 @@ rec {
         MemorySwapMax = "512M";
       };
       # The gateway's shell lanes share this parent by slice-name hierarchy.
-      # It hosts no pool; it measures both lanes and stays above the wider
-      # child so it never binds either alone.
+      # It hosts no pool; it measures both lanes.
       agent-ctl-shell = {
         IOAccounting = true;
         CPUWeight = 100;
         IOWeight = 100;
-        MemoryHigh = "12G";
         MemorySwapMax = "2G";
       };
       # Quick reads (rg, sed, git status) come first for CPU and IO; a runaway
-      # one is killed at its own ceiling, never paging the desktop.
+      # one is killed at its own ceiling.
       agent-ctl-shell-quick = {
         IOAccounting = true;
         CPUWeight = 200;
@@ -584,12 +604,11 @@ rec {
         MemorySwapMax = "512M";
       };
       # Agent CLIs launched from ChatGPT: 2-3 GiB each, like agent-ctl-agent
-      # workers, and like them throttled rather than killed.
+      # workers.
       agent-ctl-shell-long = {
         IOAccounting = true;
         CPUWeight = 100;
         IOWeight = 100;
-        MemoryHigh = "10G";
         MemorySwapMax = "2G";
       };
       # Offloads and copies: the lowest I/O weight in the plane, so builds
@@ -602,29 +621,22 @@ rec {
         MemoryMax = "6G";
         MemorySwapMax = "512M";
       };
-      # Two type and lint checks at 3-4 GiB each fit in 8G; their metadata
-      # writes take priority over test builds.
+      # Rust type and lint checks, 3-4 GiB each; their metadata writes take
+      # priority over test builds.
       agent-ctl-compile = {
         IOAccounting = true;
         CPUWeight = 100;
         IOWeight = 100;
-        MemoryHigh = "8G";
-        MemoryMax = "10G";
         MemorySwapMax = "1G";
       };
       # One benchmark or measurement at a time. Its numbers are only valid on
-      # a quiet host, so it runs throttled by nothing but its own ceiling: no
-      # pressure kill, ordinary weights.
+      # a quiet host, so it runs throttled by nothing but the plane: no
+      # pressure kill, ordinary weights. agentctl marks measurement units as
+      # the OOM killers' last choice.
       agent-ctl-measure = {
         IOAccounting = true;
         CPUWeight = 100;
         IOWeight = 100;
-        # No MemoryLow: under recursive protection a child's low is bounded by
-        # its ancestors', and the user manager's 15G is claimed in full by
-        # the desktop and live slices, so it would be inert. agentctl marks
-        # measurement units as the OOM killers' last choice instead.
-        MemoryHigh = "12G";
-        MemoryMax = "14G";
         MemorySwapMax = "2G";
       };
       # One full workstation build (`sinnix:build_system`); evaluation runs
@@ -633,8 +645,6 @@ rec {
         IOAccounting = true;
         CPUWeight = 20;
         IOWeight = 10;
-        MemoryHigh = "8G";
-        MemoryMax = "10G";
         MemorySwapMax = "2G";
       };
       # The switch commands place their evaluation scope here.

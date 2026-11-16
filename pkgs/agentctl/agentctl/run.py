@@ -55,11 +55,13 @@ MAX_LOG_BYTES = 8_000_000
 MAX_RESULT_BYTES = 64_000
 
 # Exit statuses of the wrapper itself. 124 is timeout(1)'s, 130 is a
-# SIGINT-shaped cancellation and 126 a command that could not be observed.
+# SIGINT-shaped cancellation, 126 a command that could not be observed and
+# 121 a unit the out-of-memory killer ended (no common tool exits 121).
 TIMEOUT_EXIT_CODE = 124
 REFUSED_EXIT_CODE = 125
 CANCELLED_EXIT_CODE = 130
 VANISHED_EXIT_CODE = 126
+OUT_OF_MEMORY_EXIT_CODE = 121
 BUS_CONNECT_RETRY_SECONDS = 10
 USER_BUS_CONNECTION_REFUSED = (
     b"Failed to connect to user scope bus via local transport: Connection refused"
@@ -80,6 +82,7 @@ class Outcome(str, Enum):
     TIMEOUT = "timeout"
     CANCELLED = "cancelled"
     VANISHED = "vanished"
+    OUT_OF_MEMORY = "out-of-memory"
 
 
 # Pool slices sit under agent-ctl.slice, inside the host's agent budget
@@ -572,6 +575,9 @@ def _service_command(
         "IOAccounting=yes",
         # Job units rank above Chrome tab renderers (200-300) for global OOM kills.
         "OOMScoreAdjust=900" if pool not in PROTECTED_POOLS else "OOMScoreAdjust=100",
+        # A kernel OOM kill of any process ends the whole unit at once
+        # (memory.oom.group), so a job never continues with a killed child.
+        "OOMPolicy=kill",
         *(("ManagedOOMPreference=avoid",) if pool in PROTECTED_POOLS else ()),
         f"WorkingDirectory={launch['working_directory']}",
         f"StandardOutput={'append' if stdout == log_path else 'file'}:{stdout}",
@@ -609,6 +615,9 @@ def _classify(
         return Outcome.VANISHED, VANISHED_EXIT_CODE
     if properties.get("Result") == "timeout":
         return Outcome.TIMEOUT, TIMEOUT_EXIT_CODE
+    # The kernel's and systemd-oomd's kills both end the unit with this result.
+    if properties.get("Result") == "oom-kill":
+        return Outcome.OUT_OF_MEMORY, OUT_OF_MEMORY_EXIT_CODE
     try:
         status = int(properties.get("ExecMainStatus", ""))
     except ValueError:
@@ -950,6 +959,11 @@ def _run(
                 action = "control" if scratch_owner.unit is not None else "start"
                 log.write(f"could not {action} the command: {error}\n".encode())
                 return refused(scratch_error=scratch_owner.cleanup())
+            if outcome is Outcome.OUT_OF_MEMORY:
+                log.write(
+                    b"killed: out of memory in the agent budget "
+                    b"(docs/resource-control.md)\n"
+                )
             if outcome is Outcome.TIMEOUT:
                 message = (
                     f"timed out after {launch['timeout_seconds']} seconds\n"

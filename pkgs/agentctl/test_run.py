@@ -21,6 +21,7 @@ from agentctl.config import Config
 from agentctl.run import (
     CANCELLED_EXIT_CODE,
     MAX_LOG_BYTES,
+    OUT_OF_MEMORY_EXIT_CODE,
     REFUSED_EXIT_CODE,
     TIMEOUT_EXIT_CODE,
     VANISHED_EXIT_CODE,
@@ -404,6 +405,7 @@ def test_a_successful_command_spools_its_start_and_finish(
         ("cancelled", CANCELLED_EXIT_CODE),
         ("vanished", VANISHED_EXIT_CODE),
         ("refused", REFUSED_EXIT_CODE),
+        ("out-of-memory", OUT_OF_MEMORY_EXIT_CODE),
     ],
 )
 def test_terminal_outcomes_publish_records_without_phone_interruptions(
@@ -420,6 +422,10 @@ def test_terminal_outcomes_publish_records_without_phone_interruptions(
         overrides["argv"] = ["sh", "-c", "exit 3"]
     elif outcome == "timeout":
         fake_systemd.terminal(Result="timeout")
+    elif outcome == "out-of-memory":
+        fake_systemd.terminal(
+            Result="oom-kill", ExecMainCode="killed", ExecMainStatus="9"
+        )
     elif outcome == "cancelled":
         marker = cancel_marker_for(tmp_path / "job-a.log")
         marker.write_text(json.dumps({"attempt": 1}))
@@ -1256,7 +1262,22 @@ def test_build_units_rank_first_for_the_oom_killers(
 
     argv = fake_systemd.run_argv()
     assert "OOMScoreAdjust=900" in argv
+    assert "OOMPolicy=kill" in argv
     assert "ManagedOOMPreference=avoid" not in argv
+
+
+def test_an_out_of_memory_kill_tells_the_owner_where_it_happened(
+    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue
+) -> None:
+    fake_systemd.terminal(Result="oom-kill", ExecMainCode="killed", ExecMainStatus="9")
+    launch = write_launch(tmp_path, pool="normal")
+
+    assert main([str(launch)]) == OUT_OF_MEMORY_EXIT_CODE
+
+    record = outcome_of(tmp_path)
+    assert record["outcome"] == "out-of-memory"
+    assert record["systemd_result"] == "oom-kill"
+    assert "killed: out of memory in the agent budget" in log_of(tmp_path)
 
 
 def test_output_larger_than_eight_mb_is_preserved_completely(tmp_path: Path) -> None:

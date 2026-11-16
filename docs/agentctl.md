@@ -131,6 +131,13 @@ attempt 1. A retry never overwrites an earlier attempt.
 | `cancelled` | 130  | the job was cancelled                                            |
 | `vanished`  | 126  | the unit's terminal status could not be observed                 |
 | (refused)   | 125  | refused before starting (vanished workdir, unresolvable command) |
+| `out-of-memory` | 121 | the kernel or systemd-oomd killed the unit (`Result=oom-kill`) |
+
+An `out-of-memory` job was the victim the host chose when agent work reached
+its memory ceiling ([resource control](resource-control.md)); the log ends
+with `killed: out of memory in the agent budget`. Job units carry
+`OOMPolicy=kill`, so the whole unit ends with the killed process. Run it again
+when the plane is quieter, or narrower.
 
 Terminal outcomes publish retained records and finish events for the event feed. They do not send phone notifications. Producers that require
 operator action use explicit alarm paths.
@@ -191,8 +198,11 @@ A pool declares one fixed `parallel` width. Pueue enforces it. Applying pool
 settings changes widths without restarting the daemon or its running jobs.
 
 **Concurrent builds.** The widths of the pools that run Cargo builds
-(`normal` 1, `bulk` 1, `compile` 2) bound how many run at once, so a job takes its queue slot only
-when it can run; no job waits inside its slot.
+(`normal` 1, `bulk` 1, `compile` 1) bound how many run at once, so a job takes
+its queue slot only when it can run; no job waits inside its slot. Widths are
+sized for efficiency inside the job plane's memory ceiling: more concurrent
+builds than the plane holds are throttled and then killed. The ceiling, not
+the widths, protects the host.
 
 **Pausing work.** `pueue pause --group <pool> --wait` stops new jobs in a
 group while its running jobs finish. `pueue start --group <pool>` resumes it.
@@ -208,7 +218,7 @@ group while its running jobs finish. `pueue start --group <pool>` resumes it.
   `boot`, in the one-slot `system-build` pool, so neither occupies a `bulk` slot
   a check is waiting for and an activation never waits behind a product check.
 - **Rust type and lint checks** (the Rust projects' `compile` operations and
-  their Clippy operations) run in the two-slot `compile` pool. They write only
+  their Clippy operations) run in the one-slot `compile` pool. They write only
   metadata, so they neither wait behind test builds nor stop when `normal`
   and `bulk` are paused, and an agent learns within minutes whether its head
   compiles. Focused test builds run in `normal`.

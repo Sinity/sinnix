@@ -75,10 +75,14 @@ dots/         managed user configuration; dots/_ai/ holds the global agent
 - Declared operations choose a pueue group; the groups and their widths are
   `sinnix.services.agentctl.pools` (`modules/services/agentctl.nix`), applied
   with `agentctl pools apply`, never by restarting pueued.
-- Memory is bounded by the slice hierarchy and the resource classes in
-  `flake/data/runtime-defaults.nix`. Hard `MemoryMax` is reserved for explicit
-  safety boundaries. The `bulk` group admits
-  large Nix operations; nothing wraps `nix` by basename.
+- Memory follows one host budget that sums to physical memory
+  (`hostMemory` in `flake/data/runtime-defaults.nix`, explained in
+  `docs/resource-control.md`): every consumer outside agent work has a
+  protected line, and agent work's `MemoryMax` is what remains. A change to a
+  line or a new long-running consumer changes the budget, not just its unit.
+  Pool widths keep builds efficient inside that ceiling; they are not what
+  protects the host. The `bulk` group admits large Nix operations; nothing
+  wraps `nix` by basename.
 - Scheduled work is a module's `mkScheduledJob` timer. When the work is a
   declared operation, its command is
   `agentctl job start --if-idle <project> <operation>`.

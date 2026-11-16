@@ -343,6 +343,7 @@ in
             in
             number * scale;
           budget = userSlices.agent;
+          hostBudget = runtimeDefaults.memoryBudget;
           managedWork = userSlices.agent-ctl;
           poolSlices = lib.genAttrs [
             "agent-ctl-agent"
@@ -393,22 +394,19 @@ in
         assert lib.assertMsg (
           declaredPools ? compile && poolSlices ? agent-ctl-compile
         ) "type and lint checks have a pool and slice of their own";
-        # The build pools' widths are the only bound on concurrent Cargo builds:
-        # one test build, one full check and two type checks.
+        # The job plane holds one test build beside one check.
         assert lib.assertMsg (
-          declaredPools.normal.parallel + declaredPools.bulk.parallel + declaredPools.compile.parallel <= 4
-        ) "normal, bulk and compile together admit at most four Cargo builds";
+          declaredPools.normal.parallel == 1 && declaredPools.compile.parallel == 1
+        ) "normal and compile each admit one Cargo build";
         assert lib.assertMsg (lib.all (token: !(lib.hasInfix token avoidPattern))
           forbiddenAvoidTokens
         ) "the earlyoom fallback must not exempt agents, browsers, runtimes, or generic shells";
         assert lib.assertMsg
           (
-            # One budget holds every kind of agent work beside the desktop's
-            # hard guarantee in the host's 31 GiB. The guarantee, not the
-            # budget, protects the desktop; the budget's ceiling leaves the
-            # kernel and system services the remainder, and agents throttle at
-            # MemoryHigh 2G before it (lowered after the 2026-11-02 global OOMs and
-            # again on 2026-11-16 for the huge-page reservation).
+            # One budget holds every kind of agent work. Its ceiling plus the
+            # kernel reserve, the zram store and every protected line of the
+            # host budget fit in physical memory, and the desktop's guarantee
+            # in that budget is the one its slices carry.
             lib.all (name: userSlices ? ${name}) [
               "agent-cli"
               "agent-tool"
@@ -424,9 +422,9 @@ in
             && !(budget ? ManagedOOMSwap)
             &&
               sliceBytes budget.MemoryMax
-              + sliceBytes userSlices.app.MemoryMin
-              + sliceBytes userSlices.session.MemoryMin
-              + sliceBytes userSlices.desktop-shell.MemoryMin <= 29 * 1024 * 1024 * 1024
+              + (hostBudget.kernel + hostBudget.zram + hostBudget.protected) * 1024 * 1024
+              <= hostBudget.ram * 1024 * 1024
+            && hostBudget.desktop * 1024 * 1024 == sliceBytes runtimeDefaults.slices.system.user.MemoryMin
             # The desktop's guarantee is hard, and every ancestor carries it.
             && userSlices.desktop.MemoryMin == userSlices.desktop-shell.MemoryMin
             &&
@@ -463,44 +461,27 @@ in
             && userSlices.agent-cli ? MemoryMax
             && !(userSlices.agent-cli ? ManagedOOMMemoryPressure)
             && userSlices.agent-cli.CPUWeight > userSlices.agent-tool.CPUWeight
-            && !(poolSlices.agent-ctl-agent ? MemoryMax)
             && !(poolSlices.agent-ctl-agent ? ManagedOOMPreference)
             && !(poolSlices.agent-ctl-agent ? ManagedOOMMemoryPressure)
             && !(poolSlices.agent-ctl-agent ? ManagedOOMSwap)
-            && poolSlices.agent-ctl-agent ? MemoryHigh
             # No extra pytest-parent trigger; plane-wide monitoring still
             # makes every eligible test job a candidate under sustained thrash.
             && !(poolSlices.agent-ctl-pytest ? ManagedOOMMemoryPressure)
             && poolSlices.agent-ctl-pytest.CPUWeight == 200
             && poolSlices.agent-ctl-pytest.IOWeight == 200
-            # A parent ceiling must not bind below its widest child.
-            &&
-              sliceBytes poolSlices.agent-ctl-pytest.MemoryHigh
-              >= sliceBytes poolSlices.agent-ctl-pytest-heavy.MemoryHigh
-            &&
-              sliceBytes poolSlices.agent-ctl-pytest.MemoryHigh
-              >= sliceBytes poolSlices.agent-ctl-pytest-quick.MemoryHigh
-            # The shell lanes' parent must not bind below either lane.
-            &&
-              sliceBytes poolSlices.agent-ctl-shell.MemoryHigh
-              >= sliceBytes poolSlices.agent-ctl-shell-long.MemoryHigh
-            &&
-              sliceBytes poolSlices.agent-ctl-shell.MemoryHigh
-              >= sliceBytes poolSlices.agent-ctl-shell-quick.MemoryHigh
-            # The corpus at its sized width (four 2263 MiB workers plus the
-            # master, ~10.05 GiB) fits inside the plane's own ceiling, and no
-            # pool's ceiling is larger than the plane's.
-            && sliceBytes poolSlices.agent-ctl-pytest-heavy.MemoryHigh <= sliceBytes managedWork.MemoryHigh
-            && lib.all (slice: sliceBytes slice.MemoryHigh <= sliceBytes managedWork.MemoryHigh) (
-              lib.attrValues poolSlices
-            )
-            && sliceBytes poolSlices.agent-ctl-pytest-heavy.MemoryHigh >= 12 * 1024 * 1024 * 1024
-            && poolSlices.agent-ctl-pytest-heavy.MemoryMax == "14G"
+            # A pool sets a memory limit only where it is tighter than the
+            # plane's, and throttles below its own ceiling.
+            && lib.all (
+              slice:
+              !(slice ? MemoryMax)
+              || (
+                sliceBytes slice.MemoryMax <= sliceBytes managedWork.MemoryMax
+                && sliceBytes slice.MemoryHigh < sliceBytes slice.MemoryMax
+              )
+            ) (lib.attrValues poolSlices)
             && poolSlices.agent-ctl-pytest-heavy.ManagedOOMMemoryPressure == "kill"
             && poolSlices.agent-ctl-pytest-heavy.CPUWeight == 200
             && poolSlices.agent-ctl-pytest-heavy.IOWeight == 200
-            # Bulk reclaims and swaps its own pages before its hard cap.
-            && sliceBytes poolSlices.agent-ctl-bulk.MemoryHigh < sliceBytes poolSlices.agent-ctl-bulk.MemoryMax
             && !(poolSlices.agent-ctl-bulk ? IOReadBandwidthMax)
             # Every pool's swap fits inside the plane's.
             && lib.all (slice: sliceBytes slice.MemorySwapMax <= sliceBytes managedWork.MemorySwapMax) (

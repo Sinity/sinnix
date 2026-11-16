@@ -15,6 +15,7 @@
 }:
 let
   runtimeInventory = config.sinnix.runtime.inventory;
+  memoryBudget = helpers.data.runtimeDefaults.memoryBudget;
   primaryUserUid = toString config.users.users.${config.sinnix.user.name}.uid;
   # The desktop's guarantee is only as large as every ancestor's, so the
   # user slice's values are repeated on the per-user slice and manager.
@@ -196,16 +197,19 @@ in
 
         # zram is the only swap; overcommit beyond it is killed because disk paging stalls the host.
         # Telemetry samples zram, PSI and refaults.
+        # The zram store's RAM is a line of the host memory budget
+        # (runtime-defaults.nix, docs/resource-control.md). The resident limit
+        # holds it to that line whatever the pages compress to; 9 GiB of swap
+        # space fits it at the measured 3:1, so the space and the limit run
+        # out together and oomd's swap threshold sees a full store. Disksize
+        # changes apply to /dev/zram0 only on reboot, not on a live switch.
         zramSwap = {
           enable = true;
           algorithm = "zstd";
-          # 12 GiB, sized from a measured 3.6:1 compression ratio under real
-          # load; do not raise further without a zram residue-reset hygiene step
-          # (incompressible worst case approaches 1:1). Disksize changes apply
-          # to /dev/zram0 only on reboot, not on a live switch.
-          memoryMax = 12 * 1024 * 1024 * 1024;
+          memoryMax = 9 * 1024 * 1024 * 1024;
           priority = 100;
         };
+        services.zram-generator.settings.zram0.zram-resident-limit = toString memoryBudget.zram;
 
         systemd.settings.Manager.StatusUnitFormat = "name";
 
@@ -359,7 +363,12 @@ in
         # trees opt into pressure/swap monitoring in runtime-defaults.nix;
         # coordinator and desktop trees stay outside their candidate sets.
         # earlyoom covers global near-full swap with actual memory stalls.
-        systemd.oomd.enable = true;
+        systemd.oomd = {
+          enable = true;
+          # At 80% of the 9 GiB device the zram store is near its resident
+          # limit; oomd then kills the job or tool command using the most swap.
+          settings.OOM.SwapUsedLimit = "80%";
+        };
 
         # Devshell/agent scratch belongs on /realm NVMe, not the RAM-backed /tmp
         # tmpfs: `nix develop` uses `nix-shell.*` and `nix-develop-*` scratch
