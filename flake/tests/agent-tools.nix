@@ -433,7 +433,8 @@ in
               + sliceBytes userSlices.session.MemoryMin
               + sliceBytes userSlices.desktop.MemoryMin
             && managedWork.CPUWeight < userSlices.app.CPUWeight
-            && sliceBytes managedWork.MemoryHigh < sliceBytes managedWork.MemoryMax
+            && !(managedWork ? MemoryHigh)
+            && !(userSlices.agent-tool ? MemoryHigh)
             && sliceBytes managedWork.MemoryMax <= sliceBytes budget.MemoryMax
             && sliceBytes managedWork.MemorySwapMax <= sliceBytes budget.MemorySwapMax
             && managedWork.ManagedOOMSwap == "kill"

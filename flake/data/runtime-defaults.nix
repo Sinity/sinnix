@@ -75,13 +75,11 @@ let
     cliLow = 3072;
     cliHigh = 6144;
     cliMax = 7168;
-    toolHigh = 4608;
     toolMax = 5120;
     # The job plane: room for the largest single job (a Sinnix check peaks
-    # at 6.1-6.4G, a Sinex focused build at 6.9G) under a narrow throttling
-    # band; the sessions' protection, not this ceiling, keeps them resident
-    # when the plane and the sessions together reach the agent ceiling.
-    planeHigh = 7680;
+    # at 6.1-6.4G, a Sinex focused build at 6.9G); the sessions' protection,
+    # not this ceiling, keeps them resident when the plane and the sessions
+    # together reach the agent ceiling.
     planeMax = 8192;
   };
   mib = value: "${toString value}M";
@@ -352,11 +350,12 @@ rec {
       # out-of-memory killer then act inside this slice, where the victim is
       # the job or tool with the highest OOM score (agentctl sets 900 on job
       # units, claude-tool-scope 800 on tool commands, the CLIs 300).
-      # Agent work slows down at each kind's own MemoryHigh below (CLIs,
-      # tools, job plane). This slice has none: a MemoryHigh here throttled
-      # every kind at once without bound, four runaway allocators were held
-      # there for minutes, and oomd killed a bystander job in the meantime.
-      # At MemoryMax the kernel kills the largest of the highest-scored
+      # Only the CLIs have a MemoryHigh. On this slice, the job plane and the
+      # tool slice a MemoryHigh held runaway allocators throttled for
+      # minutes without ever reaching the ceiling, while oomd's pressure
+      # rule killed bystanders that were being reclaimed (a build, another
+      # session's tool command). At a MemoryMax the kernel reclaims and
+      # swaps first and then kills the largest of the highest-scored
       # processes at once.
       agent = {
         IOAccounting = true;
@@ -404,9 +403,8 @@ rec {
         # against its own tools.
         CPUWeight = 90;
         IOWeight = 90;
-        # Pressure killing selects a command scope; the ceiling and swap limit
-        # bound total tool memory.
-        MemoryHigh = mib agentMemory.toolHigh;
+        # The ceiling ends a runaway command (the largest at score 800); the
+        # pressure rule ends sustained thrash among many commands.
         MemoryMax = mib agentMemory.toolMax;
         MemorySwapMax = "2G";
         ManagedOOMMemoryPressure = "kill";
@@ -479,22 +477,20 @@ rec {
       # Peak memory per job, page cache included: Polylogue focused p50 3.6G
       # p90 5.5G, Sinex focused p90 6.9G, Sinnix check 6.1-6.4G, compile and
       # Clippy 2.0-3.4G. The plane holds one large job, or one test build
-      # beside one type check; more running jobs are
-      # throttled at MemoryHigh and then ended by the kernel or oomd, and the
-      # owner sees "out of memory" (docs/agentctl.md).
+      # beside one type check; beyond that the kernel ends the largest job at
+      # the ceiling, and the owner sees "out of memory" (docs/agentctl.md).
       agent-ctl = {
         IOAccounting = true;
         # Give queued work enough CPU to make progress alongside the desktop.
         CPUWeight = 90;
         IOWeight = 100;
-        MemoryHigh = mib agentMemory.planeHigh;
         MemoryMax = mib agentMemory.planeMax;
         # A job's own cold pages are cheaper to page than its page cache is to
         # re-read.
         MemorySwapMax = "2G";
-        # MemoryHigh can hold the plane in reclaim indefinitely below MemoryMax.
-        # Monitor the whole plane so every pool contributes eligible job units.
-        # 40% full PSI means all runnable work is stalled for two fifths of
+        # Sustained reclaim among several jobs below the ceiling: monitor the
+        # whole plane so every pool contributes eligible job units. 40% full
+        # PSI means all runnable work is stalled for two fifths of
         # the sampling window; 15s above it tolerates short allocation bursts
         # but sacrifices the job with most reclaim before minutes of thrash.
         # Only descendants are selected, so pueued and job units are candidates;

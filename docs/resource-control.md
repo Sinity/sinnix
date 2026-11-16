@@ -33,9 +33,8 @@ agent ceiling exceeds the remainder.
 
 Inside agent work: interactive CLIs (`agent-cli.slice`) keep 3 GiB protected,
 throttle at 6 and stop at 7; tool commands and MCP servers (`agent-tool.slice`)
-throttle at 4.5 and stop at 5; the job plane (`agent-ctl.slice`) throttles at
-7.5 and stops at 8, room for the largest single job (a Sinnix check peaks at
-6.4 GiB). A pool slice sets its own limit only where it is tighter than
+stop at 5; the job plane (`agent-ctl.slice`) stops at 8, room for the largest
+single job (a Sinnix check peaks at 6.4 GiB). A pool slice sets its own limit only where it is tighter than
 the plane's.
 
 Each live service also has a ceiling that ends a leak inside its own unit:
@@ -79,11 +78,12 @@ consumer.
 
 ### What is killed
 
-Each kind of agent work slows down at its own `MemoryHigh` (CLIs 6, tools
-4.5, job plane 7.5). `agent.slice` itself has no `MemoryHigh`: one there
-throttled every kind at once and held runaway allocators for minutes instead
-of ending them. When agent work as a whole reaches its ceiling, the kernel
-reclaims inside `agent.slice` and then kills inside it at once. The victim is chosen by OOM score, and the scores rank the kinds
+At a ceiling (`agent.slice`, the job plane, the tool slice) the kernel first
+reclaims and swaps inside it, which slows the work down, and then kills
+inside it at once. Only the CLIs have a `MemoryHigh` (6), so a session is
+throttled rather than killed. A `MemoryHigh` on the other slices held runaway
+allocators throttled for minutes without reaching the ceiling, while oomd's
+pressure rule killed bystanders that were being reclaimed. The victim is chosen by OOM score, and the scores rank the kinds
 of agent work:
 
 1. agentctl job units, `OOMScoreAdjust=900` (measurement jobs 100). A job unit
