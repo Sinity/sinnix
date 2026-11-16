@@ -1326,6 +1326,8 @@ in
               # with python3.
               pkgs.python3
               pkgs.shellcheck
+              # The attention hook is exercised under a pseudo-terminal.
+              pkgs.util-linux
             ];
           }
           ''

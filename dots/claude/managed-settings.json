@@ -61,6 +61,16 @@
         ]
       },
       {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/realm/project/sinnix/repo/dots/claude/hooks/attention-notify.py",
+            "timeout": 3
+          }
+        ]
+      },
+      {
         "hooks": [
           {
             "type": "command",
@@ -93,6 +103,18 @@
         ]
       }
     ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt|elicitation_dialog",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/realm/project/sinnix/repo/dots/claude/hooks/attention-notify.py",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
     "StopFailure": [
       {
         "matcher": "rate_limit",
@@ -115,6 +137,15 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/realm/project/sinnix/repo/dots/claude/hooks/attention-notify.py",
+            "timeout": 3
+          }
+        ]
       }
     ],
     "SessionStart": [
@@ -135,6 +166,15 @@
             "type": "command",
             "command": "polylogue hook UserPromptSubmit",
             "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/realm/project/sinnix/repo/dots/claude/hooks/attention-notify.py",
+            "timeout": 3
           }
         ]
       }

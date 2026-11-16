@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Provably fails when: a hook fails shellcheck, a guard stops denying what it
 # should deny for either harness, a client's hook source stops running the
-# command guard on shell commands, or a hook blocks on malformed input.
+# command guard on shell commands, a hook blocks on malformed input, or the
+# attention notification fires for a short turn or an unattended run, or stays
+# silent when an attended session asks for the operator.
 set -euo pipefail
 
 hooks_dir=$1
@@ -143,6 +145,110 @@ jq -e '
 jq -e '
   [.hooks.PreToolUse[] | select(.matcher == "^Bash$") | .hooks[].command]
   | any(endswith("/pretooluse-bash.py codex"))
+' "$codex_hooks" >/dev/null
+
+# The attention hook notifies only from an attended harness: an ancestor named
+# after the harness with a terminal on stdin and stdout, started interactively.
+# A stand-in executable of that name, run under a pseudo-terminal, is one.
+mkdir -p "$test_root/harness" "$test_root/stub" "$test_root/run"
+for name in claude codex; do
+  cat >"$test_root/harness/$name" <<EOF
+#!$test_root/bin/bash
+read -r -a hook <<<"\$ATTENTION_HOOK"
+printf '%s' "\$ATTENTION_PAYLOAD" | "\${hook[@]}"
+EOF
+  chmod +x "$test_root/harness/$name"
+done
+cat >"$test_root/stub/notify-send" <<EOF
+#!$test_root/bin/bash
+printf '%s\n' "\$@" >"$test_root/notice"
+EOF
+chmod +x "$test_root/stub/notify-send"
+attention_env() {
+  env PATH="$test_root/stub:$PATH" XDG_RUNTIME_DIR="$test_root/run" HYPRLAND_INSTANCE_SIGNATURE= \
+    ATTENTION_HOOK="$1" ATTENTION_PAYLOAD="$2" "${@:3}"
+}
+# attended <harness> <hook arguments> <payload> [harness arguments]
+attended() {
+  attention_env "$hooks_dir/attention-notify.py $2" "$3" \
+    script -qec "$test_root/harness/$1 ${4:-}" /dev/null >/dev/null </dev/null
+}
+# The sender is started detached, so its record can trail the hook's exit.
+expect_notice() {
+  local waited=0
+  while ! test -s "$test_root/notice" && ((waited < 60)); do
+    sleep 0.05
+    waited=$((waited + 1))
+  done
+  grep -qxF -- "$1" "$test_root/notice"
+  grep -qxF -- "$2" "$test_root/notice"
+  grep -qxF -- '--app-name=agent-attention' "$test_root/notice"
+  rm "$test_root/notice"
+}
+expect_silence() {
+  sleep 0.3
+  test ! -e "$test_root/notice"
+}
+attention_payload() {
+  jq -cn --arg event "$1" --arg type "${2:-}" '{
+    session_id: "s1", cwd: "/work/example-project", hook_event_name: $event,
+    notification_type: $type, tool_name: "Bash"
+  }'
+}
+stamp="$test_root/run/sinnix-agent-turn/claude-s1"
+
+attended claude '' "$(attention_payload Notification permission_prompt)"
+expect_notice 'example-project (Claude Code)' 'needs permission'
+attended claude '' "$(attention_payload Notification elicitation_dialog)"
+expect_notice 'example-project (Claude Code)' 'asks a question'
+attended codex codex "$(attention_payload PermissionRequest)"
+expect_notice 'example-project (Codex)' 'needs permission for Bash'
+# Waiting at the prompt after a turn is not a request.
+attended claude '' "$(attention_payload Notification idle_prompt)"
+expect_silence
+
+# A short turn is silent; one longer than ten minutes is announced once.
+attended claude '' "$(attention_payload UserPromptSubmit)"
+test -e "$stamp"
+attended claude '' "$(attention_payload Stop)"
+expect_silence
+test ! -e "$stamp"
+attended claude '' "$(attention_payload UserPromptSubmit)"
+touch -d '11 minutes ago' "$stamp"
+attended claude '' "$(attention_payload Stop)"
+expect_notice 'example-project (Claude Code)' 'finished after 11 min'
+attended claude '' "$(attention_payload Stop)"
+expect_silence
+
+# Unattended: no terminal, or a non-interactive start. Nothing is stamped.
+attention_env "$hooks_dir/attention-notify.py" "$(attention_payload Notification permission_prompt)" \
+  "$test_root/harness/claude" >/dev/null </dev/null
+expect_silence
+attended claude '' "$(attention_payload Notification permission_prompt)" '-p prompt'
+expect_silence
+attended codex codex "$(attention_payload PermissionRequest)" 'exec prompt'
+expect_silence
+attended claude '' "$(attention_payload UserPromptSubmit)" '--print prompt'
+test ! -e "$stamp"
+# The harness the hook names must be its ancestor: a Codex hook under a
+# process named claude finds no Codex.
+attended claude codex "$(attention_payload PermissionRequest)"
+expect_silence
+# Malformed input is a silent success.
+test -z "$(attention_env "$hooks_dir/attention-notify.py" 'not-json' "$test_root/harness/claude" 2>&1)"
+
+# Both clients run it on the events that carry the two cases.
+jq -e --arg hook attention-notify.py '
+  def runs($event): [.hooks[$event][]?.hooks[].command] | any(endswith("/" + $hook));
+  runs("UserPromptSubmit") and runs("Stop") and runs("Notification")
+  and ([.hooks.Notification[] | select(.hooks[].command | endswith("/" + $hook)) | .matcher]
+       == ["permission_prompt|elicitation_dialog"])
+  and ([.hooks.PreToolUse[] | select(.matcher == "AskUserQuestion") | .hooks[].command]
+       | any(endswith("/" + $hook)))
+' "$settings" >/dev/null
+jq -e --arg hook 'attention-notify.py codex' '
+  def runs($event): [.hooks[$event][]?.hooks[].command] | any(endswith("/" + $hook));
+  runs("UserPromptSubmit") and runs("Stop") and runs("PermissionRequest")
 ' "$codex_hooks" >/dev/null
 
 # Without Polylogue, Sinnix or Sinex on PATH the session-start block is empty.

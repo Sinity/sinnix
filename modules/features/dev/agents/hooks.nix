@@ -6,13 +6,20 @@
 # shell tool as `Bash`). Plannotator reviews a plan when a turn ends with
 # one: its Stop hook reads the turn from the transcript, exits at once when
 # there is no plan, and otherwise holds the turn until the operator decides
-# (the timeout is upstream's four days).
+# (the timeout is upstream's four days). The attention hook raises a desktop
+# notification when an attended session asks for permission or ends a turn
+# longer than ten minutes; the prompt hook stamps the turn's start for it.
 # Plain helper (not a NixOS module) imported directly by mcp.nix's configFn,
 # which installs the file as /etc/codex/hooks.json; it is also exposed via the
 # mcp-servers.codexHooksSource option for tests.
 { pkgs, dotsRoot }:
 let
   jsonFormat = pkgs.formats.json { };
+  attentionHook = {
+    type = "command";
+    command = "${dotsRoot}/claude/hooks/attention-notify.py codex";
+    timeout = 3;
+  };
 in
 jsonFormat.generate "codex-hooks.json" {
   hooks = {
@@ -36,6 +43,10 @@ jsonFormat.generate "codex-hooks.json" {
           }
         ];
       }
+      { hooks = [ attentionHook ]; }
+    ];
+    PermissionRequest = [
+      { hooks = [ attentionHook ]; }
     ];
     PreCompact = [
       {
@@ -86,6 +97,7 @@ jsonFormat.generate "codex-hooks.json" {
           }
         ];
       }
+      { hooks = [ attentionHook ]; }
       {
         hooks = [
           {

@@ -148,6 +148,16 @@ show_actions = true
 show_app_name = true
 background_opacity = 0.96
 
+# Agent sessions asking for the operator (dots/claude/hooks/attention-notify.py):
+# silent, and shown during Do Not Disturb.
+[notification.filter.agent-attention]
+enabled = true
+match = "agent-attention"
+show_toast = true
+save_history = true
+play_sound = false
+bypass_dnd = true
+
 [plugin_settings."sinity/sinnix-hub"]
 now_placement = "floating"
 now_position = "center"
