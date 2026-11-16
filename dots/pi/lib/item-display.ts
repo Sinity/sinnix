@@ -66,7 +66,8 @@ export const fileDisplay: ItemDisplay = {
 		const lines = [path];
 		try {
 			const info = await stat(path);
-			const modified = info.mtime.toISOString().slice(0, 16).replace("T", " ");
+			// Local time, in the sortable form the Swedish locale happens to print.
+			const modified = info.mtime.toLocaleString("sv-SE").slice(0, 16);
 			if (info.isDirectory()) {
 				lines.push(`directory, ${(await readdir(path)).length} entries, modified ${modified}`);
 			} else {
