@@ -339,7 +339,8 @@ def fake_systemd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FakeSystemd
         # A managed unit receives the supplied provenance, not the test
         # runner's outer AgentCTL job identity.
         "unset AGENTCTL_JOB_ID AGENTCTL_CORRELATION_ID AGENTCTL_PROJECT_ID "
-        "AGENTCTL_OPERATION AGENTCTL_CHECKOUT_ID AGENTCTL_CHECKOUT_HEAD\n"
+        "AGENTCTL_OPERATION AGENTCTL_CHECKOUT_ID AGENTCTL_CHECKOUT_HEAD "
+        "DEVKIT_JOB_RUNNER DEVKIT_JOB_ID DEVKIT_SCRATCH\n"
         f"printf '%s\\n' \"$@\" > {tmp_path / 'systemd-run-argv'}\n"
         "out=/dev/stdout; err=/dev/stderr\n"
         'while [ "$1" != "--" ]; do\n'
