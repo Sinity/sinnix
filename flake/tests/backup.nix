@@ -572,7 +572,7 @@ assert lib.assertMsg (
           ''
             cp -r ${../../pkgs/sinnix-backup/tests} tests
             chmod -R u+w tests
-            python3 -m pytest -q ${testPaths}
+            python3 -m pytest -q --durations=15 ${testPaths}
             touch "$out"
           '';
     in
