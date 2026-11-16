@@ -294,6 +294,7 @@ let
     tunnel-client = pkgs.callPackage ../pkgs/tunnel-client { };
 
     chatgpt-app = pkgs.callPackage ../pkgs/chatgpt-app { };
+    learnharness = pkgs.callPackage ../pkgs/learnharness { };
 
     machine-telemetry = pkgs.callPackage ../pkgs/machine-telemetry/pkg.nix {
       inherit sinnix-lib;

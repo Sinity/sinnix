@@ -161,6 +161,7 @@ mkFeatureModule {
             lnch
             libnotify
             scriptPkgs.chatgpt-app
+            scriptPkgs.learnharness
             scriptPkgs.media-preview-cache
           ]);
 
