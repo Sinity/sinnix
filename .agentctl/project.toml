@@ -22,7 +22,6 @@ default_base = "origin/master"
 description = "Run default Sinnix checks"
 exec = ["check"]
 pool = "bulk"
-result = "exit"
 scratch = "nvme"
 cache = "tree+environment"
 timeout_seconds = 7200
@@ -36,7 +35,6 @@ admission = { memory_mib = 4608 }
 description = "Build explicitly selected Sinnix flake checks"
 exec = ["nix", "build", "--no-link"]
 pool = "bulk"
-result = "exit"
 scratch = "nvme"
 timeout_seconds = 1800
 
@@ -44,7 +42,6 @@ timeout_seconds = 1800
 description = "Verify emergency earlyoom victim selection and real signals in an isolated VM"
 exec = ["nix", "build", "--no-link", "--max-jobs", "1", "--cores", "2", ".#heavyChecks.x86_64-linux.earlyoom-emergency-vm"]
 pool = "bulk"
-result = "exit"
 scratch = "nvme"
 timeout_seconds = 1800
 admission = { memory_mib = 4096 }
@@ -58,7 +55,6 @@ arguments = "required"
 pool = "bulk"
 result = "json"
 scratch = "nvme"
-cache = "none"
 timeout_seconds = 1800
 admission = { memory_mib = 4608 }
 unit_properties = ["MemoryMax=4G", "MemorySwapMax=0", "IOWeight=10", "IOReadBandwidthMax=/realm 8M", "IOWriteBandwidthMax=/realm 8M", "IOReadBandwidthMax=/nix 8M", "IOWriteBandwidthMax=/nix 8M"]
@@ -69,7 +65,6 @@ exec = ["python3", "flake/tests/backup_native_restore.py"]
 arguments = "required"
 pool = "bulk"
 result = "json"
-cache = "none"
 scratch = "nvme"
 timeout_seconds = 600
 admission = { memory_mib = 2048 }
@@ -79,7 +74,6 @@ description = "Compare explicit source and preserved trees read-only, including 
 exec = ["sudo", "-n", "rsync", "--archive", "--hard-links", "--acls", "--xattrs", "--numeric-ids", "--dry-run", "--checksum", "--delete", "--itemize-changes", "--stats"]
 arguments = "required"
 pool = "bulk"
-result = "exit"
 scratch = "nvme"
 timeout_seconds = 28800
 
@@ -87,7 +81,6 @@ timeout_seconds = 28800
 description = "Verify firmware extraction and Ghidra decompilation on synthetic inputs"
 exec = ["nix", "develop", ".#reverse-engineering", "--command", "python3", "flake/tests/reverse-engineering.py"]
 pool = "bulk"
-result = "exit"
 timeout_seconds = 900
 
 [operations.firmware_analysis]
@@ -95,7 +88,6 @@ description = "Run an explicit REA firmware or native analysis command"
 exec = ["nix", "run", ".#rea", "--"]
 arguments = "required"
 pool = "bulk"
-result = "exit"
 timeout_seconds = 1800
 
 [operations.ghidra_analysis]
@@ -103,7 +95,6 @@ description = "Run Ghidra headless with explicit project and loader arguments"
 exec = ["nix", "develop", ".#reverse-engineering", "--command", "ghidra-analyzeHeadless"]
 arguments = "required"
 pool = "bulk"
-result = "exit"
 timeout_seconds = 1800
 
 [operations.pytest_focused]
@@ -111,7 +102,6 @@ description = "Run selected AgentCTL and gateway Python tests"
 exec = ["nix", "develop", ".#gateway-tests", "--command", "gateway-pytest", "-q"]
 arguments = "required"
 pool = "normal"
-result = "exit"
 scratch = "nvme"
 timeout_seconds = 1800
 
@@ -120,8 +110,6 @@ description = "Restore one retained telemetry SQLite zstd artifact and check its
 exec = ["sinnix-sqlite-backup", "--immutable-source", "--verify-only", "--compressed-source", "--max-restore-bytes", "85899345920", "--acquire-budget-seconds", "3600"]
 arguments = "required"
 pool = "bulk"
-result = "exit"
-cache = "none"
 scratch = "nvme"
 timeout_seconds = 28800
 admission = { memory_mib = 4096 }
@@ -132,7 +120,6 @@ description = "Verify declared operation limits in its actual kernel cgroup"
 exec = ["python3", "flake/tests/job_limits_native.py"]
 pool = "bulk"
 result = "json"
-cache = "none"
 timeout_seconds = 120
 admission = { memory_mib = 128 }
 unit_properties = ["MemoryHigh=1G", "MemoryMax=1536M", "MemorySwapMax=0", "IOWeight=10", "IOReadBandwidthMax=/realm 20M", "IOWriteBandwidthMax=/realm 20M"]
@@ -142,7 +129,6 @@ description = "Verify pinned CLI recovery and native versions in an isolated HOM
 exec = ["python3", "scripts/tests/verify_agent_recovery.py"]
 arguments = "required"
 pool = "bulk"
-result = "exit"
 timeout_seconds = 1800
 admission = { memory_mib = 2048 }
 
@@ -150,39 +136,33 @@ admission = { memory_mib = 2048 }
 description = "Render the generated gateway catalog and skill from their source"
 exec = ["nix", "develop", ".#gateway-tests", "--command", "sinnix-agent-gateway-generate", "--root", ".", "--write"]
 pool = "normal"
-result = "exit"
 timeout_seconds = 1800
 
 [operations.verify_quick]
 description = "Run maintained lint and formatting checks before lane publication"
 exec = ["lint"]
 pool = "normal"
-result = "exit"
 
 [operations.check_heavy]
 description = "Run the heavy Sinnix check tier"
 exec = ["check-heavy"]
 pool = "bulk"
-result = "exit"
 
 [operations.check_all]
 description = "Run all Sinnix semantic checks"
 exec = ["check-all"]
 pool = "bulk"
-result = "exit"
 
 [operations.check_master]
 description = "Manually verify committed master's flake checks"
 exec = ["check-master"]
 pool = "bulk"
-result = "exit"
 timeout_seconds = 7200
 
 [operations.lint]
 description = "Run maintained Nix and shell linters"
 exec = ["lint"]
 pool = "normal"
-result = "exit"
 scratch = "nvme"
 cache = "tree+environment"
 
@@ -190,7 +170,6 @@ cache = "tree+environment"
 description = "Build and activate the workstation configuration"
 exec = ["switch"]
 pool = "system-build"
-result = "exit"
 scratch = "nvme"
 timeout_seconds = 28800
 
@@ -198,7 +177,6 @@ timeout_seconds = 28800
 description = "Build and set the workstation boot default for the next reboot"
 exec = ["boot"]
 pool = "system-build"
-result = "exit"
 scratch = "nvme"
 timeout_seconds = 28800
 
@@ -206,93 +184,72 @@ timeout_seconds = 28800
 description = "Transcribe selected audio files with the local speech engine"
 exec = ["sinnix-stt", "transcribe"]
 pool = "normal"
-result = "exit"
-cache = "none"
 timeout_seconds = 3600
 
 [operations.transcribe_review]
 description = "Transcribe selected recordings with Scribe v2 and retain word evidence"
 exec = ["python3", "scripts/sinnix-stt-review"]
 pool = "normal"
-result = "exit"
-cache = "none"
 timeout_seconds = 3600
 
 [operations.diarize]
 description = "Identify speaker turns in a selected audio file"
 exec = ["sinnix-stt", "diarize"]
 pool = "normal"
-result = "exit"
-cache = "none"
 timeout_seconds = 3600
 
 [operations.rank_ingest]
 description = "Move ranking judgments posted to the hub into their domains"
 exec = ["sinnix-rank", "ingest"]
 pool = "normal"
-result = "exit"
-cache = "none"
 timeout_seconds = 300
 
 [operations.ambient_audit]
 description = "Refresh content-bound decode inspections for retained phone audio"
 exec = ["bash", "scripts/sinnix-phone", "ambient-audit"]
 pool = "bulk"
-result = "exit"
-cache = "none"
 timeout_seconds = 14400
 
 [operations.phone_app_build]
 description = "Build the phone application and its signing installer"
 exec = ["nix", "build", ".#sinnix-phone-app-install", "--no-link", "--print-out-paths"]
 pool = "bulk"
-result = "exit"
-cache = "none"
 timeout_seconds = 3600
 
 [operations.phone_dispatcher_build]
 description = "Build and test the phone upload and repair tools"
 exec = ["nix", "build", ".#checks.x86_64-linux.sinnix-phone-dispatcher-suite", "--no-link", "--print-out-paths"]
 pool = "normal"
-result = "exit"
-cache = "none"
 timeout_seconds = 1800
 
 [operations.agent_cli_locks]
 description = "Re-render agent CLI recovery locks from the pinned tarballs"
 exec = ["nix", "run", ".#sinnix-agent-cli-locks"]
 pool = "normal"
-result = "exit"
 timeout_seconds = 1800
 
 [operations.build_system]
 description = "Build the declared workstation configuration without activation"
 exec = ["env", "SINNIX_SECRET_DECLARATIONS=/realm/state/secrets/sinnix/runtime.nix", "nix", "build", "--impure", "--no-link", ".#nixosConfigurations.sinnix-prime.config.system.build.toplevel"]
 pool = "system-build"
-result = "exit"
 timeout_seconds = 14400
 
 [operations.eval_system]
 description = "Measure uncached workstation evaluation with native Nix statistics"
 exec = ["env", "NIX_SHOW_STATS=1", "SINNIX_SECRET_DECLARATIONS=/realm/state/secrets/sinnix/runtime.nix", "nix", "eval", "--impure", "--no-eval-cache", ".#nixosConfigurations.sinnix-prime.config.system.build.toplevel.drvPath"]
 pool = "bulk"
-result = "exit"
 timeout_seconds = 1800
 
 [operations.navigation_audit]
 description = "Audit current entrance links against the private explicit manifest"
 exec = ["sinnix-fs", "links", "--manifest", "/realm/report/catalog/navigation-audit.json"]
 pool = "normal"
-result = "exit"
-cache = "none"
 
 [operations.url_ledger_build]
 description = "Publish a coherent URL-ledger generation from explicit local state without provider requests"
 exec = ["sinnix-url-ledger", "build"]
 arguments = "required"
 pool = "bulk"
-result = "exit"
-cache = "none"
 scratch = "nvme"
 timeout_seconds = 1800
 
@@ -301,8 +258,6 @@ description = "Restore a coherent filesystem-index generation from explicit date
 exec = ["sinnix-fs", "refresh", "--index-dir", "/realm/state/fs-index", "--retained-inputs"]
 arguments = "required"
 pool = "bulk"
-result = "exit"
-cache = "none"
 scratch = "nvme"
 timeout_seconds = 7200
 
@@ -310,8 +265,6 @@ timeout_seconds = 7200
 description = "Scan managed filesystems and publish one coherent index generation"
 exec = ["sinnix-fs", "scan", "--out-dir", "/realm/state/fs-index"]
 pool = "bulk"
-result = "exit"
-cache = "none"
 scratch = "nvme"
 timeout_seconds = 21600
 
@@ -319,23 +272,18 @@ timeout_seconds = 21600
 description = "Verify report-index links in local and served contexts"
 exec = ["nix", "build", "--no-link", ".#checks.x86_64-linux.report-navigation-suite"]
 pool = "normal"
-result = "exit"
 cache = "tree+environment"
 
 [operations.xiaomi_cloud_login]
 description = "Authenticate the existing Xiaomi cloud capture through browser confirmation"
 exec = ["sinnix", "xiaomi-cloud-login"]
 pool = "normal"
-result = "exit"
-cache = "none"
 timeout_seconds = 420
 
 [operations.xiaomi_cloud_backfill]
 description = "Recover the last 35 days of Xiaomi vendor history through the normal collector"
 exec = ["flock", "--exclusive", "/realm/state/xiaomi-witness/sync.lock", "env", "XIAOMI_CLOUD_WINDOW_DAYS=35", "sinnix", "capture-xiaomi-cloud"]
 pool = "normal"
-result = "exit"
-cache = "none"
 timeout_seconds = 1800
 admission = { memory_mib = 1024 }
 
@@ -345,7 +293,6 @@ exec = ["sinnix-fs", "maintain", "apply"]
 arguments = "required"
 pool = "background"
 result = "json"
-cache = "none"
 timeout_seconds = 3600
 
 [operations.filesystem_accounting]
@@ -354,7 +301,6 @@ exec = ["sinnix-fs", "maintain", "account"]
 arguments = "required"
 pool = "background"
 result = "json"
-cache = "none"
 timeout_seconds = 7200
 
 [operations.filesystem_usage]
@@ -362,48 +308,36 @@ description = "Measure allocated directory bytes on explicit paths with idle I/O
 exec = ["sudo", "-n", "ionice", "-c", "3", "nice", "-n", "15", "du", "-x", "-B1", "--max-depth=2", "--"]
 arguments = "required"
 pool = "background"
-result = "exit"
-cache = "none"
 timeout_seconds = 7200
 
 [operations.filesystem_store_gc_plan]
 description = "List native unreachable Nix store paths without deleting roots or payloads"
 exec = ["nix-store", "--store", "daemon", "--gc", "--print-dead"]
 pool = "background"
-result = "exit"
-cache = "none"
 timeout_seconds = 3600
 
 [operations.backup_retention_plan]
 description = "Preview installed Borg retention without deleting archives"
 exec = ["sudo", "-n", "systemctl", "start", "borgbackup-retention-plan.service"]
 pool = "background"
-result = "exit"
-cache = "none"
 timeout_seconds = 28800
 
 [operations.backup_maintenance]
 description = "Run due installed Borg pruning and compaction"
 exec = ["sudo", "-n", "systemctl", "start", "borgbackup-maintenance.service"]
 pool = "background"
-result = "exit"
-cache = "none"
 timeout_seconds = 28800
 
 [operations.backup_capacity]
 description = "Measure installed backup headroom and repository sizes"
 exec = ["sudo", "-n", "systemctl", "start", "borgbackup-capacity.service"]
 pool = "normal"
-result = "exit"
-cache = "none"
 timeout_seconds = 1800
 
 [operations.backup_local_dumps]
 description = "Expire older local daily dumps after matching complete Borg restores"
 exec = ["sudo", "-n", "systemctl", "start", "borgbackup-local-dumps.service"]
 pool = "background"
-result = "exit"
-cache = "none"
 timeout_seconds = 7500
 
 [operations.backup_archive_inventory]
@@ -411,8 +345,6 @@ description = "Measure logical file-size prefixes in one explicit Borg archive w
 exec = ["python3", "flake/tests/backup_archive_inventory.py"]
 arguments = "required"
 pool = "bulk"
-result = "exit"
-cache = "none"
 scratch = "nvme"
 timeout_seconds = 1800
 admission = { memory_mib = 4096 }
@@ -421,16 +353,12 @@ admission = { memory_mib = 4096 }
 description = "Take native btrbk source snapshots for backup verification"
 exec = ["sudo", "-n", "systemctl", "start", "btrbk.service"]
 pool = "bulk"
-result = "exit"
-cache = "none"
 timeout_seconds = 1800
 
 [operations.backup_drain]
 description = "Archive and verify pending native source snapshots"
 exec = ["sudo", "-n", "systemctl", "start", "borgbackup-drain-coordinator.service"]
 pool = "background"
-result = "exit"
-cache = "none"
 # Native systemd coordinator owns the finite 80h15m maximum deadline.
 # AgentCTL supports bounded deadlines only up to 8h, so add no outer deadline.
 timeout_seconds = 0
@@ -440,6 +368,4 @@ description = "Run one Codex worker in this checkout: codex-worker <effort> <pro
 exec = ["codex-worker"]
 arguments = "required"
 pool = "codex"
-result = "exit"
 timeout_seconds = 28800
-cache = "none"

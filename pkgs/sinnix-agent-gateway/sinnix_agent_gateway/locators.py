@@ -610,13 +610,7 @@ def job_ref(task_id: int | str) -> str:
 
 
 class JobLocator(GatewayModel):
-    """A queued job by canonical ref or pueue task id, and the job's own id.
-
-    A task id is a position in the queue: `pueue switch` exchanges the ids of
-    two queued tasks, so a task id addresses whatever the queue keeps there.
-    The job id every job response carries addresses the job itself, and a
-    locator that includes one follows its job across a reorder.
-    """
+    """A job by its ref or numeric task ID, with an optional job name filter."""
 
     ref: str | None = Field(
         default=None,
@@ -626,15 +620,15 @@ class JobLocator(GatewayModel):
     task_id: int | None = Field(
         default=None,
         ge=0,
-        description="Numeric pueue queue position, as `agentctl job list` shows it.",
+        description="Numeric pueue task ID, as `agentctl job list` shows it.",
     )
     job_id: str | None = Field(
         default=None,
         min_length=1,
         max_length=512,
         pattern=r"^[A-Za-z0-9._-]+$",
-        description="The job's stable string id, as managed job responses return it. "
-        "Include it so the call follows this job if the queue is reordered.",
+        description="The job name returned by start. Include it to require "
+        "that the task ID still names the expected job.",
     )
 
     @model_validator(mode="after")

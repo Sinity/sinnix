@@ -259,18 +259,11 @@ MOVED = {
 }
 
 
-def test_a_wait_carrying_a_job_id_follows_its_job_to_another_id(
+def test_a_wait_passes_the_job_id_as_a_filter(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The owner answers about the job, wherever a reorder put it.
-
-    Anti-vacuity: a wait that proved identity by the id it sent would refuse
-    its own answer, and one that never sent the job_id would be told about
-    whatever task the switch moved to that id.
-    """
     server, _, fake = make_server(tmp_path, monkeypatch)
-    fake.responses["job.wait"] = MOVED
-
+    fake.responses["job.wait"] = {**DONE, "job_id": "fixture-worker-abcd1234"}
     waited = call(
         server,
         "jobs.wait",
@@ -279,14 +272,13 @@ def test_a_wait_carrying_a_job_id_follows_its_job_to_another_id(
             "timeout_seconds": 5,
         },
     )["data"]
-
     assert fake.calls[-1].arguments == {
         "task_id": 41,
         "job_id": "fixture-worker-abcd1234",
         "timeout_seconds": 5,
     }
     assert waited["outcome"] == "terminal"
-    assert (waited["task_id"], waited["ref"]) == (44, "sinnix://jobs/44")
+    assert (waited["task_id"], waited["ref"]) == (41, "sinnix://jobs/41")
     assert waited["job"]["job_id"] == "fixture-worker-abcd1234"
 
 
@@ -299,6 +291,12 @@ def test_an_answer_about_another_job_is_refused_whichever_identity_was_sent(
     fake.responses["job.wait"] = MOVED
     by_id = call(server, "jobs.wait", {"target": {"task_id": 41}})
     assert by_id["error"]["code"] == "owner_failed"
+    by_both = call(
+        server,
+        "jobs.wait",
+        {"target": {"task_id": 41, "job_id": "fixture-worker-abcd1234"}},
+    )
+    assert by_both["error"]["code"] == "owner_failed"
 
     fake.responses["job.wait"] = {**DONE, "job_id": "fixture-check-9999"}
     by_reference = call(
@@ -333,14 +331,16 @@ def test_clean_and_cancel_address_the_job_the_reference_names(
 ) -> None:
     server, _, fake = make_server(tmp_path, monkeypatch)
     job_id = "fixture-worker-abcd1234"
-    fake.responses["job.get"] = MOVED
+    fake.responses["job.get"] = {**DONE, "job_id": job_id}
     fake.responses["job.cancel"] = {
-        **MOVED,
+        **DONE,
+        "job_id": job_id,
         "cancel_requested": True,
         "already_terminal": True,
     }
     fake.responses["job.clean"] = {
-        **MOVED,
+        **DONE,
+        "job_id": job_id,
         "cleaned": True,
         "removed": ["/state/inputs/fixture-worker-abcd1234.json"],
     }
@@ -353,7 +353,7 @@ def test_clean_and_cancel_address_the_job_the_reference_names(
             "idempotency_key": "cancel-1",
         },
     )["data"]
-    assert (cancelled["task_id"], cancelled["ref"]) == (44, "sinnix://jobs/44")
+    assert (cancelled["task_id"], cancelled["ref"]) == (41, "sinnix://jobs/41")
     assert cancelled["job"]["job_id"] == job_id
     assert all(request.arguments.get("job_id") == job_id for request in fake.calls)
 
@@ -368,7 +368,7 @@ def test_clean_and_cancel_address_the_job_the_reference_names(
     assert cleaned["removed"] == ["/state/inputs/fixture-worker-abcd1234.json"]
 
 
-def test_cancel_checks_the_phase_and_surfaces_reap_survivors(
+def test_cancel_checks_the_phase_and_reports_the_stopped_unit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     server, _, fake = make_server(tmp_path, monkeypatch)
@@ -378,14 +378,8 @@ def test_cancel_checks_the_phase_and_surfaces_reap_survivors(
         "state": {"phase": "cancelled", "terminal": True, "exit_code": None},
         "cancel_requested": True,
         "already_terminal": False,
-        "cancelled": "killed",
-        "reaped": {
-            "scope": {
-                "unit": "agentctl-agent-x.scope",
-                "stopped": False,
-                "survivors": [4242],
-            }
-        },
+        "cancellation_state": "stopped",
+        "unit": "agentctl-job-fixture.service",
     }
     stale = call(
         server,
@@ -411,8 +405,8 @@ def test_cancel_checks_the_phase_and_surfaces_reap_survivors(
         },
     )["data"]
     assert cancelled["previous_phase"] == "running"
-    assert cancelled["cancelled"] == "killed" and cancelled["scope_stopped"] is False
-    assert cancelled["survivors"] == [4242] and cancelled["warnings"]
+    assert cancelled["cancelled"] == "stopped"
+    assert cancelled["unit"] == "agentctl-job-fixture.service"
     assert cancelled["job"]["state"]["phase"] == "cancelled"
     cancel_call = next(c for c in fake.calls if c.operation == "job.cancel")
     assert cancel_call.arguments["actor"] == "gateway:operator"
@@ -434,11 +428,8 @@ def test_cancel_checks_the_phase_and_surfaces_reap_survivors(
     owner_only = call(
         server, "jobs.cancel", {"target": {"task_id": 41}, "idempotency_key": "c3"}
     )["data"]
-    assert (
-        owner_only["scope_unit"] == "fixture.service"
-        and owner_only["scope_stopped"] is True
-    )
-    assert owner_only["survivors"] is None
+    assert owner_only["unit"] == "fixture.service"
+    assert owner_only["cancelled"] == "stopped"
     assert owner_only["job"]["cancellation"]["actor"] == "gateway:operator"
 
     fake.responses["job.retry"] = {

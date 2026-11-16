@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 import pytest
-from agentctl import launch as launch_module
 from agentctl import pueue as pueue_module
 from agentctl.config import Config
 from agentctl.pueue import PueueError, PueueGroupError, PueueTimeout, Status, Task
@@ -126,25 +125,11 @@ class FakePueue:
             raise PueueError("fixture pueue status failed")
         return dict(self._tasks)
 
-    def running_tasks(self, group: str) -> dict[int, Task]:
-        return {
-            task_id: task
-            for task_id, task in self.tasks().items()
-            if task.group == group and task.status == "Running"
-        }
-
     def task(self, task_id: int) -> Task | None:
         return self._tasks.get(task_id)
 
     def tasks_by_ids(self, task_ids: Sequence[int]) -> dict[int, Task]:
         return {key: self._tasks[key] for key in task_ids if key in self._tasks}
-
-    def tasks_by_command(self, fragment: str) -> dict[int, Task]:
-        return {
-            task_id: task
-            for task_id, task in self.tasks().items()
-            if fragment in task.command
-        }
 
     def status(self) -> Status:
         return Status(
@@ -385,9 +370,7 @@ def fake_pueue(monkeypatch: pytest.MonkeyPatch) -> FakePueue:
         "add",
         "tasks",
         "status",
-        "running_tasks",
         "task",
-        "tasks_by_command",
         "tasks_by_ids",
         "live",
         "kill",
@@ -416,12 +399,6 @@ def secret_env_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture(autouse=True)
-def _no_cancel_settle_wait(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A fake task never exits on its own; tests of the wait pass their own."""
-    monkeypatch.setattr(launch_module, "CANCEL_SETTLE_SECONDS", 0.0)
-
-
-@pytest.fixture(autouse=True)
 def _no_inherited_queue_group(monkeypatch: pytest.MonkeyPatch) -> None:
     """The suite must not inherit the group of a pueue task that runs it.
 
@@ -429,6 +406,7 @@ def _no_inherited_queue_group(monkeypatch: pytest.MonkeyPatch) -> None:
     inside a queued task would otherwise scope every fixture launch for real.
     """
     monkeypatch.delenv("PUEUE_GROUP", raising=False)
+    monkeypatch.delenv("PUEUE_ID", raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -462,7 +440,7 @@ def recording_systemctl(
     # reported success would hide a reap that reached nothing.
     script.write_text(
         f'#!/bin/sh\nprintf "systemctl %s\\n" "$*" >> {ledger}\n'
-        'case "$*" in *ControlGroup*) echo "ControlGroup=" ;; *stop*) exit 1 ;; *is-active*) exit 3 ;; esac\n'
+        'case "$*" in *show*) echo "LoadState=not-found" ;; *stop*) exit 1 ;; *is-active*) exit 3 ;; esac\n'
     )
     script.chmod(0o755)
     monkeypatch.setenv("PATH", f"{directory}{os.pathsep}{os.environ['PATH']}")

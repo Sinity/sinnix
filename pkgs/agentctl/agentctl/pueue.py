@@ -295,23 +295,6 @@ def tasks() -> dict[int, Task]:
     return _log_tasks(_decode(_run(["log", "--all", "--json", "--lines", "0"]), "log"))
 
 
-def running_tasks(group: str) -> dict[int, Task]:
-    """Only live tasks in one pool; the daemon's retained history is unbounded."""
-    return _selected_tasks(group, "status=running")
-
-
-def _selected_tasks(group: str, query: str) -> dict[int, Task]:
-    document = _decode(
-        _run(["status", "--json", "--group", group, query]),
-        "status",
-    )
-    entries = document.get("tasks") if isinstance(document, Mapping) else None
-    if not isinstance(entries, Mapping):
-        raise PueueError("pueue status published no tasks")
-    parsed = (Task.from_entry(entry) for entry in entries.values())
-    return {task.task_id: task for task in parsed}
-
-
 def tasks_by_ids(task_ids: Sequence[int]) -> dict[int, Task]:
     """Read selected task records in one log request, without output or history."""
     requested = tuple(task_ids)
@@ -360,20 +343,6 @@ def _log_tasks(
 def task(task_id: int) -> Task | None:
     """One task, queued/running/done, or None for an id the queue does not hold."""
     return tasks_by_ids((task_id,)).get(task_id)
-
-
-def tasks_by_command(fragment: str) -> dict[int, Task]:
-    """Tasks whose command contains ``fragment``: a filter pueue applies itself.
-
-    Only matching rows reach this Python process. Upstream Pueue still
-    transfers its full state to the CLI before filtering its JSON output.
-    """
-    document = _decode(_run(["status", "--json", f"command%={fragment}"]), "status")
-    entries = document.get("tasks") if isinstance(document, Mapping) else None
-    if not isinstance(entries, Mapping):
-        raise PueueError("pueue status published no tasks")
-    parsed = (Task.from_entry(entry) for entry in entries.values())
-    return {task.task_id: task for task in parsed}
 
 
 def live() -> Status:

@@ -116,7 +116,7 @@ def test_memory_closure_continues_through_the_order_and_keeps_agent_admissible(
     )
     assert calls == [("pause", "normal")]
     assert result["signal"] == "memory"
-    closed = {name: "Paused" for name in ORDER}
+    closed = dict.fromkeys(ORDER, "Paused")
     result, calls = _tick(monkeypatch, pressure, {"agent": "Running", **closed})
     assert calls == []
     assert result["action"] == "hold"
@@ -173,109 +173,7 @@ def test_pressure_append_keeps_compact_jsonl_record(tmp_path) -> None:
     assert spool.read_text(encoding="utf-8").endswith("\n")
 
 
-@pytest.mark.parametrize(
-    "psi,headroom,width,expected",
-    [
-        (0, 2048, 2, 3),
-        (0, 1024, 3, 2),
-        (11, 9999, 3, 2),
-        (0, 9999, 8, 8),
-        (11, 0, 1, 1),
-        (None, 9999, 2, 2),
-    ],
-)
-def test_adaptive_width_respects_pressure_headroom_floor_and_ceiling(
-    monkeypatch, tmp_path, psi, headroom, width, expected
-):
-    from agentctl.config import AdaptivePool, PoolPolicy
-
-    calls = []
-    monkeypatch.setattr(pressure_pause.pueue, "groups", lambda: {"pytest-quick": width})
-    monkeypatch.setattr(
-        pressure_pause.pueue,
-        "set_parallel",
-        lambda group, count: calls.append((group, count)),
-    )
-    monkeypatch.setattr(pressure_pause, "slice_headroom", lambda unit: headroom)
-    spool = tmp_path / "events.jsonl"
-    pressure_pause.adaptive_widths(
-        {"pytest-quick": PoolPolicy(8, adaptive=AdaptivePool(1, 1024, "quick.slice"))},
-        {"pytest-quick": "Running"},
-        {"memory_full_avg10": psi, "memory_full_avg60": psi},
-        spool,
-    )
-    assert calls == ([] if width == expected else [("pytest-quick", expected)])
-    if calls:
-        event = json.loads(spool.read_text())
-        assert (
-            event["action"] == "resized"
-            and event["from"] == width
-            and event["to"] == expected
-        )
-    else:
-        assert not spool.exists()
-
-
-def test_headroom_uses_ancestor_bounds_without_reading_cgroup_root(
-    monkeypatch, tmp_path
-):
-    from types import SimpleNamespace
-
-    monkeypatch.setattr(
-        pressure_pause.subprocess,
-        "run",
-        lambda *a, **k: SimpleNamespace(stdout="/parent/quick\n"),
-    )
-    parent = tmp_path / "parent"
-    quick = parent / "quick"
-    quick.mkdir(parents=True)
-    for node, used, high, maximum in [
-        (parent, 80, "max", "100"),
-        (quick, 5, "50", "100"),
-    ]:
-        (node / "memory.current").write_text(str(used))
-        (node / "memory.high").write_text(high)
-        (node / "memory.max").write_text(maximum)
-    assert pressure_pause.slice_headroom("quick.slice", tmp_path) == 20
-    (parent / "memory.current").unlink()
-    with pytest.raises(OSError):
-        pressure_pause.slice_headroom("quick.slice", tmp_path)
-
-
-def test_adaptive_width_does_not_touch_operator_pause_or_unknown_accounting(
-    monkeypatch, tmp_path
-):
-    from agentctl.config import AdaptivePool, PoolPolicy
-
-    monkeypatch.setattr(pressure_pause.pueue, "groups", lambda: {"quick": 4})
-
-    def forbidden(*args):
-        raise AssertionError("width changed")
-
-    monkeypatch.setattr(pressure_pause.pueue, "set_parallel", forbidden)
-    monkeypatch.setattr(pressure_pause, "slice_headroom", forbidden)
-    policy = {"quick": PoolPolicy(8, adaptive=AdaptivePool(1, 1024, "quick.slice"))}
-    assert (
-        pressure_pause.adaptive_widths(
-            policy, {"quick": "Paused"}, {}, tmp_path / "events.jsonl"
-        )[0]["status"]
-        == "not-running"
-    )
-
-    def missing(*args):
-        raise FileNotFoundError("missing accounting")
-
-    monkeypatch.setattr(pressure_pause, "slice_headroom", missing)
-    assert (
-        pressure_pause.adaptive_widths(
-            policy, {"quick": "Running"}, {}, tmp_path / "events.jsonl"
-        )[0]["status"]
-        == "unavailable"
-    )
-
-
-@pytest.mark.parametrize("stage", ["tick", "holds"])
-def test_whole_tick_deadline_includes_hold_release(monkeypatch, stage):
+def test_whole_tick_deadline_interrupts_a_blocked_queue(monkeypatch):
     import signal
     import time
 
@@ -288,33 +186,13 @@ def test_whole_tick_deadline_includes_hold_release(monkeypatch, stage):
     monkeypatch.setattr(
         pressure_pause,
         "_tick",
-        lambda **kwargs: stalled() if stage == "tick" else {"action": "clear"},
+        lambda **kwargs: stalled(),
     )
     previous = signal.getsignal(signal.SIGALRM)
-    result = pressure_pause.tick(spool=None, release_holds=stalled)
+    result = pressure_pause.tick(spool=None)
     assert result == {
         "action": "unavailable",
         "error": "pressure tick deadline exceeded",
     }
     assert signal.getsignal(signal.SIGALRM) == previous
     assert signal.getitimer(signal.ITIMER_REAL) == (0, 0)
-
-
-def test_tick_stages_share_one_budget(monkeypatch):
-    import time
-
-    monkeypatch.setattr(pressure_pause, "TICK_TIMEOUT_SECONDS", 0.05)
-
-    def decide(**kwargs):
-        time.sleep(0.03)
-        return {"action": "clear"}
-
-    def release():
-        time.sleep(0.03)
-        return {"released": [], "waiting": []}
-
-    monkeypatch.setattr(pressure_pause, "_tick", decide)
-    assert (
-        pressure_pause.tick(spool=None, release_holds=release)["action"]
-        == "unavailable"
-    )

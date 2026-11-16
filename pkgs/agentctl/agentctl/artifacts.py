@@ -72,6 +72,30 @@ def attempts(launch: Mapping[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def attempt_for_start(launch: Mapping[str, Any], started_at: str | None) -> int:
+    """The invocation allocated since this queue start, or its next number."""
+    records = attempts(launch)
+    if not records:
+        return 1
+    latest = records[-1]
+    if started_at is not None:
+        path = Path(latest["artifacts"]["log"]).parent / "attempt.json"
+        try:
+            allocated = datetime.fromisoformat(
+                json.loads(path.read_text())["started_at"]
+            )
+            started = datetime.fromisoformat(started_at)
+            if allocated.tzinfo is None:
+                allocated = allocated.replace(tzinfo=timezone.utc)
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=timezone.utc)
+            if allocated >= started:
+                return latest["attempt"]
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+    return latest["attempt"] + 1
+
+
 def begin(launch: Mapping[str, Any], launch_input: str) -> dict[str, Any]:
     """Allocate an invocation and point the compatibility names at it.
 

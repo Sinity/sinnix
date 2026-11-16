@@ -22,7 +22,6 @@ from agentctl.run import (
     CANCELLED_EXIT_CODE,
     MAX_LOG_BYTES,
     REFUSED_EXIT_CODE,
-    SLOT_OCCUPIED_EXIT_CODE,
     TIMEOUT_EXIT_CODE,
     VANISHED_EXIT_CODE,
     cancel_marker_for,
@@ -153,10 +152,12 @@ def test_execution_receipt_distinguishes_changed_and_unavailable_endpoints() -> 
     assert receipt["reason"] == "git_observation_unavailable"
 
 
-def test_run_records_execution_receipt_even_without_cache_policy(
+def test_cached_command_records_checkout_endpoints(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    launch = write_launch(tmp_path, argv=["true"])
+    launch = write_launch(
+        tmp_path, argv=["true"], tree_receipt={}, environment_receipt={}
+    )
     observations = iter(
         [
             {
@@ -198,7 +199,7 @@ def test_run_records_execution_receipt_even_without_cache_policy(
 
 
 @pytest.mark.parametrize("follow", [False, True])
-def test_large_receipt_completion_reaches_tail_and_follow(
+def test_large_checkout_record_reaches_tail_and_follow(
     tmp_path: Path,
     config: Config,
     monkeypatch: pytest.MonkeyPatch,
@@ -218,7 +219,7 @@ def test_large_receipt_completion_reaches_tail_and_follow(
         "padding": inventory,
     }
     monkeypatch.setattr(run_module, "git_observation", lambda *_args: observation)
-    launch = write_launch(tmp_path)
+    launch = write_launch(tmp_path, tree_receipt={}, environment_receipt={})
     config.event_spool.touch()
 
     def produce() -> None:
@@ -403,7 +404,6 @@ def test_a_successful_command_spools_its_start_and_finish(
         ("cancelled", CANCELLED_EXIT_CODE),
         ("vanished", VANISHED_EXIT_CODE),
         ("refused", REFUSED_EXIT_CODE),
-        ("slot_occupied", SLOT_OCCUPIED_EXIT_CODE),
     ],
 )
 def test_terminal_outcomes_publish_records_without_phone_interruptions(
@@ -429,12 +429,7 @@ def test_terminal_outcomes_publish_records_without_phone_interruptions(
         overrides["argv"] = ["sh", "-c", "exit 3"]
     elif outcome == "refused":
         overrides["argv"] = [str(tmp_path / "absent-command")]
-    elif outcome == "slot_occupied":
-        fake_systemd.active(
-            ("agentctl-pytest-held-0123456789ab.service", described("pytest", 99))
-        )
     launch = write_launch(tmp_path, **overrides)
-
     assert main([str(launch)]) == exit_code
 
     record = outcome_of(tmp_path)
@@ -646,11 +641,9 @@ def test_a_property_that_does_not_bound_the_task_is_refused(
     assert main([str(launch)]) == REFUSED_EXIT_CODE
 
 
-def test_a_declared_scratch_is_created_exported_measured_and_removed(
+def test_a_declared_scratch_is_created_exported_and_removed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The footprint is the job's own record; the result artifact stays the
-    command's document, so nothing a parser reads is invented here."""
     monkeypatch.setenv("AGENTCTL_TMPFS_SCRATCH_ROOT", str(tmp_path / "tmpfs"))
     scratch = tmp_path / "tmpfs" / "job-a"
     launch = write_launch(
@@ -672,12 +665,6 @@ def test_a_declared_scratch_is_created_exported_measured_and_removed(
 
     assert main([str(launch)]) == 0
 
-    footprint = outcome_of(tmp_path)["scratch"]
-    assert footprint["kind"] == "tmpfs" and footprint["path"] == str(scratch)
-    assert footprint["files"] == 1 and footprint["bytes"] == 4096
-    assert footprint["truncated"] is False
-    reference = events(tmp_path)[-1]["outcome_ref"]
-    assert json.loads(Path(reference["path"]).read_text())["scratch"] == footprint
     assert not scratch.exists() and (tmp_path / "tmpfs").is_dir()
     # The result artifact carries the command's stdout and nothing agentctl added.
     document = json.loads((tmp_path / "job-a.result").read_text())
@@ -746,38 +733,6 @@ def test_a_failing_command_reports_its_own_exit_status(tmp_path: Path) -> None:
         "pool": None,
         "systemd_result": None,
     }
-    assert outcome["execution_receipt"]["binding"] == "unavailable"
-
-
-def test_a_lock_stranded_during_the_attempt_is_named_and_left_alone(
-    tmp_path: Path,
-) -> None:
-    """Breaks if a lock a killed job left in its checkout goes unreported, is
-    removed by the wrapper, or a lock that was already there is blamed on it."""
-    repo = tmp_path / "repo"
-    subprocess.run(["git", "init", "-q", str(repo)], check=True)
-    lock = repo / ".git" / "index.lock"
-    launch = write_launch(
-        tmp_path,
-        argv=["sh", "-c", f": > {lock}"],
-        working_directory=str(repo),
-    )
-
-    assert main([str(launch)]) == 0
-
-    assert outcome_of(tmp_path)["stranded_index_locks"] == [
-        {"lock": str(lock), "checkout": "main"}
-    ]
-    assert f"stranded index lock: {lock}" in log_of(tmp_path)
-    assert lock.exists()
-
-    # Anti-vacuity for attribution: the same lock, older than the next attempt.
-    os.utime(lock, ns=(0, 0))
-    again = write_launch(
-        tmp_path, name="again.json", argv=["true"], working_directory=str(repo)
-    )
-    assert main([str(again)]) == 0
-    assert outcome_of(tmp_path)["stranded_index_locks"] == []
 
 
 def test_a_failing_service_reports_the_main_process_status(
@@ -986,6 +941,8 @@ def test_cancel_during_preparation_prevents_service_creation(
     launch = write_launch(
         tmp_path,
         pool="pytest",
+        tree_receipt={},
+        environment_receipt={},
         argv=["sh", "-c", f"touch {side_effect}"],
     )
     marker = cancel_marker_for(tmp_path / "job-a.log")
@@ -1129,7 +1086,9 @@ def test_retry_discards_predecessor_cancel_but_keeps_new_attempt_cancel(
     fake_pueue: FakePueue,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    launch = write_launch(tmp_path, pool="pytest", argv=["true"])
+    launch = write_launch(
+        tmp_path, pool="pytest", argv=["true"], tree_receipt={}, environment_receipt={}
+    )
     marker = cancel_marker_for(tmp_path / "job-a.log")
     assert main([str(launch)]) == 0
 
@@ -1199,11 +1158,12 @@ def test_run_retains_unit_and_scratch_until_observation_recovers(
         if state["admitted"] and state["outages"] < 2:
             state["clock"] += 60
             state["outages"] += 1
-            # Observation failure after the launch budget is not completion:
-            # neither native custody nor scratch may be released here.
+            # An unavailable manager does not mean the command completed.
             assert scratch.exists()
             assert not outcome_path_for(tmp_path / "job-a.log").exists()
-            assert "stop " not in (tmp_path / "systemctl-calls").read_text()
+            assert [
+                call for call in fake_systemd.systemctl_calls() if "stop" in call
+            ] == [["systemctl", "--user", "stop", unit_for(launch, "pytest")]]
             return None
         return original_snapshot(unit)
 
@@ -1226,114 +1186,8 @@ def test_run_retains_unit_and_scratch_until_observation_recovers(
     assert outcome_of(tmp_path)["outcome"] == "success"
 
 
-def test_a_single_slot_pool_held_by_a_running_task_refuses_the_run(
-    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue
-) -> None:
-    """Two payloads never share the pytest slot, whatever pueue admitted."""
-    other = fake_pueue.add(
-        group="pytest",
-        label="other:verify",
-        command=("agentctl-run", "/inputs/other.json"),
-        working_directory=tmp_path,
-    )
-    fake_systemd.active(
-        (unit_for("/inputs/other.json", "pytest"), described("pytest", other))
-    )
-    launch = write_launch(tmp_path, pool="pytest")
-
-    assert main([str(launch)]) == SLOT_OCCUPIED_EXIT_CODE
-
-    assert fake_systemd.run_argv() == []
-    assert outcome_of(tmp_path)["outcome"] == "slot_occupied"
-    assert "occupied" in log_of(tmp_path)
-    assert [call for call in fake_systemd.systemctl_calls() if "stop" in call] == []
-
-
-def test_a_unit_no_queued_task_owns_also_holds_the_slot(
-    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue
-) -> None:
-    fake_systemd.active(
-        ("agentctl-pytest-stray-0123456789ab.service", described("pytest", 99))
-    )
-    launch = write_launch(tmp_path, pool="pytest")
-
-    assert main([str(launch)]) == SLOT_OCCUPIED_EXIT_CODE
-    assert fake_systemd.run_argv() == []
-
-
-def test_a_unit_of_another_daemon_or_pool_does_not_hold_the_slot(
-    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue
-) -> None:
-    """A private pueued's units share the slice; a name-only match is not ownership."""
-    fake_systemd.active(
-        (
-            "agentctl-pytest-other-0123456789ab.service",
-            "agentctl:ffffffffffff:pytest:3",
-        ),
-        ("agentctl-pytest-x-job-0123456789ab.service", described("pytest-x", 4)),
-        ("agentctl-pytest-old-0123456789ab.service", "7"),
-    )
-    launch = write_launch(tmp_path, pool="pytest")
-
-    assert main([str(launch)]) == 0
-    assert [call for call in fake_systemd.systemctl_calls() if "stop" in call] == [
-        ["systemctl", "--user", "stop", unit_for(launch, "pytest")]
-    ]
-
-
-@pytest.mark.parametrize("parallel", [1, 2])
-def test_a_unit_whose_task_is_terminal_is_an_orphan_and_is_settled(
-    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue, parallel: int
-) -> None:
-    """A lost wrapper's retained unit is settled in narrow and wider pools."""
-    fake_pueue.groups["pytest"] = parallel
-    orphan = fake_pueue.add(
-        group="pytest",
-        label="other:verify",
-        command=("agentctl-run", "/inputs/other.json"),
-        working_directory=tmp_path,
-    )
-    fake_pueue.kill_directly(orphan)
-    unit = unit_for("/inputs/other.json", "pytest")
-    fake_systemd.active((unit, described("pytest", orphan)))
-    launch = write_launch(tmp_path, pool="pytest")
-
-    assert main([str(launch)]) == 0
-
-    assert ["systemctl", "--user", "stop", unit] in fake_systemd.systemctl_calls()
-    assert f"settled_orphan {unit}" in log_of(tmp_path)
-    assert fake_systemd.run_argv() != []
-
-
-@pytest.mark.parametrize("known_running", [False, True])
-def test_a_multi_slot_pool_is_not_guarded(
-    tmp_path: Path,
-    fake_systemd: FakeSystemd,
-    fake_pueue: FakePueue,
-    known_running: bool,
-) -> None:
-    if known_running:
-        task_id = fake_pueue.add(
-            group="agent",
-            label="other:verify",
-            command=("agentctl-run", "/inputs/other.json"),
-            working_directory=tmp_path,
-        )
-        other = unit_for("/inputs/other.json", "agent")
-    else:
-        task_id = 5
-        other = "agentctl-agent-other-0123456789ab.service"
-    fake_systemd.active((other, described("agent", task_id)))
-    launch = write_launch(tmp_path, pool="agent")
-
-    assert main([str(launch)]) == 0
-    assert [call for call in fake_systemd.systemctl_calls() if "stop" in call] == [
-        ["systemctl", "--user", "stop", unit_for(launch, "agent")]
-    ]
-
-
 def test_the_unit_description_names_the_daemon_pool_and_task(
-    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue
+    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue, monkeypatch
 ) -> None:
     launch = write_launch(tmp_path, pool="pytest")
     task_id = fake_pueue.add(
@@ -1343,9 +1197,10 @@ def test_the_unit_description_names_the_daemon_pool_and_task(
         working_directory=tmp_path,
     )
 
+    monkeypatch.setenv("PUEUE_ID", str(task_id))
     assert main([str(launch)]) == 0
     assert f"--description={described('pytest', task_id)}" in fake_systemd.run_argv()
-    assert [event["task_id"] for event in events(tmp_path)] == [None, task_id]
+    assert [event["task_id"] for event in events(tmp_path)] == [task_id, task_id]
 
 
 def test_a_pool_without_a_slice_policy_runs_under_the_normal_slice(
@@ -1520,51 +1375,26 @@ def test_the_wrapper_returns_only_once_the_unit_cgroup_is_empty(
     assert outcome_of(tmp_path)["unit"] == unit_for(launch, "fixture")
 
 
-def test_a_killed_waiter_leaves_its_unit_which_the_next_run_settles_or_yields_to(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_pueue: FakePueue
+def test_retry_stops_the_unit_left_by_its_killed_wrapper(
+    tmp_path: Path,
 ) -> None:
-    """SIGKILL on the wrapper stops nothing inside the unit. The next run in
-    the pool yields while pueue still counts the task running, and settles
-    the orphan once the task is terminal."""
     user_manager()
-    pool = "fixture"
-    fake_pueue.groups[pool] = 1
-    first = write_launch(tmp_path, argv=["sleep", "60"], timeout_seconds=120, pool=pool)
-    first_task = fake_pueue.add(
-        group=pool,
-        label="fixture:check",
-        command=("agentctl-run", str(first)),
-        working_directory=tmp_path,
+    ready = tmp_path / "ready"
+    launch = write_launch(
+        tmp_path,
+        pool="fixture",
+        argv=[
+            sys.executable,
+            "-c",
+            "import os,signal;from pathlib import Path;"
+            f"Path({str(ready)!r}).write_text(str(os.getpid()));signal.pause()",
+        ],
     )
-    unit = unit_for(first, pool)
-    # The waiter runs out of process with a pueue that answers like the fake.
-    stub = tmp_path / "stub-bin"
-    stub.mkdir()
-    groups = json.dumps({pool: {"status": "Running", "parallel_tasks": 1}})
-    status = json.dumps(
-        {
-            "tasks": {
-                str(first_task): {
-                    "id": first_task,
-                    "command": f"agentctl-run {first}",
-                    "group": pool,
-                    "label": "fixture:check",
-                    "path": str(tmp_path),
-                    "status": {"Running": {"start": "2026-09-03T08:00:01+00:00"}},
-                }
-            }
-        }
-    )
-    (stub / "pueue").write_text(
-        "#!/bin/sh\n"
-        f"case \"$1\" in group) echo '{groups}' ;; status) echo '{status}' ;; esac\n"
-    )
-    (stub / "pueue").chmod(0o755)
-    waiter = subprocess.Popen(
-        [sys.executable, "-m", "agentctl.run", str(first)],
+    unit = unit_for(launch, "fixture")
+    wrapper = subprocess.Popen(
+        [sys.executable, "-m", "agentctl.run", str(launch)],
         env={
             **os.environ,
-            "PATH": f"{stub}{os.pathsep}{os.environ['PATH']}",
             "PYTHONPATH": os.pathsep.join(
                 filter(None, (str(Path(__file__).parent), os.environ.get("PYTHONPATH")))
             ),
@@ -1572,83 +1402,31 @@ def test_a_killed_waiter_leaves_its_unit_which_the_next_run_settles_or_yields_to
     )
     try:
         deadline = time.monotonic() + 30
-        while (
-            subprocess.run(
-                ["systemctl", "--user", "is-active", "--quiet", unit], check=False
-            ).returncode
-            != 0
-        ):
-            assert time.monotonic() < deadline, "the unit never started"
-            time.sleep(0.2)
-        waiter.kill()
-        waiter.wait()
-        assert (
-            subprocess.run(
-                ["systemctl", "--user", "is-active", "--quiet", unit], check=False
-            ).returncode
-            == 0
-        ), "killing the waiter must not stop the unit"
+        while not ready.exists():
+            assert time.monotonic() < deadline, "the command never started"
+            time.sleep(0.01)
+        pid = int(ready.read_text())
+        wrapper.kill()
+        wrapper.wait()
+        assert Path(f"/proc/{pid}").exists()
 
-        second_log = tmp_path / "second.log"
-        second = write_launch(
-            tmp_path, "second.json", pool=pool, log_path=str(second_log), job_id="job-b"
-        )
-        assert main([str(second)]) == SLOT_OCCUPIED_EXIT_CODE
-        assert f"occupied by {unit}" in second_log.read_text()
-
-        fake_pueue.kill_directly(first_task)
-        assert main([str(second)]) == 0
-        assert f"settled_orphan {unit}" in second_log.read_text()
-        assert (
-            subprocess.run(
-                ["systemctl", "--user", "is-active", "--quiet", unit], check=False
-            ).returncode
-            != 0
-        )
+        document = json.loads(launch.read_text())
+        document["argv"] = ["true"]
+        launch.write_text(json.dumps(document))
+        assert main([str(launch)]) == 0
+        assert not Path(f"/proc/{pid}").exists()
+        assert run_module.unit_properties(unit) == {}
+        assert outcome_of(tmp_path)["attempt"] == 2
     finally:
-        subprocess.run(["systemctl", "--user", "stop", unit], check=False)
-        subprocess.run(["systemctl", "--user", "reset-failed", unit], check=False)
-        if waiter.poll() is None:
-            waiter.kill()
-
-
-def test_a_reordered_task_spools_the_id_the_queue_moved_it_to(
-    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue
-) -> None:
-    """`pueue switch` exchanges two queued task ids before either runs.
-
-    Anti-vacuity: the spool is how a reader finds the queue task behind a
-    job, so a finish event naming the id the task was enqueued with sends
-    that reader to another job's log.
-    """
-    launch = write_launch(tmp_path, pool="pytest", argv=["true"])
-    task_id = fake_pueue.add(
-        group="pytest",
-        label="fixture:check",
-        command=("agentctl-run", str(launch)),
-        working_directory=tmp_path,
-    )
-    other = fake_pueue.add(
-        group="pytest",
-        label="fixture:check",
-        command=("agentctl-run", str(tmp_path / "other.json")),
-        working_directory=tmp_path,
-    )
-    fake_pueue.queue(task_id)
-    fake_pueue.queue(other)
-    fake_pueue.switch(task_id, other)
-    fake_pueue.running(other)
-    fake_systemd.terminal()
-
-    assert main([str(launch)]) == 0
-
-    spooled = events(tmp_path)
-    assert {e["task_id"] for e in spooled if e["phase"] == "finished"} == {other}
-    assert {e["job_id"] for e in spooled} == {"job-a"}
+        run_module._systemctl("stop", unit)
+        run_module._systemctl("reset-failed", unit)
+        if wrapper.poll() is None:
+            wrapper.kill()
+            wrapper.wait()
 
 
 def test_a_restarted_task_accounts_its_outcome_again(
-    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue
+    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue, monkeypatch
 ) -> None:
     """`pueue restart --in-place` reruns the same command line; each run
     leaves its own outcome record and a paired start/finish."""
@@ -1660,6 +1438,7 @@ def test_a_restarted_task_accounts_its_outcome_again(
         command=("agentctl-run", str(launch)),
         working_directory=tmp_path,
     )
+    monkeypatch.setenv("PUEUE_ID", str(task_id))
     assert main([str(launch)]) == 3
     assert outcome_of(tmp_path)["outcome"] == "failed"
     fake_pueue.fail(task_id, exit_code=3)
@@ -1680,7 +1459,6 @@ def test_a_restarted_task_accounts_its_outcome_again(
         "pool": "pytest",
         "systemd_result": "success",
     }
-    assert outcome["execution_receipt"]["binding"] == "unavailable"
     spooled = events(tmp_path)
     assert [(e["phase"], e.get("outcome")) for e in spooled] == [
         ("started", None),
@@ -1689,13 +1467,6 @@ def test_a_restarted_task_accounts_its_outcome_again(
         ("finished", "success"),
     ]
     assert {e["task_id"] for e in spooled if e["phase"] == "finished"} == {task_id}
-    assert [
-        json.loads(Path(event["outcome_ref"]["path"]).read_text())["execution_receipt"][
-            "binding"
-        ]
-        for event in spooled
-        if event["phase"] == "finished"
-    ] == ["unavailable", "unavailable"]
     assert [
         json.loads(Path(e["outcome_ref"]["path"]).read_text())["exit_code"]
         for e in spooled
@@ -1950,74 +1721,6 @@ def test_running_unit_cannot_prove_command_success() -> None:
     )
 
 
-def test_real_retained_orphan_is_released_by_the_next_multi_slot_admission(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_pueue: FakePueue
-) -> None:
-    user_manager()
-    monkeypatch.setenv("PUEUE_GROUP", "fixture")
-    fake_pueue.groups["fixture"] = 2
-    first = write_launch(tmp_path, name="first.json", argv=["true"])
-    task_id = fake_pueue.add(
-        group="fixture",
-        label="fixture:check",
-        command=("agentctl-run", str(first)),
-        working_directory=tmp_path,
-    )
-    first_unit = unit_for(first, "fixture")
-    next_launch = write_launch(
-        tmp_path,
-        name="next.json",
-        argv=["true"],
-        job_id="job-next",
-        log_path=str(tmp_path / "next-job.log"),
-    )
-    next_task = fake_pueue.add(
-        group="fixture",
-        label="fixture:check",
-        command=("agentctl-run", str(next_launch)),
-        working_directory=tmp_path,
-    )
-    assert set(fake_pueue.running_tasks("fixture")) == {task_id, next_task}
-    next_unit = unit_for(next_launch, "fixture")
-    original = run_module._wait_for_unit
-    original_ctl = run_module._systemctl
-    control_lost = False
-
-    class LostObserver(RuntimeError):
-        pass
-
-    def lose_observer(*args: Any, **kwargs: Any) -> Any:
-        nonlocal control_lost
-        properties = original(*args, **kwargs)
-        assert properties is not None and properties["SubState"] == "exited"
-        control_lost = True
-        raise LostObserver
-
-    def lose_control(*args: str) -> str | None:
-        if control_lost and args[0] in {"stop", "show"} and args[-1] == first_unit:
-            return None
-        return original_ctl(*args)
-
-    try:
-        with monkeypatch.context() as fault:
-            fault.setattr(run_module, "_wait_for_unit", lose_observer)
-            # An ordinary exception now cleans up. An unavailable controller
-            # still leaves a real retained unit for the next admission to settle.
-            fault.setattr(run_module, "_systemctl", lose_control)
-            with pytest.raises(LostObserver):
-                main([str(first)])
-        assert run_module.unit_properties(first_unit)["SubState"] == "exited"
-        fake_pueue.kill_directly(task_id)
-        assert main([str(next_launch)]) == 0
-        assert run_module.unit_properties(first_unit) == {}
-        assert run_module.unit_properties(next_unit) == {}
-        assert f"settled_orphan {first_unit}" in (tmp_path / "next-job.log").read_text()
-    finally:
-        for unit in (first_unit, next_unit):
-            run_module._systemctl("stop", unit)
-            run_module._systemctl("reset-failed", unit)
-
-
 @pytest.mark.parametrize("parallel", [1, 2])
 def test_same_reference_restart_preserves_its_prior_unit_release(
     tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue, parallel: int
@@ -2034,7 +1737,6 @@ def test_same_reference_restart_preserves_its_prior_unit_release(
     fake_systemd.active((unit, described("pytest", task_id)))
 
     assert main([str(launch)]) == 0
-    assert f"settled_orphan {unit}" in log_of(tmp_path)
     assert [call for call in fake_systemd.systemctl_calls() if "stop" in call] == [
         ["systemctl", "--user", "stop", unit],
         ["systemctl", "--user", "stop", unit],
@@ -2445,57 +2147,23 @@ def test_dirty_endpoints_with_different_content_are_changed() -> None:
     assert changed["binding"] == "changed"
 
 
-@pytest.mark.parametrize("readable", [True, False])
-def test_scratch_retains_kernel_members_after_successful_unit_stop(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, readable: bool
-) -> None:
-    from agentctl import cgroups
-
-    group = tmp_path / "fixture.service"
-    group.mkdir()
-    members = group / "cgroup.procs"
-    members.write_text("12345\n" if readable else "unknown membership\n")
-    monkeypatch.setattr(cgroups, "CGROUP_ROOT", tmp_path)
-    monkeypatch.setattr(run_module, "_systemctl", lambda *_: "")
-    scratch = tmp_path / "scratch"
-    scratch.mkdir()
-    (scratch / "evidence").write_text("still owned")
-    owner = run_module._Scratch()
-    owner.unit = "fixture.service"
-    owner.cgroup = "/fixture.service"
-    owner.path = scratch
-
-    assert owner.cleanup() == "unit cgroup termination unconfirmed; cleanup deferred"
-    assert owner.unit == "fixture.service"
-    assert (scratch / "evidence").read_text() == "still owned"
-
-
-def test_startup_retains_native_cgroup_identity_before_dispatch(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    fake_systemd: FakeSystemd,
-    fake_pueue: FakePueue,
-) -> None:
-    from agentctl import cgroups
-
-    launch = write_launch(tmp_path, pool="pytest")
+def test_previous_unit_is_stopped_before_existing_scratch_is_refused(
+    tmp_path, monkeypatch, fake_systemd
+):
+    root = tmp_path / "scratch"
+    monkeypatch.setenv("AGENTCTL_TMPFS_SCRATCH_ROOT", str(root))
+    scratch = root / "job-a"
+    scratch.mkdir(parents=True)
+    original = scratch / "original"
+    original.write_text("previous job bytes")
+    launch = write_launch(
+        tmp_path, pool="pytest", scratch={"kind": "tmpfs", "path": str(scratch)}
+    )
     unit = unit_for(launch, "pytest")
-    monkeypatch.setattr(cgroups, "unit_cgroup", lambda _: "/fixture.slice")
-    monkeypatch.setattr(cgroups, "observe", lambda *_: {"status": "empty"})
-    original = subprocess.run
-    retained = []
 
-    def dispatch(command, *args, **kwargs):
-        if command[0] == "systemd-run":
-            owner = json.loads(Path(str(launch) + ".disposition").read_text())
-            assert owner == {
-                "attempt": 1,
-                "unit": unit,
-                "cgroup": "/fixture.slice/" + unit,
-            }
-            retained.append(owner)
-        return original(command, *args, **kwargs)
-
-    monkeypatch.setattr(subprocess, "run", dispatch)
-    assert main([str(launch)]) == 0
-    assert len(retained) == 1
+    assert main([str(launch)]) == REFUSED_EXIT_CODE
+    assert [call for call in fake_systemd.systemctl_calls() if "stop" in call] == [
+        ["systemctl", "--user", "stop", unit]
+    ]
+    assert original.read_text() == "previous job bytes"
+    assert fake_systemd.run_argv() == []

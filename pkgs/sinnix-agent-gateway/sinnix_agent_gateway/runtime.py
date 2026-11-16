@@ -798,11 +798,7 @@ class Runtime:
         cancelled: Callable[[], bool] | None = None,
         job_id: str | None = None,
     ) -> dict[str, Any]:
-        """``reference`` is the canonical ref of the waited resource.
-
-        ``job_id`` is a job's own name, and a job wait that has one follows its
-        job across a queue reorder instead of the task id the ref encodes.
-        """
+        """Wait on a resource; an optional job name filters the task ID."""
         if not isinstance(reference, str) or not 1 <= len(reference) <= 2_048:
             raise ProtocolError("invalid_request", "wait ref is malformed")
         try:
@@ -894,14 +890,9 @@ class Runtime:
                         {"ref": reference, "evidence": evidence}
                     ),
                 }
-            # The answer must name the identity the wait addressed. A job id
-            # names the job wherever the queue moved it, so its answer carries
-            # the task id the job is at now; a task id alone names only the
-            # position, and its answer must still be about that position.
-            answered = (
-                result.get("job_id") if job_id is not None else result.get("task_id")
-            )
-            if answered != (job_id or values["task_id"]):
+            if str(result.get("task_id")) != str(values["task_id"]) or (
+                job_id is not None and result.get("job_id") != job_id
+            ):
                 raise ProtocolError(
                     "owner_failed",
                     "job owner wait response does not match the requested job",

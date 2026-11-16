@@ -14,7 +14,7 @@ That path also names the task's containment: a transient service
 ``agentctl-<pueue group>-<stem>-<digest of the path>.service`` in the pool's
 slice, every part of which a reader recovers from ``pueue status`` alone. The
 ordinary service exits with its cgroup (``ExitType=cgroup``). A verifier with
-required services uses ``ExitType=main`` so systemd settles daemonized children
+required services uses ``ExitType=main`` so systemd stops daemonized children
 when verification ends. Without ``--no-block``,
 ``systemd-run`` waits for unit startup; ``Type=exec`` makes its successful
 return confirm the command was exec'd before releasing the allocation lock.
@@ -22,10 +22,6 @@ After that, the wrapper observes service completion while a canceller can
 stop the unit without this wrapper's help. RemainAfterExit retains terminal
 status until the wrapper reads it, then the wrapper stops and releases its unit.
 
-The unit's Description is ``agentctl:<daemon>:<pool>:<pueue task id>``: the
-pueue daemon the task belongs to and the exact pool, so the single-slot guard
-considers only units of its own queue. Every other unit in the slice belongs to
-another daemon (a test's private pueued) and is left alone.
 """
 
 from __future__ import annotations
@@ -36,7 +32,6 @@ import hashlib
 import json
 import os
 import re
-import shlex
 import shutil
 import signal
 import subprocess
@@ -45,29 +40,26 @@ import tempfile
 import time
 from enum import Enum
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.ledger import append_jsonl
 from sinnix_lib.secrets import mask_secret_values, secret_values
 
-from . import artifacts, gitcmd, pueue
+from . import artifacts, pueue
 from .launch_input import QueueInputError, read_input, secret_environment
 from .limits import SYSTEMCTL_TIMEOUT_SECONDS
-from .pueue import PueueError
 
 # Default transport bounds. Captured artifacts are retained in full.
 MAX_LOG_BYTES = 8_000_000
 MAX_RESULT_BYTES = 64_000
 
 # Exit statuses of the wrapper itself. 124 is timeout(1)'s, 130 is a
-# SIGINT-shaped cancellation, 126 a command that could not be observed, and
-# 75 is EX_TEMPFAIL: the slot is taken and the same task may run later.
+# SIGINT-shaped cancellation and 126 a command that could not be observed.
 TIMEOUT_EXIT_CODE = 124
 REFUSED_EXIT_CODE = 125
 CANCELLED_EXIT_CODE = 130
 VANISHED_EXIT_CODE = 126
-SLOT_OCCUPIED_EXIT_CODE = 75
 BUS_CONNECT_RETRY_SECONDS = 10
 USER_BUS_CONNECTION_REFUSED = (
     b"Failed to connect to user scope bus via local transport: Connection refused"
@@ -88,7 +80,6 @@ class Outcome(str, Enum):
     TIMEOUT = "timeout"
     CANCELLED = "cancelled"
     VANISHED = "vanished"
-    SLOT_OCCUPIED = "slot_occupied"
 
 
 # Pool slices sit under agent-ctl.slice, inside the host's agent budget
@@ -130,13 +121,7 @@ DESCRIPTION_PREFIX = "agentctl"
 # are bounded, and the prefix, the pool and the digest come first.
 UNIT_STEM_BYTES = 100
 
-# Files counted before the measurement stops and says so. A scratch tree
-# larger than this is reported as a lower bound, never walked without end.
-MAX_SCRATCH_ENTRIES = 100_000
-
-# Git is probed for execution evidence, independently of the descriptor's
-# cache policy.  These probes are deliberately bounded and read-only; failure
-# is recorded as unavailable rather than changing the command's outcome.
+# Git checks around cached commands must remain bounded.
 GIT_OBSERVATION_TIMEOUT_SECONDS = 5.0
 
 
@@ -200,8 +185,6 @@ def _start_service(
     marker: Path,
     attempt: int,
     log: Any,
-    *,
-    before_start: Callable[[], None] | None = None,
 ):
     """Serialize startup with cancellation; retry only a confirmed absent unit."""
     root = _attempt_root_for_marker(marker)
@@ -224,8 +207,6 @@ def _start_service(
             fcntl.flock(lock, fcntl.LOCK_EX)
             if _marker_targets(marker, attempt):
                 return None
-            if before_start is not None:
-                before_start()
             # Keep client diagnostics separate from payload stderr: a payload
             # must never be able to print its way into a startup retry.
             with tempfile.TemporaryFile(dir=root) as errors:
@@ -395,26 +376,6 @@ def git_observation(cwd: Path, *, observed_at: str | None = None) -> dict[str, A
     return observation
 
 
-def stranded_index_locks(cwd: Path, *, since_ns: int) -> list[dict[str, str]]:
-    """Unheld `index.lock` files that appeared in this checkout while the attempt ran.
-
-    A Git write killed with the unit strands its lock. The wrapper cannot tell
-    whose Git that was in a checkout other processes also write, so it names
-    the lock and never removes it. Both the attempt's own worktree and the main
-    checkout that shares its `.git` are checked.
-    """
-    directories = gitcmd.git_directories(cwd)
-    if directories is None:
-        return []
-    locks = {directories.git_dir / "index.lock": directories.main}
-    locks.setdefault(gitcmd.common_git_dir(directories) / "index.lock", True)
-    return [
-        {"lock": str(lock), "checkout": "main" if main else "worktree"}
-        for lock, main in locks.items()
-        if gitcmd.stranded_lock(lock, since_ns=since_ns)
-    ]
-
-
 def execution_receipt(
     start: Mapping[str, Any], end: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -453,41 +414,22 @@ def remove_scratch(path: Path | None) -> str | None:
     except FileNotFoundError:
         return None
     except OSError as error:
-        # Do not copy a potentially sensitive child filename into the receipt.
+        # Do not copy a potentially sensitive child filename into the result.
         return f"{type(error).__name__} (errno {error.errno})"
     return None
 
 
 class _Scratch:
-    """One attempt's files may be removed only after its native unit stops."""
+    """One attempt's files may be removed only after its unit stops."""
 
     def __init__(self) -> None:
         self.path: Path | None = None
         self.unit: str | None = None
-        self.cgroup: str | None = None
         self.cleaned = False
-
-    def claim_unit(self, unit: str, pool: str, launch_input: str, attempt: int) -> None:
-        from . import cgroups
-
-        # Persist custody before acceptance, under the allocation lock. Even a
-        # killed launcher must leave the kernel path after systemd forgets it.
-        self.cgroup = cgroups.planned_unit_cgroup(unit, pool_slice(pool))
-        record = {"unit": unit, "cgroup": self.cgroup, "attempt": attempt}
-        atomic_publish(
-            Path(launch_input + ".disposition"),
-            json.dumps(record, sort_keys=True).encode(),
-            fsync=True,
-            mode=0o600,
-        )
 
     def release_unit(self) -> str | None:
         if self.unit is None:
             return None
-        from . import cgroups
-
-        if self.cgroup is None:
-            self.cgroup = cgroups.unit_cgroup(self.unit)
         if _systemctl("stop", self.unit) is None:
             observed = _unit_snapshot(self.unit)
             if observed is None or (
@@ -495,8 +437,6 @@ class _Scratch:
                 and not _unit_is_terminal(observed)
             ):
                 return "unit termination unconfirmed; cleanup deferred"
-        if cgroups.observe(self.unit, self.cgroup)["status"] != "empty":
-            return "unit cgroup termination unconfirmed; cleanup deferred"
         _systemctl("reset-failed", self.unit)
         self.unit = None
         return None
@@ -510,41 +450,6 @@ class _Scratch:
             return error
         path, self.path = self.path, None
         return remove_scratch(path)
-
-
-def scratch_footprint(path: Path) -> dict[str, Any]:
-    """What the job left in its scratch: bytes and files, bounded by entry count.
-
-    Sizes come from `lstat`, so a symlink counts as itself and never as the
-    tree it points at.
-    """
-    total = 0
-    files = 0
-    truncated = False
-    for directory, _directories, names in os.walk(path, followlinks=False):
-        for name in names:
-            if files >= MAX_SCRATCH_ENTRIES:
-                truncated = True
-                break
-            try:
-                total += os.lstat(os.path.join(directory, name)).st_size
-            except OSError:
-                continue
-            files += 1
-        if truncated:
-            break
-    return {"bytes": total, "files": files, "truncated": truncated}
-
-
-def launch_input_of(command: str) -> str | None:
-    """The launch input a queued command names, or None for any other command."""
-    try:
-        words = shlex.split(command)
-    except ValueError:
-        return None
-    if len(words) != 2 or PurePosixPath(words[0]).name != RUN_EXECUTABLE:
-        return None
-    return words[1] if PurePosixPath(words[1]).is_absolute() else None
 
 
 def append_event(spool_path: Path | None, event: Mapping[str, Any]) -> None:
@@ -634,7 +539,7 @@ def _wait_for_unit(unit: str) -> dict[str, str]:
 
     The launch budget cannot prove an active or stopping unit completed.
     Failed property reads retain ownership until the manager recovers or
-    cancellation settles it. Neither elapsed wrapper time nor a query failure
+    cancellation stops it. Neither elapsed wrapper time nor a query failure
     proves command completion.
     """
     delay = UNIT_POLL_INITIAL_SECONDS
@@ -648,70 +553,6 @@ def _wait_for_unit(unit: str) -> dict[str, str]:
                 return properties
         time.sleep(delay)
         delay = min(delay * 2, UNIT_POLL_MAX_SECONDS)
-
-
-def active_units(daemon: str, pool: str) -> dict[str, int | None]:
-    """Every unit of this daemon's pool still running, whichever run created it.
-
-    The name glob is a prefilter; the Description decides, so a pool whose
-    name extends another's (``pytest-x``) and another daemon's units never
-    count.
-    """
-    listed = _systemctl(
-        "list-units",
-        "--plain",
-        "--no-legend",
-        "--state=active,activating,deactivating",
-        f"{UNIT_PREFIX}-{pool}-*",
-    )
-    prefix = unit_description(daemon, pool, "")
-    units: dict[str, int | None] = {}
-    for line in (listed or "").splitlines():
-        columns = line.split(None, 4)
-        if len(columns) == 5 and columns[4].strip().startswith(prefix):
-            identity = columns[4].strip()[len(prefix) :]
-            units[columns[0]] = int(identity) if identity.isdecimal() else None
-    return units
-
-
-def _occupancy(
-    pool: str, unit: str, daemon: str, log: Any
-) -> tuple[str, pueue.Task | None]:
-    """Settle terminal task orphans and enforce single-slot pool occupancy.
-
-    A unit whose task is terminal is an orphan of a killed wrapper and is
-    stopped in every pool. Unknown or running owners hold a single-slot pool;
-    wider pools leave them untouched and retain their declared admission width.
-    """
-    try:
-        parallel = pueue.groups().get(pool)
-        tasks = pueue.running_tasks(pool)
-        units = active_units(daemon, pool)
-        if units:
-            for task_id in units.values():
-                if task_id is not None and task_id not in tasks:
-                    owner = pueue.task(task_id)
-                    if owner is not None:
-                        tasks[task_id] = owner
-    except PueueError:
-        return "", None
-    owners = {}
-    for task in tasks.values():
-        path = launch_input_of(task.command)
-        if path is not None:
-            owners[unit_for(path, pool)] = task
-    own = owners.get(unit)
-    for other in units:
-        owner = owners.get(other)
-        if other != unit and (owner is None or not owner.terminal):
-            if parallel == 1:
-                log.write(f"pool {pool} is occupied by {other}\n".encode())
-                return "slot_occupied", own
-            continue
-        _systemctl("stop", other)
-        _systemctl("reset-failed", other)
-        log.write(f"settled_orphan {other}\n".encode())
-    return "", own
 
 
 def _service_command(
@@ -879,7 +720,9 @@ def _run(
         "kind": "queue-task",
         "job_id": launch["job_id"],
         "attempt": launch["attempt"],
-        "task_id": None,
+        "task_id": int(os.environ["PUEUE_ID"])
+        if os.environ.get("PUEUE_ID", "").isdecimal()
+        else launch.get("queue_task_id"),
         "label": launch.get("label", ""),
         "job_kind": launch.get("kind", "declared-operation"),
         "project": launch["project_id"],
@@ -931,17 +774,31 @@ def _run(
         publish_outcome(record)
         return REFUSED_EXIT_CODE
 
+    scratch = launch.get("scratch")
+    scratch_dir = Path(scratch["path"]) if scratch else None
+    pool = unit_pool(os.environ.get("PUEUE_GROUP")) or unit_pool(launch.get("pool"))
+    unit = unit_for(launch_input, pool) if pool else None
+    daemon = pueue.daemon_tag()
+    event.update(pool=pool, unit=unit)
+    if unit is not None:
+        root = _attempt_root_for_marker(marker)
+        with (root / ".allocation.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            scratch_owner.unit = unit
+            error = scratch_owner.release_unit()
+            if error is not None:
+                log_path.write_text(f"could not stop previous unit {unit}\n")
+                return refused(scratch_error=error)
     if not Path(launch["working_directory"]).is_dir():
         log_path.write_text(
             f"working directory is gone: {launch['working_directory']}\n"
         )
         return refused()
-    # This is execution evidence, not the cache key captured by `job start`.
-    # It is therefore collected for every operation, including cache=none.
-    started_ns = time.time_ns()
-    start_git = git_observation(Path(launch["working_directory"]))
-    scratch = launch.get("scratch")
-    scratch_dir = Path(scratch["path"]) if scratch else None
+    cached = (
+        launch.get("tree_receipt") is not None
+        and launch.get("environment_receipt") is not None
+    )
+    start_git = git_observation(Path(launch["working_directory"])) if cached else None
     if scratch_dir is not None:
         try:
             scratch_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -953,24 +810,15 @@ def _run(
             log_path.write_text(f"could not create the scratch directory: {error}\n")
             return refused()
 
-    # The pueue group comes from `PUEUE_GROUP`, which pueued exports into every
-    # task it spawns, so a launch input written by another repository is
-    # contained exactly like one agentctl wrote.
-    pool = unit_pool(os.environ.get("PUEUE_GROUP")) or unit_pool(launch.get("pool"))
-    unit = unit_for(launch_input, pool) if pool else None
-    daemon = pueue.daemon_tag()
-    event.update(pool=pool, unit=unit)
     append_event(spool_path, {**event, "phase": "started"})
 
-    # The queue is the admission boundary. Pass its identity to the child so
-    # project-native runners can distinguish a worker from a lane-side request.
+    # Pass the queue identity to the command so nested calls know they are workers.
     environment = dict(launch["environment"])
     # Secret values join the child's environment only; the launch input and
     # every identity computed from it keep their names alone.
     secrets, lost_secrets = secret_environment(Path(launch_input), launch)
     environment.update(secrets)
-    # Native invocation provenance is owned here, not inherited from a parent
-    # job or caller. The job id joins this attempt to retained input.
+    # This attempt supplies its own identity rather than inheriting a parent job.
     for field in (
         "JOB_ID",
         "CORRELATION_ID",
@@ -992,11 +840,9 @@ def _run(
         }
     )
     root = launch.get("project_root")
-    checkout_path, checkout_error = _git_probe(
+    checkout_path, _ = _git_probe(
         Path(launch["working_directory"]), "rev-parse", "--show-toplevel"
     )
-    start_git["checkout_root"] = checkout_path
-    start_git["checkout_root_error"] = checkout_error
     if isinstance(root, str) and root and checkout_path:
         path = Path(checkout_path).resolve()
         environment["AGENTCTL_CHECKOUT_ID"] = (
@@ -1004,8 +850,13 @@ def _run(
             if path == Path(root).resolve()
             else "worktree-" + hashlib.sha256(str(path).encode()).hexdigest()[:16]
         )
-    if isinstance(start_git.get("head"), str) and start_git["head"]:
-        environment["AGENTCTL_CHECKOUT_HEAD"] = start_git["head"]
+    head = (
+        start_git.get("head")
+        if start_git is not None
+        else _git_probe(Path(launch["working_directory"]), "rev-parse", "HEAD")[0]
+    )
+    if isinstance(head, str) and head:
+        environment["AGENTCTL_CHECKOUT_HEAD"] = head
     if pool:
         environment["AGENTCTL_POOL"] = pool
     environment.pop("DEVKIT_SCRATCH", None)
@@ -1041,76 +892,66 @@ def _run(
                 if unit is None or pool is None:
                     outcome, status = _run_bare(argv, launch, environment, stdout, log)
                 else:
-                    refusal, own = _occupancy(pool, unit, daemon, log)
-                    if own is not None:
-                        event["task_id"] = own.task_id
-                    if refusal:
-                        outcome, status = (
-                            Outcome.SLOT_OCCUPIED,
-                            SLOT_OCCUPIED_EXIT_CODE,
-                        )
+                    command = _service_command(
+                        launch,
+                        unit=unit,
+                        pool=pool,
+                        description=unit_description(
+                            daemon,
+                            pool,
+                            str(event["task_id"])
+                            if event["task_id"] is not None
+                            else launch_input,
+                        ),
+                        argv=argv,
+                        environment=environment,
+                        stdout=stdout_path,
+                        log_path=log_path,
+                    )
+                    # Acceptance can precede a lost startup acknowledgement.
+                    scratch_owner.unit = unit
+                    client = _start_service(
+                        command,
+                        marker,
+                        launch["attempt"],
+                        log,
+                    )
+                    if client is None:
+                        outcome, status = Outcome.CANCELLED, CANCELLED_EXIT_CODE
                     else:
-                        command = _service_command(
-                            launch,
-                            unit=unit,
-                            pool=pool,
-                            description=unit_description(
-                                daemon,
-                                pool,
-                                str(own.task_id) if own is not None else launch_input,
-                            ),
-                            argv=argv,
-                            environment=environment,
-                            stdout=stdout_path,
-                            log_path=log_path,
-                        )
-                        # Acceptance can precede a lost startup acknowledgement.
-                        scratch_owner.unit = unit
-                        client = _start_service(
-                            command,
-                            marker,
-                            launch["attempt"],
-                            log,
-                            before_start=lambda: scratch_owner.claim_unit(
-                                unit, pool, launch_input, launch["attempt"]
-                            ),
-                        )
-                        if client is None:
-                            outcome, status = Outcome.CANCELLED, CANCELLED_EXIT_CODE
+                        return_code = client.returncode
+                        if return_code == 0:
+                            properties = _wait_for_unit(unit)
                         else:
-                            return_code = client.returncode
-                            if return_code == 0:
+                            properties = _unit_snapshot(unit)
+                            if (
+                                properties is None
+                                or not properties.get("LoadState")
+                                or (
+                                    properties.get("LoadState") == "loaded"
+                                    and not _unit_is_terminal(properties)
+                                )
+                            ):
+                                # An acknowledgement can be lost after acceptance.
+                                # Observe that unit; never resubmit its payload.
                                 properties = _wait_for_unit(unit)
-                            else:
-                                properties = _unit_snapshot(unit)
-                                if (
-                                    properties is None
-                                    or not properties.get("LoadState")
-                                    or (
-                                        properties.get("LoadState") == "loaded"
-                                        and not _unit_is_terminal(properties)
-                                    )
-                                ):
-                                    # An acknowledgement can be lost after acceptance.
-                                    # Observe that unit; never resubmit its payload.
-                                    properties = _wait_for_unit(unit)
-                            outcome, status = _classify(
-                                _marker_targets(marker, launch["attempt"]),
-                                properties,
+                        outcome, status = _classify(
+                            _marker_targets(marker, launch["attempt"]),
+                            properties,
+                        )
+                        # Capture terminal status before releasing this unit.
+                        # Stop also ends retained verifier descendants.
+                        release_error = scratch_owner.release_unit()
+                        if release_error is not None:
+                            log.write((release_error + "\n").encode())
+                            outcome, status = (
+                                Outcome.VANISHED,
+                                VANISHED_EXIT_CODE,
                             )
-                            # Capture terminal status before releasing this unit.
-                            # Stop also settles retained verifier descendants.
-                            release_error = scratch_owner.release_unit()
-                            if release_error is not None:
-                                log.write((release_error + "\n").encode())
-                                outcome, status = (
-                                    Outcome.VANISHED,
-                                    VANISHED_EXIT_CODE,
-                                )
-                            if outcome is Outcome.VANISHED:
-                                log.write(
-                                    f"unit {unit} vanished (rc {return_code})\n".encode()
-                                )
+                        if outcome is Outcome.VANISHED:
+                            log.write(
+                                f"unit {unit} vanished (rc {return_code})\n".encode()
+                            )
             except OSError as error:
                 action = "control" if scratch_owner.unit is not None else "start"
                 log.write(f"could not {action} the command: {error}\n".encode())
@@ -1129,18 +970,6 @@ def _run(
         fcntl.flock(lock, fcntl.LOCK_UN)
     _mask_logs((log_path, stdout_path), secret_values(secrets))
 
-    end_git = git_observation(Path(launch["working_directory"]))
-    stranded = stranded_index_locks(
-        Path(launch["working_directory"]), since_ns=started_ns
-    )
-    if stranded:
-        with open(log_path, "ab") as log:
-            for entry in stranded:
-                log.write(
-                    f"stranded index lock: {entry['lock']} appeared during this "
-                    "attempt and no process holds it\n".encode()
-                )
-
     record: dict[str, Any] = {
         "attempt": launch["attempt"],
         "outcome": outcome.value,
@@ -1148,38 +977,25 @@ def _run(
         "unit": unit,
         "pool": pool,
         "systemd_result": properties.get("Result") if properties is not None else None,
-        "execution_receipt": execution_receipt(start_git, end_git),
-        "stranded_index_locks": stranded,
-        "execution_evidence": {
-            "schema_version": 1,
-            "selector": list(launch.get("argv") or ()),
-            "phase": "unit_lifecycle",
-            "command_execution_observed": None,
-            "result": {"outcome": outcome.value, "exit_code": status},
+    }
+    if start_git is not None:
+        end_git = git_observation(Path(launch["working_directory"]))
+        record["execution_receipt"] = execution_receipt(start_git, end_git)
+        record["execution_evidence"] = {
             "environment_identity": hashlib.sha256(
                 json.dumps(launch.get("environment") or {}, sort_keys=True).encode()
             ).hexdigest(),
-            "environment_identity_method": "sha256 of declared launch environment JSON",
-            "published_artifact_refs": [],
-            "coverage_gaps": [
-                "Inner provisioning, collection, test and product phases require owner stage records."
-            ],
-        },
-    }
+        }
     request = artifacts.cancellation(declared_log_path, launch["attempt"])
     if request:
         record["cancellation"] = request
     if scratch_dir is not None:
-        # Measured now, while the unit has exited and nothing else writes
-        # there; the record outlives the directory, which goes with the job.
-        record["scratch"] = {
-            "kind": str(scratch["kind"]),
-            "path": str(scratch_dir),
-            **scratch_footprint(scratch_dir),
-        }
         cleanup_error = scratch_owner.cleanup()
         if cleanup_error is not None:
-            record["scratch"]["cleanup_error"] = cleanup_error
+            record["scratch"] = {
+                "path": str(scratch_dir),
+                "cleanup_error": cleanup_error,
+            }
     publish_outcome(record)
     return status
 

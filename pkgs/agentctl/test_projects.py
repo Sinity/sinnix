@@ -47,7 +47,6 @@ def test_the_fixture_descriptor_loads_every_declared_field(project_root: Path) -
     assert project.environment.command == ("env",)
     assert project.workspace is not None
     assert project.workspace.default_base == "origin/master"
-    assert project.workspace.retain_artifacts == ()
     assert project.operation("nightly").pool == "bulk"
     verify = project.operation("verify")
     assert (verify.result, verify.timeout_seconds) == ("json", 120)
@@ -59,26 +58,6 @@ def test_the_fixture_descriptor_loads_every_declared_field(project_root: Path) -
         "verify",
         "verify_quick",
     ]
-
-
-def test_workspace_artifacts_must_be_relative(tmp_path: Path) -> None:
-    root = write_project(tmp_path / "p")
-    descriptor = root / ".agentctl" / "project.toml"
-    descriptor.write_text(
-        descriptor.read_text().replace(
-            "[workspace]",
-            '[workspace]\nretain_artifacts = [".cache/verify/*.json"]',
-        )
-    )
-    assert load_project_adapter(root).workspace.retain_artifacts == (
-        ".cache/verify/*.json",
-    )
-
-    descriptor.write_text(
-        descriptor.read_text().replace(".cache/verify/*.json", "../escape")
-    )
-    with pytest.raises(ProjectConfigError, match="retain_artifacts must be relative"):
-        load_project_adapter(root)
 
 
 @pytest.mark.parametrize(

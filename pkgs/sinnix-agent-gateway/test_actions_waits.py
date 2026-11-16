@@ -47,14 +47,10 @@ def test_wait_for_job_terminal_uses_the_queue_wait(
 def test_wait_for_job_terminal_carries_the_job_id_to_the_queue(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The same stable identity jobs.wait uses, through the condition locator.
-
-    Anti-vacuity: without it the queue wait is handed the task id the ref
-    encodes, and answers about whatever a reorder moved there.
-    """
+    """The condition locator forwards both job IDs to the queue wait."""
     server, _, fake = make_server(tmp_path, monkeypatch)
     job_id = "fixture-worker-abcd1234"
-    fake.responses["job.wait"] = {**DONE, "task_id": "44", "job_id": job_id}
+    fake.responses["job.wait"] = {**DONE, "job_id": job_id}
 
     satisfied = call(
         server,
@@ -74,8 +70,7 @@ def test_wait_for_job_terminal_carries_the_job_id_to_the_queue(
         "timeout_seconds": 3,
     }
     assert satisfied["outcome"] == "satisfied"
-    # The job's current position, not the one the caller addressed.
-    assert satisfied["ref"] == "sinnix://jobs/44"
+    assert satisfied["ref"] == "sinnix://jobs/41"
     assert satisfied["job"]["job_id"] == job_id
 
 

@@ -220,7 +220,7 @@ def parser() -> argparse.ArgumentParser:
                 "--actor", help="declared requester; defaults to the OS user"
             )
             one.add_argument(
-                "--reason", help="reason retained with cancellation evidence"
+                "--reason", help="reason retained with the cancellation request"
             )
             one.add_argument(
                 "--expected-attempt",
@@ -239,20 +239,14 @@ def parser() -> argparse.ArgumentParser:
             )
         _output_arguments(one)
     clean = job_verbs.add_parser(
-        "clean", help="remove a terminal queue task, retaining execution evidence"
+        "clean", help="remove a terminal queue task, keeping its input and output"
     )
     clean.add_argument("task_id", type=int, nargs="?")
     _job_id_option(clean)
-    clean.add_argument("--all-terminal", action="store_true")
     clean.add_argument(
-        "--worktrees",
+        "--all-terminal",
         action="store_true",
-        help="also retire published checkouts after queue cleanup",
-    )
-    clean.add_argument(
-        "--budget-seconds",
-        type=float,
-        help="with --worktrees, stop admitting checkout removals after this long",
+        help="remove tasks finished more than 24 hours ago",
     )
     _output_arguments(clean)
     wait = job_verbs.add_parser("wait")
@@ -276,11 +270,11 @@ def parser() -> argparse.ArgumentParser:
     tail.add_argument("--project", help="filter by project id")
     _output_arguments(tail)
 
-    admission = verbs.add_parser(
+    pool_commands = verbs.add_parser(
         "pools", help="the declared parallelism of every pueue group"
     )
-    admission_verbs = admission.add_subparsers(dest="pools_verb", required=True)
-    _output_arguments(admission_verbs.add_parser("apply"))
+    pool_verbs = pool_commands.add_subparsers(dest="pools_verb", required=True)
+    _output_arguments(pool_verbs.add_parser("apply"))
 
     pause = verbs.add_parser(
         "pressure", help="pause or reopen job groups against memory pressure"
@@ -455,33 +449,10 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             reason=arguments.reason,
         )
         out.write(job, f"{out.job_line(job)}; {job['state']}")
-        return EXIT_REFUSED if job["state"] in {"failed", "incomplete"} else EXIT_OK
+        return EXIT_REFUSED if job["state"] in {"failed", "unresolved"} else EXIT_OK
     if verb == "clean":
-        if arguments.worktrees and not arguments.all_terminal:
-            raise JobError("--worktrees requires --all-terminal")
         if arguments.all_terminal:
             rows = launch.clean_terminal(config)
-            if arguments.worktrees:
-                print(
-                    f"cleaned {len(rows)} terminal queue task(s); checking completed worktrees",
-                    file=sys.stderr,
-                    flush=True,
-                )
-                worktrees = worktree_cleanup.clean_published(
-                    config, budget_seconds=arguments.budget_seconds
-                )
-                failed = any("error" in row for row in worktrees)
-                out.write(
-                    {
-                        "jobs": rows,
-                        "queue_cleanup": "completed",
-                        "worktrees": worktrees,
-                        "worktree_cleanup": "failed" if failed else "completed",
-                    },
-                    f"cleaned {len(rows)} terminal task(s); worktree cleanup "
-                    + ("has failures" if failed else "completed"),
-                )
-                return EXIT_REFUSED if failed else EXIT_OK
             out.write(rows, f"cleaned {len(rows)} terminal task(s)")
             return EXIT_OK
         if arguments.task_id is None:
@@ -494,13 +465,6 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         out.write(job, out.job_line(job))
         return EXIT_OK
     if verb == "wait":
-        if arguments.job_id is None:
-            # The queue reuses a cancelled task's number, so a bare number can
-            # name another caller's job by the time the wait begins.
-            raise JobError(
-                "job wait needs --job-id (the job_id that job start printed); "
-                "a task number alone can address a different job once the queue reuses it"
-            )
         waited = job_queries.wait(
             arguments.task_id,
             timeout_seconds=arguments.timeout_seconds,
@@ -535,12 +499,6 @@ def _event_line(event: Mapping[str, Any]) -> str:
         return f"{stamp} {label} finished {outcome}{f' exit {exit_code}' if exit_code not in (None, '', '0', 0) else ''}{task}"
     if kind == pressure.EVENT_KIND:
         return f"{stamp} pressure {event.get('action')} {event.get('group') or ''}".rstrip()
-    if kind == "pool-hold":
-        excluded = ", ".join(str(pool) for pool in event.get("excluded_by") or ())
-        return (
-            f"{stamp} {event.get('label')} {event.get('action')} "
-            f"(task {event.get('task_id')}, {event.get('pool')} excluded by {excluded})"
-        )
     detail = " ".join(
         f"{key}={value}"
         for key, value in sorted(event.items())
@@ -813,22 +771,8 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
         )
         return EXIT_OK
     if verb == "pressure":
-        decision = pressure.tick(
-            spool=config.event_spool,
-            pools=config.pools,
-            release_holds=lambda: launch.release_holds(config, wait=False),
-        )
-        holds = {
-            "released": decision.get("holds_released", []),
-            "waiting": decision.get("holds_waiting", []),
-        }
-        summary = f"pressure {decision.get('action')}"
-        if holds["released"] or holds["waiting"]:
-            summary += (
-                f"; pool holds: released {len(holds['released'])}, "
-                f"waiting {len(holds['waiting'])}"
-            )
-        out.write(decision, summary)
+        decision = pressure.tick(spool=config.event_spool)
+        out.write(decision, f"pressure {decision.get('action')}")
         return EXIT_OK
     raise AssertionError(verb)
 

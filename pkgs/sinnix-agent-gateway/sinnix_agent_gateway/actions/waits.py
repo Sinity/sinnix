@@ -289,7 +289,6 @@ async def _wait_for(runtime: Runtime, inp: WaitInput) -> WaitResult:
     if isinstance(condition, JobTerminal) and "outcome" not in raw:
         view = _job_view(raw)
         timed_out = bool(raw.get("timed_out"))
-        # A reorder may have moved the job since the caller addressed it.
         return WaitResult(
             kind=condition.kind,
             ref=view.ref,

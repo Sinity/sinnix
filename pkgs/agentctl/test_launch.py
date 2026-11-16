@@ -24,7 +24,6 @@ from agentctl.pueue import PueueError, PueueGroupError, Task
 from agentctl.run import (
     CANCELLED_EXIT_CODE,
     REFUSED_EXIT_CODE,
-    SLOT_OCCUPIED_EXIT_CODE,
     TIMEOUT_EXIT_CODE,
     VANISHED_EXIT_CODE,
     cancel_marker_for,
@@ -34,7 +33,7 @@ from agentctl.run import (
 from agentctl.run import (
     main as run_main,
 )
-from conftest import FakePueue, begin_attempt, read_launch
+from conftest import FakePueue, read_launch
 
 
 def test_declared_operation_limits_reach_its_queued_launch(
@@ -379,7 +378,7 @@ def test_phases_come_from_pueue_results_and_the_wrapper_exit_codes(
     project = load_project_adapter(project_root)
     ids = [
         launch.start_operation(config, project, project.operation("check"))["task_id"]
-        for _ in range(9)
+        for _ in range(8)
     ]
     fake_pueue.succeed(ids[0])
     fake_pueue.fail(ids[1], exit_code=3)
@@ -389,7 +388,6 @@ def test_phases_come_from_pueue_results_and_the_wrapper_exit_codes(
     fake_pueue.queue(ids[5])
     fake_pueue.fail(ids[6], exit_code=CANCELLED_EXIT_CODE)
     fake_pueue.fail(ids[7], exit_code=VANISHED_EXIT_CODE)
-    fake_pueue.fail(ids[8], exit_code=SLOT_OCCUPIED_EXIT_CODE)
 
     phases = [job_queries.get_job(task_id)["phase"] for task_id in ids]
 
@@ -402,7 +400,6 @@ def test_phases_come_from_pueue_results_and_the_wrapper_exit_codes(
         "queued",
         "cancelled",
         "vanished",
-        "slot_occupied",
     ]
 
 
@@ -467,31 +464,33 @@ def test_result_of_an_exit_operation_keeps_the_wrapper_execution_receipt(
     assert result["outcome"]["execution_receipt"]["binding"] == "unchanged_endpoints"
 
 
-def test_cancel_marks_then_stops_the_unit_then_kills_the_task(
+def test_cancel_stops_the_unit_before_killing_the_task(
     fake_pueue: FakePueue,
     config: Config,
     project_root: Path,
     recording_systemctl: Callable[[], list[list[str]]],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`systemctl stop` ends the wrapper's wait with a success status, so the
-    marker written before it is the only record that this was a cancel."""
     project = load_project_adapter(project_root)
     started = launch.start_operation(config, project, project.operation("check"))
     task = fake_pueue.task(started["task_id"])
     unit = job_queries.unit_of(task)
     marker = cancel_marker_for(read_launch(config, task)["log_path"])
+    original_kill = pueue.kill
 
-    cancelled = launch.cancel(config, started["task_id"], settle_seconds=0)
+    def kill(task_id: int) -> None:
+        assert marker.exists()
+        assert ["systemctl", "--user", "stop", unit] in recording_systemctl()
+        original_kill(task_id)
 
-    assert marker.exists()
+    monkeypatch.setattr(pueue, "kill", kill)
+    cancelled = launch.cancel(config, started["task_id"], finish_seconds=0)
+
     assert fake_pueue.killed == [started["task_id"]]
-    calls = recording_systemctl()
-    assert ["systemctl", "--user", "stop", unit] in calls
-    assert ["systemctl", "--user", "show", "-p", "LoadState,ActiveState", unit] in calls
-    assert cancelled["state"] == "unresolved"
-    assert cancelled["unresolved"] is True
+    assert cancelled["state"] == "stopped"
     assert cancelled["unit"] == unit
     assert cancelled["phase"] == "cancelled"
+    assert cancelled["cancellation"]["stopped"] is True
 
 
 def test_running_cancel_records_request_before_stopping_and_keeps_retry_identity(
@@ -511,7 +510,7 @@ def test_running_cancel_records_request_before_stopping_and_keeps_retry_identity
         started["task_id"],
         actor="fixture-worker",
         reason="stop requested",
-        settle_seconds=0,
+        finish_seconds=0,
     )
     request = json.loads(
         artifacts.cancellation_path(Path(document["log_path"]), 1).read_text()
@@ -540,7 +539,7 @@ def test_running_cancel_records_request_before_stopping_and_keeps_retry_identity
         started["task_id"],
         actor="fixture-reviewer",
         reason="second request",
-        settle_seconds=0,
+        finish_seconds=0,
     )
     assert (
         job_queries.get_job(started["task_id"], config, attempt=1)["cancellation"]
@@ -554,7 +553,7 @@ def test_running_cancel_records_request_before_stopping_and_keeps_retry_identity
     )
 
 
-def test_cancel_refuses_to_stop_when_request_evidence_cannot_be_written(
+def test_cancel_refuses_to_stop_when_request_cannot_be_written(
     fake_pueue: FakePueue,
     config: Config,
     project_root: Path,
@@ -577,7 +576,7 @@ def test_cancel_refuses_to_stop_when_request_evidence_cannot_be_written(
             started["task_id"],
             actor="fixture-worker",
             reason="stop requested",
-            settle_seconds=0,
+            finish_seconds=0,
         )
     assert not fake_pueue.killed
     assert not any("stop" in call for call in recording_systemctl())
@@ -628,7 +627,7 @@ def test_cancel_waits_for_inflight_service_creation_then_stops_unit(
     project_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Cancellation serializes with systemd admission and reports unknown state."""
+    """An in-progress service start completes before cancellation stops its unit."""
     project = load_project_adapter(project_root)
     started = launch.start_operation(config, project, project.operation("check"))
     task = fake_pueue.task(started["task_id"])
@@ -636,8 +635,8 @@ def test_cancel_waits_for_inflight_service_creation_then_stops_unit(
     marker = cancel_marker_for(written["log_path"])
     artifacts.root_for(Path(written["log_path"])).mkdir(parents=True)
     unit = job_queries.unit_of(task)
-    admission_entered = threading.Event()
-    allow_admission = threading.Event()
+    creation_entered = threading.Event()
+    allow_creation = threading.Event()
     cancel_lock_attempted = threading.Event()
     cancel_finished = threading.Event()
     sequence: list[str] = []
@@ -658,10 +657,10 @@ def test_cancel_waits_for_inflight_service_creation_then_stops_unit(
         argv: list[str], **_kwargs: object
     ) -> subprocess.CompletedProcess[str]:
         if argv[0] == "systemd-run":
-            admission_entered.set()
-            if not allow_admission.wait(5):
-                raise AssertionError("test did not release the admission barrier")
-            sequence.append("admitted")
+            creation_entered.set()
+            if not allow_creation.wait(5):
+                raise AssertionError("test did not release the creation barrier")
+            sequence.append("created")
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
         if argv[:3] == ["systemctl", "--user", "stop"]:
             sequence.append("stop")
@@ -686,56 +685,68 @@ def test_cancel_waits_for_inflight_service_creation_then_stops_unit(
     def cancel() -> None:
         try:
             cancellation.append(
-                launch.cancel(config, started["task_id"], settle_seconds=0)
+                launch.cancel(config, started["task_id"], finish_seconds=0)
             )
         except BaseException as error:
             errors.append(error)
         finally:
             cancel_finished.set()
 
-    runner = threading.Thread(target=start_service, name="service-admission")
+    runner = threading.Thread(target=start_service, name="service-creation")
     canceller = threading.Thread(target=cancel, name="cancel-inflight-service")
     runner.start()
-    assert admission_entered.wait(5), errors
+    assert creation_entered.wait(5), errors
     canceller.start()
     assert cancel_lock_attempted.wait(5)
     assert not marker.exists()
     assert sequence == []
     assert not cancel_finished.is_set()
 
-    allow_admission.set()
+    allow_creation.set()
     runner.join(5)
     canceller.join(5)
 
     assert not runner.is_alive() and not canceller.is_alive()
     assert errors == []
-    assert sequence == ["admitted", "stop"]
+    assert sequence == ["created", "stop"]
     assert stopped_units == [unit]
     assert json.loads(marker.read_text()) == {"attempt": 1}
     assert fake_pueue.killed == [started["task_id"]]
-    assert cancellation[0]["state"] == "incomplete"
-    assert cancellation[0]["unresolved"] is True
+    assert cancellation[0]["state"] == "stopped"
+    assert cancellation[0]["cancellation"]["stopped"] is True
 
 
-def test_cancel_fails_when_the_unit_is_still_active_afterwards(
+@pytest.mark.parametrize(
+    "failure",
+    [1, PermissionError("fixture"), subprocess.TimeoutExpired("systemctl", 1)],
+)
+def test_failed_unit_stop_preserves_the_queue_task(
     fake_pueue: FakePueue,
     config: Config,
     project_root: Path,
-    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    failure,
 ) -> None:
-    directory = tmp_path / "live-systemctl"
-    directory.mkdir()
-    (directory / "systemctl").write_text("#!/bin/sh\nexit 0\n")
-    (directory / "systemctl").chmod(0o755)
-    monkeypatch.setenv("PATH", f"{directory}{os.pathsep}{os.environ['PATH']}")
     project = load_project_adapter(project_root)
     started = launch.start_operation(config, project, project.operation("check"))
+    original = subprocess.run
 
-    cancelled = launch.cancel(config, started["task_id"], settle_seconds=0)
+    def control(command, **kwargs):
+        if command[:3] == ["systemctl", "--user", "stop"]:
+            if isinstance(failure, BaseException):
+                raise failure
+            return subprocess.CompletedProcess(command, failure)
+        if command[:3] == ["systemctl", "--user", "show"]:
+            return subprocess.CompletedProcess(
+                command, 0, stdout="LoadState=loaded\nActiveState=active\n"
+            )
+        return original(command, **kwargs)
 
-    assert cancelled["state"] == "incomplete"
-    assert cancelled["unresolved"] is True
+    monkeypatch.setattr(launch.subprocess, "run", control)
+    with pytest.raises(JobError, match="could not stop"):
+        launch.cancel(config, started["task_id"], finish_seconds=0)
+    assert fake_pueue.task(started["task_id"]).status == "Running"
+    assert fake_pueue.killed == fake_pueue.removed == []
 
 
 @pytest.mark.parametrize(
@@ -761,73 +772,54 @@ def test_cancel_unit_state_requires_observed_inactivity(
     assert launch._unit_state("fixture.service") == expected
 
 
-def test_cancel_lets_the_wrapper_record_the_outcome_before_any_kill(
+def test_cancel_waits_for_the_wrapper_to_save_its_output(
     fake_pueue: FakePueue,
     config: Config,
     project_root: Path,
     recording_systemctl: Callable[[], list[list[str]]],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Stopping the unit ends the wrapper's wait; it records `cancelled`,
-    consumes the marker and exits. Killing it first would lose the record."""
     project = load_project_adapter(project_root)
     started = launch.start_operation(config, project, project.operation("check"))
     task_id = started["task_id"]
     task = fake_pueue.task(task_id)
-    log = Path(read_launch(config, task)["log_path"])
-    marker = cancel_marker_for(log)
-    polls: list[int] = []
-    real_task = fake_pueue.task
+    document = read_launch(config, task)
+    current = artifacts.begin(document, str(job_queries.launch_input_path(task)))
+    marker = cancel_marker_for(document["log_path"])
 
-    def wrapper_exits_on_third_poll(asked: int) -> Task | None:
-        # Polls: the cancel's own read, one after the stop, one after a sleep.
-        polls.append(asked)
-        if len(polls) == 3:
-            assert marker.exists(), "the marker must precede the stop"
-            outcome_path_for(log).parent.mkdir(parents=True, exist_ok=True)
-            outcome_path_for(log).write_text(
-                json.dumps({"outcome": "cancelled", "exit_code": 130})
-            )
-            marker.unlink()
-            fake_pueue.fail(task_id, exit_code=CANCELLED_EXIT_CODE)
-        return real_task(asked)
+    def finish(fake: FakePueue) -> None:
+        assert marker.exists()
+        assert [
+            "systemctl",
+            "--user",
+            "stop",
+            job_queries.unit_of(task),
+        ] in recording_systemctl()
+        outcome_path_for(current["log_path"]).write_text(
+            json.dumps({"outcome": "cancelled", "exit_code": 130})
+        )
+        marker.unlink()
+        fake.fail(task_id, exit_code=CANCELLED_EXIT_CODE)
 
-    monkeypatch.setattr(launch.pueue, "task", wrapper_exits_on_third_poll)
-    slept: list[float] = []
-
-    cancelled = launch.cancel(
-        config, task_id, settle_seconds=15, sleep=lambda seconds: slept.append(seconds)
-    )
-
+    fake_pueue.finish_when_waited(task_id, finish)
+    cancelled = launch.cancel(config, task_id, finish_seconds=15)
     assert fake_pueue.killed == []
-    assert slept == [launch.CANCEL_POLL_SECONDS]
-    assert not marker.exists()
-    assert cancelled["phase"] == "cancelled" and cancelled["state"] == "unresolved"
+    assert fake_pueue.waited == [task_id]
+    assert cancelled["phase"] == "cancelled" and cancelled["state"] == "stopped"
     assert cancelled["outcome"] == {"outcome": "cancelled", "exit_code": 130}
-    stop = ["systemctl", "--user", "stop", job_queries.unit_of(task)]
-    assert stop in recording_systemctl()
 
 
-def test_cancel_kills_a_wrapper_that_does_not_settle_in_time(
+def test_cancel_kills_a_wrapper_after_wait_reports_it_running(
     fake_pueue: FakePueue,
     config: Config,
     project_root: Path,
     recording_systemctl: Callable[[], list[list[str]]],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project = load_project_adapter(project_root)
     started = launch.start_operation(config, project, project.operation("check"))
-    clock = iter([0.0, 0.0, 20.0, 20.0])
-    monkeypatch.setattr(launch.time, "monotonic", lambda: next(clock))
-    slept: list[float] = []
-
-    cancelled = launch.cancel(
-        config, started["task_id"], settle_seconds=1, sleep=slept.append
-    )
-
-    assert slept == [launch.CANCEL_POLL_SECONDS]
+    cancelled = launch.cancel(config, started["task_id"], finish_seconds=1)
+    assert fake_pueue.waited == [started["task_id"]]
     assert fake_pueue.killed == [started["task_id"]]
-    assert cancelled["phase"] == "cancelled" and "outcome" not in cancelled
+    assert cancelled["phase"] == "cancelled"
 
 
 def test_the_launch_input_records_the_task_id_pueue_assigned(
@@ -862,104 +854,42 @@ def test_clean_finds_a_task_pueue_forgot_by_its_launch_input(
     assert launch.clean(config, started["task_id"], started["job_id"])["retained"]
 
 
-def test_clean_leaves_the_launch_input_of_a_job_the_queue_moved(
-    fake_pueue: FakePueue, config: Config, project_root: Path
+@pytest.mark.parametrize(
+    "operation", ["get", "logs", "result", "wait", "clean", "cancel", "retry"]
+)
+def test_job_id_filters_the_named_task_without_searching_other_tasks(
+    fake_pueue: FakePueue, config: Config, project_root: Path, operation: str
 ) -> None:
-    """A vacant id is no evidence that the job written there is gone.
-
-    Anti-vacuity: selecting the input by the id it recorded deletes a queued
-    job's own launch input, and that job then fails with an unusable launch
-    file when the queue reaches it.
-    """
-    project = load_project_adapter(project_root)
-    survivor = launch.start_operation(config, project, project.operation("verify"))
-    doomed = launch.start_operation(config, project, project.operation("verify"))
-    fake_pueue.queue(survivor["task_id"])
-    fake_pueue.queue(doomed["task_id"])
-    written = read_launch(config, fake_pueue.task(survivor["task_id"]))
-    assert written["queue_task_id"] == survivor["task_id"]
-    survivor_input = config.inputs_dir / f"{survivor['job_id']}.json"
-
-    # The operator prioritises the queue, then drops the other job, leaving
-    # the id the survivor recorded vacant while the survivor is still queued.
-    fake_pueue.switch(survivor["task_id"], doomed["task_id"])
-    vacated = survivor["task_id"]
-    fake_pueue.remove([vacated])
-
-    with pytest.raises(JobError, match="pueue has no task"):
-        launch.clean(config, vacated)
-
-    assert survivor_input.exists(), "the queued job lost its own launch input"
-    assert job_queries.get_job(doomed["task_id"])["job_id"] == survivor["job_id"]
-
-
-def test_clean_by_reference_removes_only_the_named_queue_entry(
-    fake_pueue: FakePueue, config: Config, project_root: Path
-) -> None:
-    """A job_id names one job's artifacts wherever the queue put the job."""
     project = load_project_adapter(project_root)
     first = launch.start_operation(config, project, project.operation("verify"))
     second = launch.start_operation(config, project, project.operation("verify"))
-    fake_pueue.queue(first["task_id"])
-    fake_pueue.queue(second["task_id"])
-    fake_pueue.switch(first["task_id"], second["task_id"])
-    fake_pueue.succeed(second["task_id"])
-
-    cleaned = launch.clean(config, first["task_id"], first["job_id"])
-
-    assert cleaned["job_id"] == first["job_id"]
-    assert (config.inputs_dir / f"{first['job_id']}.json").exists()
-    assert (config.inputs_dir / f"{second['job_id']}.json").exists()
-    assert fake_pueue.removed == [second["task_id"]]
+    calls = {
+        "get": lambda: job_queries.get_job(first["task_id"], config, second["job_id"]),
+        "logs": lambda: job_queries.logs(config, first["task_id"], second["job_id"]),
+        "result": lambda: job_queries.result(
+            config, first["task_id"], second["job_id"]
+        ),
+        "wait": lambda: job_queries.wait(
+            first["task_id"], timeout_seconds=0, job_id=second["job_id"], config=config
+        ),
+        "clean": lambda: launch.clean(config, first["task_id"], second["job_id"]),
+        "cancel": lambda: launch.cancel(
+            config, first["task_id"], job_id=second["job_id"]
+        ),
+        "retry": lambda: launch.retry(config, first["task_id"], second["job_id"]),
+    }
+    with pytest.raises(JobError, match="does not match"):
+        calls[operation]()
+    assert fake_pueue.killed == fake_pueue.removed == fake_pueue.restarted == []
+    assert fake_pueue.waited == []
 
 
 def test_clean_refuses_a_reference_that_is_not_one(
     fake_pueue: FakePueue, config: Config, project_root: Path
 ) -> None:
     """The job_id names a file under inputs/, so it is never a path."""
-    with pytest.raises(JobError, match="is not a job id"):
+    with pytest.raises(JobError, match="archived reads require a job id"):
         launch.clean(config, 1, "../../etc/passwd")
-
-
-def test_a_read_by_reference_answers_about_that_job_after_a_reorder(
-    fake_pueue: FakePueue, config: Config, project_root: Path
-) -> None:
-    """Status, result, log and cancellation follow the job, not the position.
-
-    Anti-vacuity: the same calls without the job_id answer about whatever
-    the switch moved to that id, which the sibling test pins.
-    """
-    project = load_project_adapter(project_root)
-    first = launch.start_operation(config, project, project.operation("verify"))
-    second = launch.start_operation(config, project, project.operation("verify"))
-    fake_pueue.queue(first["task_id"])
-    fake_pueue.queue(second["task_id"])
-    for job, ran in ((first, "first"), (second, "second")):
-        begin_attempt(config, job["job_id"])
-        (config.jobs_dir / f"{job['job_id']}.outcome").write_text(
-            json.dumps({"outcome": "success", "exit_code": 0})
-        )
-        (config.jobs_dir / f"{job['job_id']}.log").write_text(f"{ran} log\n")
-        (config.jobs_dir / f"{job['job_id']}.result").write_text(
-            json.dumps({"ran": ran})
-        )
-
-    fake_pueue.switch(first["task_id"], second["task_id"])
-
-    asked = first["task_id"]
-    job_id = first["job_id"]
-    moved = job_queries.get_job(asked, config, job_id)
-    assert (moved["job_id"], moved["task_id"]) == (job_id, second["task_id"])
-    assert job_queries.result(config, asked, job_id)["value"] == {"ran": "first"}
-    assert job_queries.logs(config, asked, job_id).strip() == "first log"
-
-    cancelled = launch.cancel(config, asked, job_id=job_id)
-
-    assert cancelled["job_id"] == job_id
-    assert fake_pueue.removed == [second["task_id"]], (
-        "the cancel dropped the task at the id it was handed, not its own job"
-    )
-    assert (config.jobs_dir / f"{second['job_id']}.log").exists()
 
 
 def test_a_retained_reference_remains_readable_after_the_queue_forgets_it(
@@ -1000,8 +930,7 @@ def test_clean_removes_a_terminal_queue_task_and_retains_its_evidence(
     cleaned = launch.clean(config, started["task_id"])
 
     assert cleaned["cleaned"] is True
-    assert not cancel_marker_for(log).exists()
-    assert all(path.exists() for path in artifacts if path != cancel_marker_for(log))
+    assert all(path.exists() for path in artifacts)
     assert fake_pueue.removed == [started["task_id"]]
 
 
@@ -1089,7 +1018,7 @@ def test_a_declared_scratch_tier_reaches_the_launch_input_and_job_get(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The wrapper is told which directory to own, and `job get` shows what it cost."""
+    """The queued command receives its scratch location; cleanup errors remain readable."""
     monkeypatch.setenv("AGENTCTL_NVME_SCRATCH_ROOT", str(tmp_path / "nvme"))
     descriptor = project_root / ".agentctl" / "project.toml"
     descriptor.write_text(
@@ -1117,11 +1046,8 @@ def test_a_declared_scratch_tier_reaches_the_launch_input_and_job_get(
                 "outcome": "success",
                 "exit_code": 0,
                 "scratch": {
-                    "kind": "nvme",
                     "path": written["scratch"]["path"],
-                    "bytes": 2048,
-                    "files": 3,
-                    "truncated": False,
+                    "cleanup_error": "PermissionError (errno 13)",
                 },
             }
         )
@@ -1129,7 +1055,10 @@ def test_a_declared_scratch_tier_reaches_the_launch_input_and_job_get(
     fake_pueue.succeed(started["task_id"])
 
     document = job_queries.get_job(started["task_id"], config)
-    assert document["scratch"]["bytes"] == 2048 and document["scratch"]["files"] == 3
+    assert document["scratch"] == {
+        "path": written["scratch"]["path"],
+        "cleanup_error": "PermissionError (errno 13)",
+    }
     assert "scratch" not in job_queries.get_job(plain["task_id"], config)
 
 
@@ -1155,11 +1084,8 @@ def test_cancelling_a_queued_task_drops_it_out_of_the_queue(
     assert cancelled["state"] == "removed"
     assert cancelled["phase"] == "cancelled" and cancelled["terminal"] is True
     assert cancelled["started"] is False
-    assert cancelled["disposition"] == {
-        "outcome": "cancelled",
-        "started": False,
-    }
-    assert cancelled["removed"] == []
+    assert cancelled["cancellation"]["started"] is False
+    assert cancelled["cancellation"]["stopped"] is True
     assert input_path.exists()
     first = job_queries.get_job(started["task_id"], config, started["job_id"])
     second = job_queries.get_job(started["task_id"], config, started["job_id"])
@@ -1176,10 +1102,8 @@ def test_cancelling_a_queued_task_drops_it_out_of_the_queue(
     for document in (first, second, restarted):
         assert document["phase"] == "cancelled"
         assert document["started"] is False
-        assert document["disposition"] == {
-            "outcome": "cancelled",
-            "started": False,
-        }
+        assert document["cancellation"]["started"] is False
+        assert document["cancellation"]["stopped"] is True
         assert document["queue_present"] is False
     assert input_path in list(config.inputs_dir.iterdir())
 
@@ -1187,7 +1111,7 @@ def test_cancelling_a_queued_task_drops_it_out_of_the_queue(
 def test_cancelling_a_queued_retry_keeps_the_previous_attempt_and_its_output(
     fake_pueue: FakePueue, config: Config, project_root: Path
 ) -> None:
-    """Latest disposition is cancelled/not-started; attempt 1 stays readable."""
+    """A cancelled queued retry leaves the previous attempt readable."""
     project = load_project_adapter(project_root)
     started = launch.start_operation(config, project, project.operation("verify"))
     written = read_launch(config, fake_pueue.task(started["task_id"]))
@@ -1322,9 +1246,10 @@ def test_cancel_racing_runner_start_does_not_fabricate_not_started(
 
     cancelled = launch.cancel(config, started["task_id"], job_id=started["job_id"])
 
-    assert cancelled.get("started") is not False
-    assert cancelled["phase"] == "unresolved"
-    assert cancelled["disposition"]["unresolved"] is True
+    assert cancelled["started"] is True
+    assert cancelled["phase"] == "cancelled"
+    assert cancelled["cancellation"]["stopped"] is True
+    assert fake_pueue.removed == [started["task_id"]]
 
 
 def test_cancel_start_race_targets_the_attempt_allocated_after_it(
@@ -1358,7 +1283,7 @@ def test_cancel_start_race_targets_the_attempt_allocated_after_it(
 
     monkeypatch.setattr(launch.pueue, "task", task_after_runner_start)
     cancelled = launch.cancel(
-        config, task_id, job_id=started["job_id"], settle_seconds=0
+        config, task_id, job_id=started["job_id"], finish_seconds=0
     )
 
     document = read_launch(config, original_task(task_id))
@@ -1559,142 +1484,6 @@ def test_wait_returns_the_terminal_view_and_reports_a_timeout_as_such(
     assert timed_out["phase"] == "running"
 
 
-def test_a_wait_follows_its_job_when_the_queue_reorders_beneath_it(
-    fake_pueue: FakePueue, config: Config, project_root: Path
-) -> None:
-    """`pueue switch` exchanges two task ids, and a wait must follow its job.
-
-    Anti-vacuity: a wait bound to the id blocks on whatever the switch moved
-    there, and reports that stranger's outcome as its own.
-    """
-    project = load_project_adapter(project_root)
-    other = launch.start_operation(config, project, project.operation("check"))
-    own = launch.start_operation(config, project, project.operation("check"))
-    fake_pueue.queue(other["task_id"])
-    fake_pueue.queue(own["task_id"])
-
-    def reorder(fake: FakePueue) -> None:
-        """The operator reorders the queue while the caller is blocked."""
-        fake.switch(other["task_id"], own["task_id"])
-        # The waited job is at the other's id now, and finishes there.
-        fake.succeed(other["task_id"])
-
-    fake_pueue.finish_when_waited(own["task_id"], reorder)
-
-    waited = job_queries.wait(own["task_id"], timeout_seconds=30, job_id=own["job_id"])
-
-    assert waited["job_id"] == own["job_id"]
-    assert (waited["task_id"], waited["phase"]) == (other["task_id"], "succeeded")
-    # Blocked once on the id it started with, never on the task moved there.
-    assert fake_pueue.waited == [own["task_id"]]
-    assert job_queries.get_job(own["task_id"])["job_id"] == other["job_id"]
-
-
-def test_a_wait_finds_the_job_the_queue_moved_before_the_wait_began(
-    fake_pueue: FakePueue, config: Config, project_root: Path
-) -> None:
-    """The job_id the caller started with names its job; the id may not.
-
-    Anti-vacuity: reading the job out of the id at entry waits for the task
-    the switch left there, which is never this caller's.
-    """
-    project = load_project_adapter(project_root)
-    other = launch.start_operation(config, project, project.operation("check"))
-    own = launch.start_operation(config, project, project.operation("check"))
-    fake_pueue.queue(other["task_id"])
-    fake_pueue.queue(own["task_id"])
-    fake_pueue.switch(other["task_id"], own["task_id"])
-    fake_pueue.succeed(other["task_id"])
-
-    waited = job_queries.wait(own["task_id"], timeout_seconds=30, job_id=own["job_id"])
-
-    assert (waited["job_id"], waited["phase"]) == (own["job_id"], "succeeded")
-    assert fake_pueue.waited == []
-
-
-@pytest.mark.parametrize("move_again", [False, True])
-def test_wait_keeps_relocated_hint_without_repeating_reference_scans(
-    fake_pueue: FakePueue,
-    config: Config,
-    project_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    move_again: bool,
-) -> None:
-    project = load_project_adapter(project_root)
-    first = launch.start_operation(config, project, project.operation("check"))
-    second = launch.start_operation(config, project, project.operation("check"))
-    own = launch.start_operation(config, project, project.operation("check"))
-    for job in (first, second, own):
-        fake_pueue.queue(job["task_id"])
-    fake_pueue.switch(first["task_id"], own["task_id"])
-    scans = []
-
-    def lookup(fragment):
-        scans.append(fragment)
-        return fake_pueue.tasks_by_command(fragment)
-
-    monkeypatch.setattr(pueue, "tasks_by_command", lookup)
-    current = first["task_id"]
-    rounds = 0
-
-    def advance(fake):
-        nonlocal current, rounds
-        rounds += 1
-        if rounds == 1 and move_again:
-            fake.switch(current, second["task_id"])
-            current = second["task_id"]
-        if rounds == 3:
-            fake.succeed(current)
-        else:
-            fake.finish_when_waited(current, advance)
-
-    fake_pueue.finish_when_waited(current, advance)
-    result = job_queries.wait(own["task_id"], job_id=own["job_id"], timeout_seconds=60)
-    assert result["job_id"] == own["job_id"]
-    assert (result["task_id"], result["phase"]) == (current, "succeeded")
-    assert len(scans) == (2 if move_again else 1)
-    assert set(scans) == {own["job_id"] + ".json"}
-    assert len(fake_pueue.waited) == 3
-    for stranger in (first, second):
-        task = job_queries.find_task(
-            fake_pueue.tasks(), stranger["task_id"], stranger["job_id"]
-        )
-        assert task is not None and task.status == "Queued"
-
-
-def test_every_read_by_task_id_answers_about_the_job_that_id_now_holds(
-    fake_pueue: FakePueue, config: Config, project_root: Path
-) -> None:
-    """Status, result, log and cancellation move with the queue, together."""
-    project = load_project_adapter(project_root)
-    first = launch.start_operation(config, project, project.operation("verify"))
-    second = launch.start_operation(config, project, project.operation("verify"))
-    fake_pueue.queue(first["task_id"])
-    fake_pueue.queue(second["task_id"])
-    for job, ran in ((first, "first"), (second, "second")):
-        begin_attempt(config, job["job_id"])
-        (config.jobs_dir / f"{job['job_id']}.outcome").write_text(
-            json.dumps({"outcome": "success", "exit_code": 0})
-        )
-        (config.jobs_dir / f"{job['job_id']}.log").write_text(f"{ran} log\n")
-        (config.jobs_dir / f"{job['job_id']}.result").write_text(
-            json.dumps({"ran": ran})
-        )
-
-    fake_pueue.switch(first["task_id"], second["task_id"])
-
-    moved = first["task_id"]
-    assert job_queries.get_job(moved, config)["job_id"] == second["job_id"]
-    assert job_queries.result(config, moved)["value"] == {"ran": "second"}
-    assert job_queries.logs(config, moved).strip() == "second log"
-    cancelled = launch.cancel(config, moved)
-    assert cancelled["job_id"] == second["job_id"]
-    assert cancelled["removed"] == []
-    assert (config.jobs_dir / f"{second['job_id']}.log").read_text() == "second log\n"
-    assert (config.inputs_dir / f"{second['job_id']}.json").exists()
-    assert (config.jobs_dir / f"{first['job_id']}.log").exists()
-
-
 def test_list_filters_by_project_prefix(
     fake_pueue: FakePueue, config: Config, project_root: Path
 ) -> None:
@@ -1879,214 +1668,20 @@ def test_queued_environment_uses_current_host_roots_without_losing_explicit_over
     assert "NOT_INHERITED" not in env
 
 
-def test_wait_retained_cancelled_launch_does_not_follow_reused_id(
+def test_wait_requires_a_terminal_result_for_a_removed_task(
     fake_pueue, config, project_root
 ):
     project = load_project_adapter(project_root)
     own = launch.start_operation(config, project, project.operation("check"))
-    fake_pueue.queue(own["task_id"])
-    launch.cancel(config, own["task_id"], job_id=own["job_id"])
-    fake_pueue.next_id = own["task_id"]
-    other = launch.start_operation(config, project, project.operation("check"))
-    fake_pueue.succeed(other["task_id"])
-    observed = job_queries.wait(
-        own["task_id"], timeout_seconds=5, job_id=own["job_id"], config=config
-    )
-    assert observed["phase"] == "cancelled" and observed["terminal"] is True
-    assert observed["job_id"] == own["job_id"] and observed["queue_present"] is False
-    assert observed["exit_code"] == CANCELLED_EXIT_CODE
-    assert fake_pueue.waited == []
-
-
-@pytest.mark.parametrize("owner_error", [False, True])
-def test_wait_retained_cancellation_during_observation(
-    fake_pueue, config, project_root, owner_error
-):
-    project = load_project_adapter(project_root)
-    own = launch.start_operation(config, project, project.operation("check"))
-    fake_pueue.queue(own["task_id"])
-
-    def cancel_then_reuse(fake):
-        launch.cancel(config, own["task_id"], job_id=own["job_id"])
-        fake.next_id = own["task_id"]
-        launch.start_operation(config, project, project.operation("check"))
-        if owner_error:
-            raise PueueError("fixture removed during wait")
-
-    fake_pueue.finish_when_waited(own["task_id"], cancel_then_reuse)
-    # No explicit job_id: a wait must retain the identity it first saw.
-    observed = job_queries.wait(own["task_id"], timeout_seconds=5, config=config)
-    assert observed["phase"] == "cancelled" and observed["terminal"] is True
-    assert observed["job_id"] == own["job_id"] and not observed.get("wait_timed_out")
-    assert fake_pueue.waited == [own["task_id"]]
-
-
-@pytest.mark.parametrize("request_only", [False, True])
-def test_wait_retained_unverified_launch_is_not_terminal(
-    fake_pueue, config, project_root, request_only
-):
-    project = load_project_adapter(project_root)
-    own = launch.start_operation(config, project, project.operation("check"))
-    task = fake_pueue.task(own["task_id"])
-    if request_only:
-        launch._write_disposition(
-            config, task, {"outcome": "cancelled", "unresolved": True, "started": True}
-        )
     fake_pueue.remove([own["task_id"]])
     assert (
         job_queries.get_job(own["task_id"], config, own["job_id"])["terminal"] is False
     )
-    with pytest.raises(JobError, match="no verified terminal"):
+    with pytest.raises(JobError, match="no terminal result"):
         job_queries.wait(
             own["task_id"], timeout_seconds=5, job_id=own["job_id"], config=config
         )
     assert fake_pueue.waited == []
-
-
-@pytest.mark.parametrize(
-    "stop_error",
-    [None, PermissionError("fixture"), subprocess.TimeoutExpired("systemctl", 1)],
-)
-def test_cancel_retains_privileged_members_until_cgroup_drains(
-    fake_pueue, config, project_root, tmp_path, monkeypatch, stop_error
-):
-    from agentctl import cgroups, worktree_cleanup
-
-    project = load_project_adapter(project_root)
-    started = launch.start_operation(config, project, project.operation("check"))
-    task = fake_pueue.task(started["task_id"])
-    root = tmp_path / "cgroups"
-    group = root / "fixture.service"
-    group.mkdir(parents=True)
-    members = group / "cgroup.procs"
-    members.write_text("12345\n")
-    monkeypatch.setattr(cgroups, "CGROUP_ROOT", root)
-    monkeypatch.setattr(cgroups, "unit_cgroup", lambda _unit: "/fixture.service")
-    monkeypatch.setattr(launch, "_unit_state", lambda _unit: "stopped")
-
-    original_run = launch.subprocess.run
-
-    def stop(_unit):
-        if stop_error:
-            # Exercise the actual stop helper's permission/timeout handling.
-            monkeypatch.setattr(
-                launch.subprocess,
-                "run",
-                lambda *a, **k: (_ for _ in ()).throw(stop_error),
-            )
-            original_stop(_unit)
-
-    original_stop = launch._stop_unit
-    monkeypatch.setattr(launch, "_stop_unit", stop)
-    cancelled = launch.cancel(
-        config, task.task_id, job_id=started["job_id"], settle_seconds=0
-    )
-    assert cancelled["state"] == "incomplete"
-    assert cancelled["terminal"] is False
-    assert cancelled["cgroup_observation"]["pids"] == [12345]
-    assert job_queries.get_job(task.task_id, config)["terminal"] is False
-    waited = job_queries.wait(task.task_id, config=config, timeout_seconds=0)
-    assert waited["terminal"] is False and waited["wait_timed_out"] is True
-    assert launch.cancel(config, task.task_id)["state"] == "incomplete"
-    for action in (launch.retry, launch.clean):
-        with pytest.raises(JobError, match="cancellation incomplete"):
-            action(config, task.task_id, started["job_id"])
-    assert fake_pueue.restarted == []
-    # The checkout guard must work even after the pueue entry disappears.
-    kept = worktree_cleanup._drop_branch(
-        config,
-        project,
-        "fixture-branch",
-        recorded_path=project_root,
-        registry=[],
-    )
-    assert kept == "worktree kept; job cancellation incomplete"
-    members.write_text("")
-    assert (
-        job_queries.get_job(task.task_id, config).get("cancellation_incomplete")
-        is not True
-    )
-    # Identity is retained; retry is permitted only after actual drain.
-    monkeypatch.setattr(launch.subprocess, "run", original_run)
-    retried = launch.retry(config, task.task_id, started["job_id"])
-    assert retried["job_id"] == started["job_id"]
-    members.write_text("67890\n")
-    assert job_queries.get_job(task.task_id, config)["phase"] != "cancelled"
-    assert (
-        job_queries.get_job(task.task_id, config).get("cancellation_incomplete")
-        is not True
-    )
-
-
-@pytest.mark.parametrize(
-    "contents, expected",
-    [("", "empty"), ("42\n", "populated"), ("invalid\n", "unresolved")],
-)
-def test_cgroup_observation_includes_children_and_missing_groups(
-    tmp_path, monkeypatch, contents, expected
-):
-    from agentctl import cgroups
-
-    group = tmp_path / "fixture.service"
-    child = group / "child"
-    child.mkdir(parents=True)
-    (group / "cgroup.procs").write_text("")
-    (child / "cgroup.procs").write_text(contents)
-    monkeypatch.setattr(cgroups, "CGROUP_ROOT", tmp_path)
-    monkeypatch.setattr(cgroups, "unit_cgroup", lambda _unit: "/fixture.service")
-    assert cgroups.observe("fixture.service")["status"] == expected
-    assert cgroups.observe("fixture.service", "/missing.service")["status"] == "empty"
-
-
-def test_unreadable_cgroup_is_not_empty(tmp_path, monkeypatch):
-    from agentctl import cgroups
-
-    group = tmp_path / "fixture.service"
-    group.mkdir()
-    (group / "cgroup.procs").write_text("42\n")
-    read_text = Path.read_text
-
-    def unreadable(path, *args, **kwargs):
-        if path == group / "cgroup.procs":
-            raise PermissionError("synthetic cgroup permission failure")
-        return read_text(path, *args, **kwargs)
-
-    monkeypatch.setattr(cgroups, "CGROUP_ROOT", tmp_path)
-    monkeypatch.setattr(Path, "read_text", unreadable)
-    observed = cgroups.observe("fixture.service", "/fixture.service")
-    assert observed["status"] == "unresolved"
-    assert (
-        cgroups.cancellation_obstacle({"cancellation_incomplete": True, **observed})
-        is not None
-    )
-
-
-def test_native_cleanup_retains_incomplete_job_after_queue_removal(
-    fake_pueue, config, project_root, tmp_path, monkeypatch
-):
-    from agentctl import cgroups, native_worktrees
-
-    project = load_project_adapter(project_root)
-    workspace = tmp_path / "checkout"
-    workspace.mkdir()
-    started = launch.start_operation(
-        config,
-        project,
-        project.operation("check"),
-        workspace=workspace,
-    )
-    group = tmp_path / "fixture.service"
-    group.mkdir()
-    members = group / "cgroup.procs"
-    members.write_text("42\n")
-    monkeypatch.setattr(cgroups, "CGROUP_ROOT", tmp_path)
-    monkeypatch.setattr(cgroups, "unit_cgroup", lambda unit: "/fixture.service")
-    monkeypatch.setattr(launch, "_unit_state", lambda unit: "stopped")
-    monkeypatch.setattr(launch, "_stop_unit", lambda unit: None)
-    launch.cancel(config, started["task_id"], settle_seconds=0)
-    assert native_worktrees._owners(config, project, {})[workspace]["terminal"] is False
-    members.write_text("")
-    assert native_worktrees._owners(config, project, {})[workspace]["terminal"] is True
 
 
 @pytest.mark.parametrize("key", [None, "fixture-remote-launch"])
@@ -2127,77 +1722,6 @@ def test_operation_binding_persists_original_run_on_replay(
             read_launch(config, fake_pueue.task(started["task_id"]))["binding"]
             == binding
         )
-
-
-@pytest.mark.parametrize("terminal", [False, True])
-def test_retained_unit_custody_survives_launcher_death_without_cancel_request(
-    fake_pueue, config, project_root, tmp_path, monkeypatch, terminal
-):
-    from agentctl import cgroups
-
-    project = load_project_adapter(project_root)
-    started = launch.start_operation(config, project, project.operation("check"))
-    task_id, job_id = started["task_id"], started["job_id"]
-    task = fake_pueue.task(task_id)
-    group = tmp_path / "fixture.service"
-    group.mkdir()
-    members = group / "cgroup.procs"
-    members.write_text("12345\n")
-    monkeypatch.setattr(cgroups, "CGROUP_ROOT", tmp_path)
-    launch._write_disposition(
-        config,
-        task,
-        {"unit": "fixture.service", "cgroup": "/fixture.service", "attempt": 1},
-    )
-    if terminal:
-        fake_pueue.kill_directly(task_id)
-    view = job_queries.get_job(task_id, config, job_id)
-    if not terminal:
-        assert view["phase"] == "running"
-        assert not view.get("cancellation_incomplete")
-        return
-    assert view["terminal"] is False and view["phase"] == "unresolved"
-    assert view["cgroup_observation"]["pids"] == [12345]
-    waited = job_queries.wait(task_id, config=config, job_id=job_id, timeout_seconds=0)
-    assert waited["terminal"] is False and waited["wait_timed_out"] is True
-    for action in (launch.retry, launch.clean):
-        with pytest.raises(JobError, match="cancellation incomplete"):
-            action(config, task_id, job_id)
-    members.write_text("")
-    assert job_queries.get_job(task_id, config, job_id)["terminal"] is True
-    retried = launch.retry(config, task_id, job_id)
-    assert retried["job_id"] == job_id
-
-
-@pytest.mark.parametrize("parent", [None, ""])
-def test_planned_cgroup_covers_inactive_slices(tmp_path, monkeypatch, parent):
-    from agentctl import cgroups
-
-    monkeypatch.setattr(
-        cgroups,
-        "unit_cgroup",
-        lambda name: "/fixture-user" if name == "-.slice" else parent,
-    )
-    assert cgroups.planned_unit_cgroup(
-        "fixture.service", "agent-ctl-pytest-quick.slice"
-    ) == (
-        "/fixture-user/agent.slice/agent-ctl.slice/agent-ctl-pytest.slice/"
-        "agent-ctl-pytest-quick.slice/fixture.service"
-    )
-    monkeypatch.setattr(cgroups, "unit_cgroup", lambda _: None)
-    assert (
-        cgroups.planned_unit_cgroup("fixture.service", "agent-ctl-normal.slice") is None
-    )
-    assert (
-        cgroups.cancellation_obstacle(
-            {
-                "unit": "fixture.service",
-                "cgroup": None,
-                "attempt": 1,
-            }
-        )["status"]
-        == "unresolved"
-    )
 
 
 def test_cached_operation_answers_from_a_cleaned_queue_entry(
@@ -2372,3 +1896,34 @@ def test_operation_environment_reaches_shell_entry_without_changing_other_operat
                 written["argv"], env=written["environment"], check=False
             )
             assert result.returncode == 0
+
+
+def test_cancel_kills_a_task_that_starts_while_queue_removal_is_attempted(
+    fake_pueue, config, project_root, recording_systemctl, monkeypatch
+):
+    project = load_project_adapter(project_root)
+    job = launch.start_operation(config, project, project.operation("check"))
+    fake_pueue.queue(job["task_id"])
+    task = fake_pueue.task(job["task_id"])
+    marker = cancel_marker_for(read_launch(config, task)["log_path"])
+
+    def start_before_remove(task_ids):
+        assert task_ids == [job["task_id"]]
+        assert marker.exists()
+        assert [
+            "systemctl",
+            "--user",
+            "stop",
+            job_queries.unit_of(task),
+        ] in recording_systemctl()
+        fake_pueue._set(
+            job["task_id"], status="Running", started_at="2026-09-03T08:00:02+00:00"
+        )
+        raise PueueError("fixture task started before remove")
+
+    monkeypatch.setattr(pueue, "remove", start_before_remove)
+    cancelled = launch.cancel(config, job["task_id"], finish_seconds=0)
+    assert fake_pueue.killed == [job["task_id"]]
+    assert fake_pueue.removed == []
+    assert cancelled["phase"] == "cancelled"
+    assert cancelled["cancellation"]["stopped"] is True

@@ -70,8 +70,8 @@ class JobView(GatewayModel):
     task_id: int
     job_id: str | None = Field(
         default=None,
-        description="The job's own name. Pass it back in a target locator to "
-        "address this job after the queue has been reordered.",
+        description="The job's own name. Include it with the task ID to check "
+        "that the response names the expected job.",
     )
     label: str | None = None
     kind: str | None = None
@@ -148,7 +148,6 @@ class JobQueue(QueueState):
     """Where one unfinished job stands in its group."""
 
     reason: str | None = None
-    excluded_by: list[str] = Field(default_factory=list)
 
     position: int | None = Field(
         default=None, description="1-based place among the group's queued jobs."
@@ -214,7 +213,6 @@ def _job_queue(payload: Mapping[str, Any]) -> JobQueue | None:
     return JobQueue(
         **_queue_fields(raw),
         reason=raw.get("reason"),
-        excluded_by=[str(item) for item in raw.get("excluded_by") or []],
         position=raw.get("position"),
         ahead=[int(item) for item in raw.get("ahead") or []],
         waiting_for=[int(item) for item in raw.get("waiting_for") or []],
@@ -322,25 +320,14 @@ def _job(
     job_id: str | None = None,
     **arguments: Any,
 ) -> dict[str, Any]:
-    """One LocalJobs operation on a job, proving the answer names that job.
-
-    Which identity the answer must match is the identity the call addressed:
-    a job id names the job wherever the queue moved it, so its
-    answer is expected to carry another task id, while an id alone names only
-    the position and its answer must still be about that position.
-    """
-    if job_id is None:
-        result = runtime._job(operation, {"task_id": task_id, **arguments})
-        if str(result.get("task_id")) != str(task_id):
-            raise ProtocolError(
-                "owner_failed", f"job owner {operation} response names another job"
-            )
-        return result
+    """Call one job operation and check both requested IDs."""
     result = runtime._job(
         operation,
-        {"task_id": task_id, "job_id": job_id, **arguments},
+        {"task_id": task_id, **({"job_id": job_id} if job_id else {}), **arguments},
     )
-    if str(result.get("job_id") or "") != job_id:
+    if str(result.get("task_id")) != str(task_id) or (
+        job_id is not None and str(result.get("job_id") or "") != job_id
+    ):
         raise ProtocolError(
             "owner_failed", f"job owner {operation} response names another job"
         )
@@ -507,7 +494,6 @@ def _log(
     content = str(raw.get("content") or "")
     truncated = bool(raw.get("truncated"))
     returned = raw.get("returned_bytes", len(content.encode()))
-    # A job_id-addressed read answers about whatever id the job is at now.
     task_id = int(raw.get("task_id", task_id))
     return JobLog(
         ref=job_ref(task_id),
@@ -641,7 +627,6 @@ async def _wait(runtime: Runtime, inp: JobWaitInput) -> JobWait:
             # Caught up with a job that is still writing: the next poll
             # resumes where this one ended, not from the start.
             output.next_offset = output.offset + output.returned_bytes
-    # Where the job is now, which a reorder may have moved since it started.
     return JobWait(
         ref=view.ref,
         task_id=view.task_id,
@@ -722,13 +707,7 @@ class CancelResult(GatewayModel):
         default=None,
         description="The owner's cancellation state, such as stopped, removed, terminal, failed or unresolved.",
     )
-    scope_unit: str | None = None
-    scope_stopped: bool | None = None
-    survivors: list[int] | None = Field(
-        default=None,
-        description="Owner-observed process survivors; null means the owner did not inspect or report them.",
-    )
-    warnings: list[str] = Field(default_factory=list)
+    unit: str | None = None
     next_actions: list[str] = Field(default_factory=list)
 
 
@@ -765,22 +744,7 @@ def _cancel(runtime: Runtime, inp: CancelInput) -> CancelResult:
             "owner_failed",
             "job owner cancel response does not prove cancellation truth",
         )
-    reaped = raw.get("reaped") if isinstance(raw.get("reaped"), Mapping) else {}
-    scope = reaped.get("scope") if isinstance(reaped.get("scope"), Mapping) else {}
-    survivors = (
-        [int(pid) for pid in scope["survivors"]]
-        if isinstance(scope.get("survivors"), list)
-        else None
-    )
     owner_state = raw.get("cancellation_state")
-    scope_stopped = scope.get("stopped")
-    if scope_stopped is None and owner_state in {"stopped", "failed"}:
-        scope_stopped = owner_state == "stopped"
-    warnings = (
-        [f"{len(survivors)} processes survived the reap; the job's scope is not empty"]
-        if survivors
-        else []
-    )
     cancelled_view = _job_view(raw)
     return CancelResult(
         ref=cancelled_view.ref,
@@ -790,10 +754,7 @@ def _cancel(runtime: Runtime, inp: CancelInput) -> CancelResult:
         cancel_requested=raw["cancel_requested"],
         already_terminal=bool(raw.get("already_terminal")),
         cancelled=raw.get("cancelled") or owner_state,
-        scope_unit=scope.get("unit") or raw.get("unit"),
-        scope_stopped=scope_stopped,
-        survivors=survivors,
-        warnings=warnings,
+        unit=raw.get("unit"),
         next_actions=["jobs.get", "jobs.logs", "jobs.retry"],
     )
 
@@ -825,7 +786,6 @@ class CleanResult(GatewayModel):
 def _clean(runtime: Runtime, inp: CleanInput) -> CleanResult:
     task_id, _, job_id = inp.target.resolve()
     raw = _job(runtime, "job.clean", task_id, job_id)
-    # The id the owner cleaned, which a reorder may have moved the job to.
     cleaned_id = int(raw.get("task_id", task_id))
     return CleanResult(
         ref=job_ref(cleaned_id),
@@ -1069,7 +1029,7 @@ ACTIONS: tuple[Action, ...] = (
         resource_kinds=("job",),
         next_actions=("jobs.get", "jobs.logs", "jobs.queues", "jobs.cancel"),
         aliases=("wait for job", "block", "until done", "continue"),
-        documentation="outcome is terminal, running or queued; running and queued are continuations, never failures, and carry queue: the group's occupancy and the job's place in it. Pass output_offset (the previous output.next_offset) to receive only new log bytes. The wait runs in a worker thread; cancelling the MCP request abandons it without stopping the job. A task id is a queue position: pass the job_id the start returned and the wait follows its job across a reorder, answering with the id it is at now.",
+        documentation="outcome is terminal, running or queued; running and queued are continuations, never failures, and carry queue: the group's occupancy and the job's place in it. Pass output_offset (the previous output.next_offset) to receive only new log bytes. The wait runs in a worker thread; cancelling the MCP request abandons it without stopping the job. Pass the job_id returned by start alongside the task ID to check that the response names the expected job.",
         examples=(
             Example(
                 title="Wait a minute",
@@ -1130,7 +1090,7 @@ ACTIONS: tuple[Action, ...] = (
         next_actions=("jobs.get", "jobs.logs", "jobs.retry"),
         aliases=("kill", "stop job", "abort"),
         supports_precondition=True,
-        documentation="Pass expected_phase to refuse when the job already moved on. The owner retains reason with the gateway caller label before stopping the job. Request metadata is separate from completion; survivors is null when the owner did not report a process inspection.",
+        documentation="Pass expected_phase to refuse when the job already moved on. The owner retains reason with the gateway caller label before stopping the job. The response returns the stopped systemd unit and the resulting job state.",
         examples=(
             Example(
                 title="Cancel a running job",

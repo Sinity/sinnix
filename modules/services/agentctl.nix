@@ -52,24 +52,6 @@ mkServiceModule {
             type = lib.types.ints.positive;
             description = "How many tasks this pueue group admits at once.";
           };
-          adaptive = lib.mkOption {
-            default = null;
-            description = "Optional headroom-based admission. Parallel is the ceiling.";
-            type = lib.types.nullOr (
-              lib.types.submodule {
-                options = {
-                  floor = lib.mkOption { type = lib.types.ints.positive; };
-                  jobMemoryBytes = lib.mkOption { type = lib.types.ints.positive; };
-                  slice = lib.mkOption { type = lib.types.str; };
-                };
-              }
-            );
-          };
-          exclusiveWith = lib.mkOption {
-            type = lib.types.listOf lib.types.str;
-            default = [ ];
-            description = "Pools whose live work holds new launches in this pool until they drain.";
-          };
         };
       }
     );
@@ -87,7 +69,6 @@ mkServiceModule {
       pytest.parallel = 2;
       pytest-heavy = {
         parallel = 1;
-        exclusiveWith = [ "agent" ];
       };
       # Bounded selections stay admissible beside a wave: a worker runs its own
       # focused tests here while its own task occupies the agent pool.
@@ -98,11 +79,6 @@ mkServiceModule {
       # sinnix-tisc makes admission follow live headroom.
       pytest-quick = {
         parallel = 8;
-        adaptive = {
-          floor = 1;
-          jobMemoryBytes = 1073741824;
-          slice = "agent-ctl-pytest-quick.slice";
-        };
       };
       # The widths of the pools that run Cargo builds (normal, bulk, compile)
       # are the bound on concurrent builds: a job takes its queue slot only
@@ -173,19 +149,7 @@ mkServiceModule {
           private_project_catalog = config.sinnix.projects.privateCatalogFile;
           event_spool = eventSpool;
           agentctl = "${scriptPkgs.agentctl}/bin/agentctl";
-          pools = lib.mapAttrs (
-            _name: pool:
-            {
-              inherit (pool) parallel;
-              exclusive_with = pool.exclusiveWith;
-            }
-            // lib.optionalAttrs (pool.adaptive != null) {
-              adaptive = {
-                inherit (pool.adaptive) floor slice;
-                job_memory_bytes = pool.adaptive.jobMemoryBytes;
-              };
-            }
-          ) cfg.pools;
+          pools = lib.mapAttrs (_name: pool: { inherit (pool) parallel; }) cfg.pools;
         }
       );
     in
@@ -227,13 +191,8 @@ mkServiceModule {
         {
           manager = "user";
           resourceClass = "background";
-          # Every `pueue status --json` serialises all retained tasks, and the
-          # pressure tick, the hub and agentctl ask many times a minute; the
-          # daemon's memory follows the largest response. Daily cleaning let
-          # ~900 finished tasks a day pile up (349 MB on 2026-10-27, 1.2 GB
-          # over 3.7 days before any cleaning), and freed tasks do not return
-          # the allocator's high-water mark, so clean often enough that the
-          # queue never grows large. Checkout retirement is an explicit owner action.
+          # Keep the most recent 24 hours of task IDs while releasing older
+          # queue rows. Inputs and output stay in agentctl's state directory.
           execStart = "${scriptPkgs.agentctl}/bin/agentctl job clean --all-terminal";
           serviceConfig = {
             TimeoutStartSec = "5min";
@@ -241,7 +200,7 @@ mkServiceModule {
           timer = {
             onCalendar = "hourly";
             persistent = true;
-            description = "Hourly cleanup of finished queue tasks";
+            description = "Hourly cleanup of queue tasks finished over 24 hours ago";
           };
         }
       )

@@ -51,7 +51,7 @@ _ENVIRONMENT_FIELDS = frozenset(
 # The one environment kind whose realization agentctl-devenv can cache.
 NIX_DEVELOP_KIND = "nix-develop"
 DEVENV_COMMAND = "agentctl-devenv"
-_WORKSPACE_FIELDS = frozenset({"root", "default_base", "retain_artifacts"})
+_WORKSPACE_FIELDS = frozenset({"root", "default_base"})
 
 
 def _warn_unknown(descriptor: Path, table: str, unknown: set[str]) -> None:
@@ -161,17 +161,15 @@ class ProjectEnvironment:
 
 @dataclass(frozen=True)
 class WorkspacePolicy:
-    """Filesystem placement and artifact custody for preserved checkouts."""
+    """Workspace location and the branch used for publication checks."""
 
     root: Path
     default_base: str
-    retain_artifacts: tuple[str, ...] = ()
 
     def catalog_row(self) -> dict[str, Any]:
         return {
             "root": str(self.root),
             "default_base": self.default_base,
-            "retain_artifacts": list(self.retain_artifacts),
         }
 
 
@@ -358,19 +356,7 @@ def _workspace(raw: Mapping[str, Any], descriptor: Path) -> WorkspacePolicy | No
         raise ProjectConfigError(
             f"{descriptor} workspace.default_base must be non-empty"
         )
-    fields: dict[str, Any] = {}
-    if "retain_artifacts" in raw_workspace:
-        patterns = _optional_string_list(
-            raw_workspace["retain_artifacts"], "workspace.retain_artifacts"
-        )
-        for pattern in patterns:
-            path = Path(pattern)
-            if path.is_absolute() or ".." in path.parts:
-                raise ProjectConfigError(
-                    f"{descriptor} workspace.retain_artifacts must be relative"
-                )
-        fields["retain_artifacts"] = patterns
-    return WorkspacePolicy(root=Path(root), default_base=default_base, **fields)
+    return WorkspacePolicy(root=Path(root), default_base=default_base)
 
 
 def _admission(name: str, definition: Any, descriptor: Path) -> AdmissionEnvelope:

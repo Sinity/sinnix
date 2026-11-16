@@ -1,896 +1,324 @@
-"""Retain checkout-only evidence and Git recovery refs before worktree removal."""
+"""Remove published worktrees after saving their commit in a recovery ref."""
 
 from __future__ import annotations
 
-import errno
 import fcntl
 import hashlib
 import os
 import shutil
-import stat
-import subprocess
-import sys
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Iterator, Mapping, Sequence
+from typing import Any, Iterator, Sequence
 
-from sinnix_lib.procfs import held_paths
-
-from . import gitcmd, pueue, worktrunk
-from .limits import CALL_TIMEOUT_SECONDS
+from . import gitcmd, github, pueue, worktrunk
+from .config import Config
 from .projects import ProjectAdapter
-from .pueue import PueueError
-from .worktrunk import WorktrunkError
-
-if TYPE_CHECKING:
-    from .config import Config
+from .worktrunk import Worktree, WorktrunkError
 
 
 class CleanupError(RuntimeError):
-    """A checkout or retained artifact cannot be inspected or safely released."""
+    """A checkout cannot be inspected or removed."""
 
 
 @contextmanager
-def _custody_lock(path: Path) -> Iterator[bool]:
+def project_locked(config: Config, project_id: str) -> Iterator[None]:
+    """One cleanup pass per project at a time."""
+    path = config.state_dir / "worktree-cleanup" / f"{project_id}.lock"
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(path.parent, 0o700)
     descriptor = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
     with os.fdopen(descriptor, "w") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
         try:
-            yield True
+            yield
         finally:
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
-def project_locked(config: Config, project_id: str) -> Iterator[bool]:
-    """One cleanup pass per project at a time."""
-    return _custody_lock(config.state_dir / "worktree-cleanup" / f"{project_id}.lock")
+def _git(path: Path, *arguments: str) -> str:
+    return gitcmd.git(path, *arguments, error=CleanupError)
 
 
-WORKTREE_STATE_DIR = ".agentctl"
-#: Preserved checkout artifacts and Git recovery refs live under this name.
-RETAINED = "checkouts"
+def _has_origin(root: Path) -> bool:
+    return "origin" in _git(root, "remote").split()
 
 
-def _git(
-    path: Path,
-    *arguments: str,
-    timeout: float = CALL_TIMEOUT_SECONDS,
-    owned: bool = False,
-    main_checkout: bool = False,
-) -> str:
-    return gitcmd.git(
-        path,
-        *arguments,
-        timeout=timeout,
-        error=CleanupError,
-        owned=owned,
-        main_checkout=main_checkout,
-    )
-
-
-def _dirty_paths(path: Path) -> list[str]:
-    return [
-        line
-        for line in _git(path, "status", "--porcelain=v1").splitlines()
-        if not (line.startswith("??") and line[3:].startswith(f"{WORKTREE_STATE_DIR}/"))
-    ]
-
-
-def _empty_tree(path: Path) -> bool:
-    pending, visited = [path], 0
-    try:
-        while pending:
-            directory = pending.pop()
-            visited += 1
-            if visited > 256:
-                return False
-            for child in directory.iterdir():
-                if child.is_symlink() or not child.is_dir():
-                    return False
-                pending.append(child)
-    except OSError:
-        return False
-    return True
-
-
-def _cargo_cache(path: Path, *, registered: bool) -> Path | None:
-    target = path / "target"
-    tag = target / "CACHEDIR.TAG"
-    if target.is_symlink() or tag.is_symlink() or not target.is_dir():
+def _remote_default(project: ProjectAdapter) -> str | None:
+    if project.workspace:
+        base = project.workspace.default_base
+        for prefix in ("refs/remotes/origin/", "origin/"):
+            if base.startswith(prefix):
+                return base.removeprefix(prefix)
+    if not _has_origin(project.root):
         return None
-    try:
-        tagged = (
-            tag.is_file()
-            and tag.read_bytes().splitlines()[0]
-            == b"Signature: 8a477f597d28d172789f06886806bc55"
-        )
-    except (OSError, IndexError):
-        tagged = False
-    if not tagged and not _empty_tree(target):
-        return None
-    if registered:
-        if _git(path, "ls-files", "--", "target"):
-            return None
-        ignored = gitcmd.git(
-            path, "check-ignore", "target", ok_statuses=(0, 1), error=CleanupError
-        )
-        if not ignored:
-            return None
-    return target
-
-
-def _bytecode_cache(path: Path) -> bool:
-    if path.name != "__pycache__" or path.is_symlink() or not path.is_dir():
-        return False
-    try:
-        for child in path.iterdir():
-            if child.is_symlink() or not child.is_file() or child.suffix != ".pyc":
-                return False
-            with child.open("rb") as handle:
-                header = handle.read(16)
-                if len(header) != 16 or header[2:4] != b"\r\n":
-                    return False
-    except OSError:
-        return False
-    return True
-
-
-def _tagged_cache(path: Path) -> bool:
-    tag = path / "CACHEDIR.TAG"
-    if path.is_symlink() or not path.is_dir() or tag.is_symlink():
-        return False
-    try:
-        return (
-            tag.is_file()
-            and tag.read_bytes().splitlines()[0]
-            == b"Signature: 8a477f597d28d172789f06886806bc55"
-        )
-    except (OSError, IndexError):
-        return False
-
-
-def _only_caches(directory: Path) -> bool:
-    """An ignored directory holding nothing but tool caches and empty directories.
-
-    A project can keep its tools' caches under one ignored directory (for
-    example `.lynchpin/cache/{ruff,mypy,pytest}`), which Git lists as that
-    one directory.
-    """
-    pending, visited = [directory], 0
-    try:
-        while pending:
-            current = pending.pop()
-            visited += 1
-            if visited > 256:
-                return False
-            for child in current.iterdir():
-                if child.is_symlink() or not child.is_dir():
-                    return False
-                if not (_tagged_cache(child) or _bytecode_cache(child)):
-                    pending.append(child)
-    except OSError:
-        return False
-    return True
-
-
-def _ignored_caches(path: Path) -> tuple[Path, ...]:
-    names = _git(
-        path,
-        "ls-files",
-        "--others",
-        "--ignored",
-        "--exclude-standard",
-        "--directory",
-        "-z",
-    )
-    # A tool cache that ignores its own contents (ruff and pytest write a
-    # `.gitignore` of `*` inside) is listed file by file, so each listed path
-    # is attributed to the outermost cache directory that contains it.
-    found: dict[Path, None] = {}
-    for name in names.split("\0"):
-        if not name:
-            continue
-        relative = Path(name)
-        outermost_first = [*reversed(relative.parents[:-1]), relative]
-        for directory in (path / part for part in outermost_first):
-            if directory == path / "target":
-                break
-            if _bytecode_cache(directory) or _tagged_cache(directory):
-                found.setdefault(directory)
-                break
-    return tuple(found)
-
-
-def _remove_cache(target: Path) -> None:
-    """Retain the cache tag until a partial deletion is safely retryable."""
-    tag = target / "CACHEDIR.TAG"
-    for child in target.iterdir():
-        if child == tag:
-            continue
-        if child.is_dir() and not child.is_symlink():
-            shutil.rmtree(child)
-        else:
-            child.unlink()
-    tag.unlink(missing_ok=True)
-    target.rmdir()
-
-
-def _external_cache(path: Path) -> Path | None:
-    """Only the compiler selector's exact per-checkout cache, never a scan."""
-    root = Path(os.environ.get("SINNIX_CARGO_CACHE_ROOT", "/realm/state/cache/cargo"))
-    key = hashlib.sha256(str(path.resolve()).encode()).hexdigest()[:32]
-    parent = root / str(os.getuid()) / key
-    target = parent / "target"
-    if not _path_entry_exists(parent):
-        return None
-    if any(
-        candidate.is_symlink() for candidate in (root, parent.parent, parent, target)
-    ):
-        raise CleanupError(f"compiler cache is symlinked; inspect {target}")
-    marker = parent / "checkout"
-    if _path_entry_exists(marker):
-        if marker.is_symlink() or not marker.is_file():
-            raise CleanupError(
-                f"compiler cache checkout marker is not a regular file; inspect {marker}"
-            )
-        if marker.read_bytes() != os.fsencode(path.resolve()) + b"\n":
-            raise CleanupError(
-                f"compiler cache checkout marker names another checkout; inspect {marker}"
-            )
-    if any(entry.name not in ("target", "checkout") for entry in parent.iterdir()):
-        raise CleanupError(f"compiler cache contains other evidence; inspect {parent}")
-    if _cargo_cache(parent, registered=False) != target:
-        raise CleanupError(f"compiler cache is not tagged or empty; inspect {target}")
-    return target
-
-
-def _under(path: Path, root: Path) -> bool:
-    try:
-        path.resolve().relative_to(root.resolve())
-    except ValueError:
-        return False
-    return True
-
-
-def _process_users(path: Path) -> list[str]:
-    """Current-directory and open-file users outside pueue's authority.
-
-    A same-user process whose /proc entries refuse a direct read is read
-    through sudo; a foreign one outside our inspection authority is reported
-    as neither an observed holder nor an observed non-holder.
-    """
-    users: list[str] = []
-    proc = Path("/proc")
-    try:
-        entries = tuple(proc.iterdir())
-    except OSError as error:
-        raise CleanupError(f"cannot inspect process users: {error}") from error
-    for entry in entries:
-        if not entry.name.isdigit():
-            continue
-        try:
-            cwds = [
-                Path(target)
-                for _, target in held_paths(
-                    str(entry), links=("cwd",), descriptors=False
-                )
-            ]
-        except PermissionError:
-            if not _owned_by_us(entry):
-                continue
-            cwd = _stable_privileged_cwd(entry)
-            cwds = [cwd] if cwd is not None else []
-        except OSError as error:
-            raise CleanupError(
-                f"cannot inspect process {entry.name} cwd: {error}"
-            ) from error
-        if not cwds:
-            continue
-        if _under(cwds[0], path):
-            users.append(f"pid {entry.name} cwd {cwds[0]}")
-            continue
-        try:
-            targets = _process_open_files(entry)
-        except PermissionError:
-            if not _owned_by_us(entry):
-                continue
-            targets = _stable_privileged_open_files(entry)
-        for target in targets:
-            if target.is_absolute() and _under(target, path):
-                users.append(f"pid {entry.name} open file {target}")
-                break
-    return users
-
-
-def _owned_by_us(entry: Path) -> bool:
-    try:
-        return entry.stat().st_uid == os.getuid()
-    except OSError as error:
-        if error.errno in {errno.ENOENT, errno.ESRCH}:
-            return False
-        raise CleanupError(
-            f"cannot inspect process {entry.name} ownership: {error}"
-        ) from error
-
-
-def _process_open_files(entry: Path) -> list[Path]:
-    try:
-        return [
-            Path(target)
-            for _, target in held_paths(str(entry), links=(), descriptors=True)
-        ]
-    except PermissionError:
-        raise
-    except OSError as error:
-        raise CleanupError(
-            f"cannot inspect process {entry.name} open files: {error}"
-        ) from error
-
-
-def _privileged_open_files(entry: Path) -> list[Path]:
-    try:
-        completed = subprocess.run(
-            [
-                "sudo",
-                "-n",
-                "find",
-                str(entry / "fd"),
-                "-maxdepth",
-                "1",
-                "-type",
-                "l",
-                "-printf",
-                "%l\\0",
-            ],
-            capture_output=True,
-            timeout=CALL_TIMEOUT_SECONDS,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise CleanupError(
-            f"cannot inspect process {entry.name} open files: {error}"
-        ) from error
-    if completed.returncode != 0:
-        raise CleanupError(
-            f"cannot inspect process {entry.name} open files: {os.fsdecode(completed.stderr).strip()}"
-        )
-    return [
-        Path(os.fsdecode(target)) for target in completed.stdout.split(b"\0") if target
-    ]
-
-
-def _stable_privileged_open_files(entry: Path) -> list[Path]:
-    start = _process_starttime(entry)
-    if start is None:
-        return []
-    try:
-        targets = _privileged_open_files(entry)
-    except CleanupError:
-        if _process_starttime(entry) is None:
-            return []
-        raise
-    end = _process_starttime(entry)
-    if end is None:
-        return []
-    if end != start:
-        raise CleanupError(f"process {entry.name} changed during open-file probe")
-    return targets
-
-
-def _process_starttime(entry: Path) -> str | None:
-    try:
-        payload = (entry / "stat").read_text()
-        return payload.rsplit(")", 1)[1].split()[19]
-    except OSError as error:
-        if error.errno in {errno.ENOENT, errno.ESRCH}:
-            return None
-        raise CleanupError(f"cannot identify process {entry.name}: {error}") from error
-    except IndexError as error:
-        raise CleanupError(f"cannot identify process {entry.name}: {error}") from error
-
-
-def _privileged_cwd(entry: Path) -> Path:
-    try:
-        completed = subprocess.run(
-            ["sudo", "-n", "readlink", str(entry / "cwd")],
-            capture_output=True,
-            text=True,
-            timeout=CALL_TIMEOUT_SECONDS,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise CleanupError(
-            f"cannot inspect process {entry.name} cwd: {error}"
-        ) from error
-    if completed.returncode != 0 or not completed.stdout.strip():
-        detail = completed.stderr.strip() or completed.stdout.strip()
-        raise CleanupError(f"cannot inspect process {entry.name} cwd: {detail}")
-    return Path(completed.stdout.strip())
-
-
-def _stable_privileged_cwd(entry: Path) -> Path | None:
-    start = _process_starttime(entry)
-    if start is None:
-        return None
-    try:
-        cwd = _privileged_cwd(entry)
-    except CleanupError:
-        if _process_starttime(entry) is None:
-            return None
-        raise
-    end = _process_starttime(entry)
-    if end is None:
-        return None
-    if end != start:
-        raise CleanupError(f"process {entry.name} changed during cwd probe")
-    return cwd
-
-
-def _task_users(path: Path) -> list[str]:
-    try:
-        tasks = pueue.tasks().values()
-    except PueueError as error:
-        raise CleanupError(f"cannot inspect pueue users: {error}") from error
-    users = []
-    for task in tasks:
-        if task.terminal:
-            continue
-        try:
-            task_path = Path(task.path)
-        except TypeError:
-            continue
-        if task_path.is_absolute() and _under(task_path, path):
-            users.append(f"task {task.task_id} {task.status.lower()} cwd {task_path}")
-    return users
-
-
-def _artifact_paths(path: Path, patterns: Sequence[str]) -> list[Path]:
-    found: dict[Path, Path] = {}
-    root = path.resolve()
-    for pattern in patterns:
-        for candidate in path.glob(pattern):
-            if candidate.is_symlink():
-                raise CleanupError(f"artifact path escapes checkout: {candidate}")
-            if candidate.is_dir():
-                continue
-            if not _under(candidate, root):
-                raise CleanupError(f"artifact path escapes checkout: {candidate}")
-            try:
-                mode = candidate.stat().st_mode
-            except OSError as error:
-                raise CleanupError(
-                    f"cannot read artifact {candidate}: {error}"
-                ) from error
-            if not stat.S_ISREG(mode):
-                raise CleanupError(f"artifact is not a regular file: {candidate}")
-            found[candidate.relative_to(path)] = candidate
-    return [found[key] for key in sorted(found)]
-
-
-def _artifact_destination(
-    config: Config, worktree: Path, relative: Path, digest: str
-) -> Path:
-    token = hashlib.sha256(str(worktree).encode()).hexdigest()[:16]
-    return (
-        config.state_dir
-        / "artifacts"
-        / RETAINED
-        / token
-        / relative.parent
-        / f"{relative.name}.{digest[:16]}"
-    )
-
-
-def _digest(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _preserve_artifacts(
-    config: Config,
-    project: ProjectAdapter,
-    path: Path,
-    *,
-    artifacts: list[dict[str, str]],
-) -> dict[str, str]:
-    patterns = (
-        f"{WORKTREE_STATE_DIR}/**/*",
-        "target/nextest/**/*",
-        *(project.workspace.retain_artifacts if project.workspace else ()),
-    )
-    replacements: dict[str, str] = {}
-    for source in _artifact_paths(path, patterns):
-        relative = source.relative_to(path)
-        before = _digest(source)
-        destination = _artifact_destination(config, path, relative, before)
-        destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(destination.parent, 0o700)
-        if destination.exists():
-            if _digest(destination) != before:
-                raise CleanupError(f"artifact destination differs: {destination}")
-        else:
-            temporary = destination.with_suffix(destination.suffix + ".tmp")
-            shutil.copyfile(source, temporary)
-            if _digest(temporary) != before:
-                temporary.unlink(missing_ok=True)
-                raise CleanupError(f"artifact verification failed: {destination}")
-            os.replace(temporary, destination)
-        replacements[str(source)] = str(destination)
-        artifacts.append({"source": str(source), "destination": str(destination)})
-    return replacements
-
-
-def _recovery_ref(root: Path, path: Path, head: str) -> str:
-    token = hashlib.sha256(str(path).encode()).hexdigest()[:16]
-    ref = f"refs/agentctl/recovery/{RETAINED}/{token}/{head}"
-    existing = gitcmd.git(
-        root,
-        "rev-parse",
-        "--verify",
+    known = gitcmd.git(
+        project.root,
+        "symbolic-ref",
         "--quiet",
-        f"{ref}^{{commit}}",
+        "refs/remotes/origin/HEAD",
         ok_statuses=(0, 1),
         error=CleanupError,
     )
-    if existing and existing != head:
-        raise CleanupError(f"recovery ref differs: {ref}")
-    if not existing:
-        _git(root, "update-ref", ref, head)
-    verified = _git(root, "rev-parse", "--verify", f"{ref}^{{commit}}")
-    if verified != head:
-        raise CleanupError(f"recovery ref did not retain {head}: {ref}")
-    return ref
+    if known.startswith("refs/remotes/origin/"):
+        return known.removeprefix("refs/remotes/origin/")
+    for line in _git(
+        project.root, "ls-remote", "--symref", "origin", "HEAD"
+    ).splitlines():
+        target, _, name = line.partition("\t")
+        if name == "HEAD" and target.startswith("ref: refs/heads/"):
+            return target.removeprefix("ref: refs/heads/")
+    raise CleanupError("origin's default branch could not be resolved")
 
 
-def _cleanup_obstacle(
-    project: ProjectAdapter,
-    path: Path,
-    preserved: Mapping[str, str] | None = None,
-    disposable: Sequence[Path] = (),
-) -> str | None:
-    """Git status alone cannot prove that checkout-only bytes are retained."""
+class Published:
+    """Default-branch history and exact heads of merged pull requests."""
+
+    def __init__(self, project: ProjectAdapter):
+        self.root = project.root
+        self.default = _remote_default(project)
+        if self.default and _has_origin(self.root):
+            _git(self.root, "fetch", "--quiet", "--no-tags", "origin", self.default)
+            reference = f"refs/remotes/origin/{self.default}"
+        else:
+            reference = (
+                project.workspace.default_base if project.workspace else "master"
+            )
+            if reference.startswith("origin/") and not _has_origin(self.root):
+                reference = reference.removeprefix("origin/")
+        self.base = _git(self.root, "rev-parse", "--verify", reference + "^{commit}")
+        self.commits = set(_git(self.root, "rev-list", self.base).splitlines())
+        self.tree = _git(self.root, "rev-parse", self.base + "^{tree}")
+        self.pulls: dict[str, list[dict[str, Any]] | str] = {}
+
+    def _merged_pulls(
+        self, head: str, branch: str | None
+    ) -> list[dict[str, Any]] | str:
+        key = branch or head
+        if key not in self.pulls:
+            selector = ["--head", branch] if branch else ["--search", head]
+            try:
+                rows = github.gh_json(
+                    [
+                        "pr",
+                        "list",
+                        "--state",
+                        "merged",
+                        *selector,
+                        "--json",
+                        "number,headRefOid,mergeCommit",
+                    ],
+                    cwd=self.root,
+                )
+                self.pulls[key] = [row for row in rows or [] if isinstance(row, dict)]
+            except github.GithubError as error:
+                self.pulls[key] = str(error)
+        return self.pulls[key]
+
+    def contains(self, head: str, branch: str | None = None) -> bool:
+        return self.missing(head, branch) is None
+
+    def missing(self, head: str, branch: str | None = None) -> str | None:
+        if (
+            head in self.commits
+            or _git(self.root, "rev-parse", head + "^{tree}") == self.tree
+        ):
+            return None
+        short = head[:12]
+        facts = [f"HEAD {short} is not on {self.base[:12]} of the default branch"]
+        pulls = self._merged_pulls(head, branch)
+        if isinstance(pulls, str):
+            facts.append(f"the forge could not be asked ({pulls})")
+        else:
+            for row in pulls:
+                commit = (row.get("mergeCommit") or {}).get("oid")
+                if row.get("headRefOid") == head and commit in self.commits:
+                    return None
+            matching = [row for row in pulls if row.get("headRefOid") == head]
+            if matching:
+                facts.append(
+                    f"merged PR #{matching[0].get('number')} has head {short} but its "
+                    "merge commit is not on the fetched default branch"
+                )
+            elif pulls:
+                facts.append(f"no merged PR has head {short}")
+            else:
+                facts.append(
+                    f"no merged PR for branch {branch}"
+                    if branch
+                    else f"no merged PR has head {short}"
+                )
+        return "publication not proved: " + "; ".join(facts)
+
+
+def _checkout_changes(project: ProjectAdapter, path: Path) -> str | None:
     common = ("rev-parse", "--path-format=absolute", "--git-common-dir")
     if (
         Path(_git(path, *common)).resolve()
         != Path(_git(project.root, *common)).resolve()
     ):
         return "worktree kept; checkout belongs to another Git repository"
-    for record in _git(path, "ls-files", "-v", "-z").split("\0"):
-        if not record:
-            continue
-        if len(record) < 3 or record[1] != " ":
-            raise CleanupError("cannot inspect checkout index flags")
-        if record[0].islower() or record[0] == "S":
-            return f"worktree kept; index flags hide tracked state: {record[2:]!r}"
-    if preserved is None:
-        return None
-    sources = {Path(source) for source in preserved}
-    covered_dirs = set()
-    for source, destination in preserved.items():
-        src, dst = Path(source), Path(destination)
-        if not all(stat.S_ISREG(item.lstat().st_mode) for item in (src, dst)):
-            return f"worktree kept; retained artifact is no longer a regular file: {source!r}"
-        if _digest(src) != _digest(dst):
-            return f"worktree kept; artifact changed after preservation: {source!r}"
-        parent = src.parent
-        while parent.is_relative_to(path):
-            covered_dirs.add(parent)
-            if parent == path:
-                break
-            parent = parent.parent
-    pending = []
-    for kind, flags in (("ignored", ("--ignored",)), ("untracked", ())):
-        listing = _git(
-            path,
-            "ls-files",
-            "--others",
-            *flags,
-            "--exclude-standard",
-            "--directory",
-            "-z",
-        )
-        pending.extend((path / name, kind) for name in listing.split("\0") if name)
-    while pending:
-        candidate, kind = pending.pop()
-        if any(candidate == d or candidate.is_relative_to(d) for d in disposable):
-            continue
-        mode = candidate.lstat().st_mode
-        if stat.S_ISDIR(mode):
-            if candidate not in covered_dirs and _empty_tree(candidate):
-                continue
-            if (
-                kind == "ignored"
-                and candidate not in covered_dirs
-                and _only_caches(candidate)
-            ):
-                continue
-            if candidate not in covered_dirs:
-                return f"worktree kept; {kind} directory is not preserved: {str(candidate)!r}"
-            with os.scandir(candidate) as children:
-                for child in children:
-                    child_path = Path(child.path)
-                    if child.is_dir(follow_symlinks=False):
-                        if child_path not in covered_dirs:
-                            return f"worktree kept; {kind} directory is not preserved: {str(child_path)!r}"
-                        pending.append((child_path, kind))
-                    elif child_path not in sources:
-                        return f"worktree kept; {kind} path is not preserved: {str(child_path)!r}"
-        elif candidate not in sources:
-            return f"worktree kept; {kind} path is not preserved: {str(candidate)!r}"
+    dirty = _git(path, "status", "--porcelain=v1", "--untracked-files=all").splitlines()
+    if dirty:
+        names = ", ".join(line.split(maxsplit=1)[-1] for line in dirty[:3])
+        return f"worktree kept; uncommitted changes: {names}"
     return None
 
 
-def _path_entry_exists(path: Path) -> bool:
-    """Only a confirmed missing entry proves absence; preserve lookup errors."""
-    try:
-        path.lstat()
-    except FileNotFoundError:
-        return False
-    return True
+def _external_cache(path: Path) -> Path | None:
+    """The compiler selector's exact directory for this checkout."""
+    root = Path(os.environ.get("SINNIX_CARGO_CACHE_ROOT", "/realm/state/cache/cargo"))
+    key = hashlib.sha256(str(path.resolve()).encode()).hexdigest()[:32]
+    parent = root / str(os.getuid()) / key
+    if not parent.exists() and not parent.is_symlink():
+        return None
+    target = parent / "target"
+    if any(item.is_symlink() for item in (root, parent.parent, parent, target)):
+        raise CleanupError(f"compiler cache is symlinked; inspect {parent}")
+    marker = parent / "checkout"
+    if marker.is_symlink() or (
+        marker.exists() and marker.read_bytes() != os.fsencode(path.resolve()) + b"\n"
+    ):
+        raise CleanupError(
+            f"compiler cache checkout marker names another checkout; inspect {marker}"
+        )
+    return parent
 
 
-def _drop_branch(
-    config: Config,
-    project: ProjectAdapter,
-    branch: str,
-    *,
-    recorded_path: Path | None = None,
-    artifacts: list[dict[str, str]] | None = None,
-    delete_branch: bool = False,
-    registry: Sequence[worktrunk.Worktree] | None = None,
-    process_users: Callable[[Path], list[str]] | None = None,
-    disposable: Sequence[Path] = (),
-    expected_head: str | None = None,
-    preserved_artifacts: Mapping[str, str] | None = None,
+def _recovery_ref(root: Path, path: Path, head: str) -> str:
+    token = hashlib.sha256(str(path).encode()).hexdigest()[:16]
+    ref = f"refs/agentctl/recovery/checkouts/{token}/{head}"
+    _git(root, "update-ref", ref, head)
+    if _git(root, "rev-parse", "--verify", ref + "^{commit}") != head:
+        raise CleanupError(f"recovery ref did not retain {head}: {ref}")
+    return ref
+
+
+def _delete_remote_branch(
+    project: ProjectAdapter, branch: str, head: str, default: str | None
 ) -> str | None:
-    """Release one terminal checkout while retaining its Git history.
-
-    Returns why it was kept, or None once it is gone.
-    """
-
-    def retire_branch() -> None:
-        head = gitcmd.git(
-            project.root,
-            "rev-parse",
-            "--verify",
-            "--quiet",
-            f"refs/heads/{branch}^{{commit}}",
-            ok_statuses=(0, 1),
-            error=CleanupError,
-        )
-        if head:
-            if expected_head is not None and head != expected_head:
-                raise CleanupError("branch moved after publication proof")
-            _recovery_ref(project.root, recorded_path or project.root, head)
-            _git(project.root, "update-ref", "-d", f"refs/heads/{branch}", head)
-
-    registry = (
-        registry if registry is not None else worktrunk.worktrunk_list(project.root)
-    )
-    tree = next((tree for tree in registry if tree.branch == branch), None)
-    if tree is None and recorded_path is None:
-        tree = worktrunk.worktrunk_find(project.root, branch)
-    target = tree.path if tree is not None else recorded_path
-    if target is not None:
-        # Native cancellation records are needed at the release boundary,
-        # not when importing the independent retained-history cleanup helpers.
-        from . import cgroups, job_queries
-
-        for input_path in config.inputs_dir.glob("*.json"):
-            document = (
-                job_queries.read_outcome(input_path, job_queries.MAX_LAUNCH_INPUT_BYTES)
-                or {}
-            )
-            cwd = document.get("working_directory")
-            if not isinstance(cwd, str) or not _under(Path(cwd), target):
-                continue
-            disposition = job_queries.read_outcome(
-                job_queries.disposition_path(input_path),
-                job_queries.MAX_LAUNCH_INPUT_BYTES,
-            )
-            if cgroups.cancellation_obstacle(disposition) is not None:
-                return "worktree kept; job cancellation incomplete"
-    process_users = process_users or _process_users
-    if tree is not None and tree.locked:
-        return "worktree kept; explicitly locked"
-    path = tree.path if tree is not None else None
-    removal_target = branch
-    detached = False
-    if recorded_path is not None:
-        detached_tree = next(
-            (
-                item
-                for item in registry
-                if not item.main and item.branch is None and item.path == recorded_path
-            ),
-            None,
-        )
-        if detached_tree is not None:
-            path = detached_tree.path
-            removal_target = str(path)
-            detached = True
-    if path is None:
-        try:
-            if recorded_path is not None and _path_entry_exists(recorded_path):
-                return f"worktree kept; checkout path is unregistered: {recorded_path}"
-        except OSError as error:
-            return f"worktree kept; cannot inspect recorded checkout: {error}"
-        if delete_branch:
-            try:
-                retire_branch()
-            except CleanupError as error:
-                return f"branch kept; {error}"
+    if default is None or branch == default or not _has_origin(project.root):
         return None
     try:
-        mode = path.stat().st_mode
-    except FileNotFoundError:
-        try:
-            path.lstat()
-        except FileNotFoundError:
-            mode = None
-        except OSError as error:
-            return f"worktree kept; cannot inspect checkout: {error}"
-        else:
-            return "worktree kept; checkout path is a broken link"
-    except OSError as error:
-        return f"worktree kept; cannot inspect checkout: {error}"
-    if mode is None:
-        if removal_target == branch:
-            return "worktree kept; checkout path is unavailable"
-    elif not stat.S_ISDIR(mode):
-        return "worktree kept; checkout path is not a directory"
-    else:
-        try:
-            obstacle = _cleanup_obstacle(project, path)
-            if obstacle:
-                return obstacle
-            dirty = _dirty_paths(path)
-            users = [*_task_users(path), *process_users(path)]
-        except (CleanupError, OSError) as error:
-            return f"worktree kept; {error}"
-        if dirty:
-            shown = ", ".join(line.split(maxsplit=1)[-1] for line in dirty[:3])
-            more = f" and {len(dirty) - 3} more" if len(dirty) > 3 else ""
-            return f"worktree kept; uncommitted changes: {shown}{more}"
-        if users:
-            return f"worktree kept; active user: {users[0]}"
-        try:
-            head = _git(path, "rev-parse", "HEAD")
-            if expected_head is not None and head != expected_head:
-                return "worktree kept; HEAD changed after publication proof"
-            branch_head = gitcmd.git(
-                project.root,
-                "rev-parse",
-                "--verify",
-                "--quiet",
-                f"refs/heads/{branch}^{{commit}}",
-                ok_statuses=(0, 1),
-                error=CleanupError,
-            )
-            if detached or delete_branch:
-                _recovery_ref(project.root, path, head)
-            if not detached and branch_head != head:
-                return "worktree kept; branch no longer names checkout HEAD"
-            copied = (
-                dict(preserved_artifacts)
-                if preserved_artifacts is not None
-                else _preserve_artifacts(
-                    config,
-                    project,
-                    path,
-                    artifacts=artifacts if artifacts is not None else [],
-                )
-            )
-            obstacle = _cleanup_obstacle(project, path, copied, disposable)
-            if obstacle:
-                return obstacle
-            if _dirty_paths(path):
-                return "worktree kept; uncommitted changes"
-            if detached and _git(path, "rev-parse", "HEAD") != head:
-                return "worktree kept; detached checkout HEAD changed"
-            if not detached:
-                branch_head = gitcmd.git(
-                    project.root,
-                    "rev-parse",
-                    "--verify",
-                    "--quiet",
-                    f"refs/heads/{branch}^{{commit}}",
-                    ok_statuses=(0, 1),
-                    error=CleanupError,
-                )
-                if branch_head != head or branch_head != _git(
-                    path, "rev-parse", "HEAD"
-                ):
-                    return "worktree kept; branch no longer names checkout HEAD"
-            users = [*_task_users(path), *process_users(path)]
-            if users:
-                return f"worktree kept; active user: {users[0]}"
-        except (CleanupError, OSError) as error:
-            return f"worktree kept; {error}"
-    try:
-        for output in disposable:
-            if (
-                output.is_relative_to(path)
-                and output != path / "target"
-                and (_bytecode_cache(output) or _tagged_cache(output))
-            ):
-                _remove_cache(output)
-                continue
-            local = output.parent == path
-            if (not local and _external_cache(path) != output) or _cargo_cache(
-                output.parent, registered=local
-            ) != output:
-                raise CleanupError(f"build output changed before removal: {output}")
-            print(f"removing build output {output}", file=sys.stderr, flush=True)
-            _remove_cache(output)
-            if not local:
-                (output.parent / "checkout").unlink(missing_ok=True)
-                output.parent.rmdir()
-        worktrunk.worktrunk_remove(
-            project.root, removal_target, keep_branch=True, reap=False
+        advertised = _git(
+            project.root, "ls-remote", "--heads", "origin", f"refs/heads/{branch}"
+        ).split()
+        if not advertised:
+            return None
+        if advertised[0] != head:
+            return f"remote branch kept; it names {advertised[0][:12]}, not the published {head[:12]}"
+        _git(
+            project.root,
+            "push",
+            "--quiet",
+            f"--force-with-lease=refs/heads/{branch}:{head}",
+            "origin",
+            f":refs/heads/{branch}",
         )
-    except (WorktrunkError, CleanupError, OSError) as error:
-        return str(error)
-    try:
-        if _path_entry_exists(path):
-            return f"worktree kept; checkout path remains after removal: {path}"
-    except OSError as error:
-        return f"worktree kept; cannot verify checkout removal: {error}"
-    if delete_branch:
-        # The checkout is gone (or was already absent), so this ref can now be
-        # removed without invalidating a registered worktree.
-        try:
-            retire_branch()
-        except CleanupError as error:
-            return f"branch kept; {error}"
+    except CleanupError as error:
+        return f"remote branch kept; {error}"
     return None
+
+
+def _unfinished_jobs(path: Path, tasks: Sequence[pueue.Task]) -> list[str]:
+    return [
+        f"task {task.task_id} {task.label!r} {task.status.lower()} cwd {task.path}"
+        for task in tasks
+        if not task.terminal
+        and Path(task.path).is_absolute()
+        and Path(task.path).resolve().is_relative_to(path.resolve())
+    ]
+
+
+def _remove(project: ProjectAdapter, tree: Worktree, head: str) -> None:
+    path = tree.path
+    assert path is not None
+    if _git(path, "rev-parse", "HEAD") != head:
+        raise CleanupError("checkout HEAD changed after the publication check")
+    reason = _checkout_changes(project, path)
+    if reason:
+        raise CleanupError(reason)
+    _recovery_ref(project.root, path, head)
+    if _git(path, "rev-parse", "HEAD") != head:
+        raise CleanupError("checkout HEAD changed after the publication check")
+    jobs = _unfinished_jobs(path, list(pueue.tasks().values()))
+    if jobs:
+        raise CleanupError("unfinished job: " + jobs[0])
+    worktrunk.worktrunk_remove(project.root, str(path), keep_branch=True, reap=False)
+    if path.exists() or path.is_symlink():
+        raise CleanupError(f"checkout path remains after removal: {path}")
 
 
 def clean(
     config: Config, project: ProjectAdapter, *, paths: Sequence[Path] | None = None
 ) -> dict[str, Any]:
-    """Retire this project's completed native checkouts, or only ``paths``.
-
-    A checkout is a candidate when its recorded jobs are terminal (or an
-    explicit path names it) and its work is published. Each one kept is named
-    with the reason.
-    """
-    from .native_worktrees import clean_native
-
+    """Remove published registered worktrees, or only the requested paths."""
     selected = {path.absolute() for path in paths} if paths is not None else None
-    return {"project": project.project_id, **clean_native(config, project, selected)}
-
-
-def clean_published(
-    config: Config, *, budget_seconds: float | None = None
-) -> list[dict[str, Any]]:
-    """The existing queue maintenance also closes completed native checkouts.
-
-    ``budget_seconds`` bounds the whole pass so it ends inside its unit's
-    start timeout; unfinished checkouts are deferred, not failed.
-    """
-    import time
-
-    from .native_worktrees import clean_native
-
-    deadline = None if budget_seconds is None else time.monotonic() + budget_seconds
-
-    catalog = config.catalog()
-    outcomes = []
-    for row in catalog.list():
-        project = catalog.get(row["id"])
-        if next(config.inputs_dir.glob(project.project_id + "-*.json"), None) is None:
-            continue
-        try:
-            outcomes.append(
-                {
-                    "project": project.project_id,
-                    **clean_native(config, project, deadline=deadline),
-                }
-            )
-        except (CleanupError, WorktrunkError, PueueError, OSError, ValueError) as error:
-            outcomes.append({"project": project.project_id, "error": str(error)})
-    return outcomes
+    removed: list[str] = []
+    kept: list[dict[str, str]] = []
+    with project_locked(config, project.project_id):
+        registry = worktrunk.worktrunk_list(project.root)
+        candidates = [
+            tree
+            for tree in registry
+            if tree.path is not None
+            and not tree.main
+            and (selected is None or tree.path in selected)
+        ]
+        registered = {tree.path for tree in registry}
+        for path in sorted((selected or set()) - registered):
+            kept.append({"branch": str(path), "reason": "checkout is not registered"})
+        if not candidates:
+            return {"project": project.project_id, "removed": removed, "kept": kept}
+        published = Published(project)
+        for tree in candidates:
+            path = tree.path
+            assert path is not None
+            name = tree.branch or str(path)
+            try:
+                if (
+                    tree.locked
+                    or tree.branch == published.default
+                    or path == project.root
+                ):
+                    raise CleanupError(
+                        "checkout is locked or is the project's main checkout"
+                    )
+                if path.is_symlink() or not path.is_dir():
+                    raise CleanupError("checkout path is a symlink or is unavailable")
+                head = _git(path, "rev-parse", "HEAD")
+                reason = published.missing(head, tree.branch) or _checkout_changes(
+                    project, path
+                )
+                if reason:
+                    raise CleanupError(reason)
+                cache = _external_cache(path)
+                _remove(project, tree, head)
+                removed.append(name)
+                if cache:
+                    if _external_cache(path) != cache:
+                        raise CleanupError(
+                            f"compiler cache changed before removal: {cache}"
+                        )
+                    shutil.rmtree(cache)
+                if tree.branch:
+                    if any(
+                        other.branch == tree.branch
+                        for other in worktrunk.worktrunk_list(project.root)
+                    ):
+                        raise CleanupError(f"branch remains checked out: {tree.branch}")
+                    _git(
+                        project.root,
+                        "update-ref",
+                        "-d",
+                        f"refs/heads/{tree.branch}",
+                        head,
+                    )
+                if tree.branch:
+                    note = _delete_remote_branch(
+                        project, tree.branch, head, published.default
+                    )
+                    if note:
+                        kept.append({"branch": f"origin/{tree.branch}", "reason": note})
+            except (CleanupError, WorktrunkError, OSError) as error:
+                detail = f"checkout removed; {error}" if name in removed else str(error)
+                kept.append({"branch": name, "reason": detail})
+    return {"project": project.project_id, "removed": removed, "kept": kept}

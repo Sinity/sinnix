@@ -58,7 +58,7 @@ UNIT_BANDWIDTH_PROPERTIES = frozenset({"IOReadBandwidthMax", "IOWriteBandwidthMa
 UNIT_BANDWIDTH_VALUE = re.compile(r"/[^\x00-\x20:]+ [1-9][0-9]*[KMGTPE]?\Z")
 
 # A job-owned scratch directory: created before the command, exported as
-# `AGENTCTL_SCRATCH` and `TMPDIR`, measured at unit exit and removed. `tmpfs` is RAM,
+# `AGENTCTL_SCRATCH` and `TMPDIR`, then removed after its unit stops. `tmpfs` is RAM,
 # `nvme` the scratch filesystem; the environment overrides exist so a test
 # owns both roots.
 SCRATCH_KINDS = frozenset({"tmpfs", "nvme"})

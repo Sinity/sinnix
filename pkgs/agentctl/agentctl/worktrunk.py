@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
-import json
 import os
 import subprocess
 import tempfile
@@ -26,7 +25,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator, Mapping, Sequence
+from typing import Iterator, Mapping, Sequence
 
 from . import gitcmd
 from .limits import CALL_TIMEOUT_SECONDS
@@ -178,18 +177,6 @@ def _mutate(root: Path, arguments: Sequence[str], verb: str) -> str:
             time.sleep(_SETTLE_POLL_SECONDS)
 
 
-def _decode(payload: str, what: str) -> Any:
-    # wt pretty-prints its JSON across lines and may precede it with progress
-    # output, so the document runs from the first brace to the end of stdout.
-    for index, character in enumerate(payload):
-        if character in "{[":
-            try:
-                return json.loads(payload[index:])
-            except json.JSONDecodeError:
-                break
-    raise WorktrunkError(f"wt {what} did not print a JSON document")
-
-
 def _entry(fields: Mapping[str, str], *, main: bool) -> Worktree:
     branch = fields.get("branch")
     path = fields.get("worktree")
@@ -220,58 +207,6 @@ def worktrunk_list(root: Path) -> tuple[Worktree, ...]:
     if fields:
         trees.append(_entry(fields, main=not trees))
     return tuple(trees)
-
-
-def worktrunk_find(root: Path, branch: str) -> Worktree | None:
-    """``branch``'s worktree, or the branch alone when it has no worktree.
-
-    A branch that exists without a worktree is published with no path: a
-    caller about to create one must tell it from a branch that does not exist.
-    """
-    for tree in worktrunk_list(root):
-        if tree.branch == branch:
-            return tree
-    reference = gitcmd.git(
-        root,
-        "rev-parse",
-        "--verify",
-        "--quiet",
-        f"refs/heads/{branch}",
-        ok_statuses=(0, 1),
-        error=WorktrunkError,
-    )
-    return Worktree(branch=branch, path=None) if reference else None
-
-
-def worktrunk_create(
-    root: Path, branch: str, *, path: Path, base: str | None = None
-) -> Worktree:
-    """Create ``branch``'s worktree at ``path``, running the project's own hooks.
-
-    The path is passed explicitly rather than left to the user's worktrunk
-    config, because the project descriptor declares where its workspaces live and
-    agentctl validates the result against that declaration.
-    """
-    arguments = [
-        "--config-set",
-        f"worktree-path={json.dumps(str(path))}",
-        "switch",
-        branch,
-        "--create",
-        "--no-cd",
-        "-y",
-        "--format",
-        "json",
-    ]
-    if base is not None:
-        arguments.extend(["--base", base])
-    document = _decode(_mutate(root, arguments, "switch"), "switch")
-    if not isinstance(document, Mapping) or not document.get("path"):
-        raise WorktrunkError("wt switch published no worktree path")
-    created = worktrunk_find(root, branch)
-    if created is None:
-        raise WorktrunkError(f"wt created {branch} but does not list it")
-    return created
 
 
 def worktrunk_remove(

@@ -80,7 +80,7 @@ def test_failed_unit_observation_stops_before_cleanup_or_retains_ownership(
         pid = int(ready.read_text())
         if can_stop:
             assert not Path(f"/proc/{pid}").exists(), (
-                "the native child must exit before scratch is removed"
+                "the child must exit before scratch is removed"
             )
             assert not scratch.exists()
         else:
@@ -113,7 +113,7 @@ def test_command_result_survives_scratch_cleanup(tmp_path, monkeypatch, exit_cod
 
 
 @pytest.mark.parametrize("cancel", [False, True])
-def test_native_timeout_and_cancellation_remove_only_stopped_scratch(
+def test_unit_timeout_and_cancellation_remove_only_stopped_scratch(
     tmp_path, monkeypatch, cancel
 ):
     user_manager()
@@ -154,7 +154,6 @@ def test_native_timeout_and_cancellation_remove_only_stopped_scratch(
         assert ready.exists()
         assert not Path(f"/proc/{int(ready.read_text())}").exists()
         assert not scratch.exists()
-        assert outcome_of(tmp_path)["scratch"]["bytes"] == len("synthetic")
     finally:
         run._systemctl("stop", unit)
         run._systemctl("reset-failed", unit)

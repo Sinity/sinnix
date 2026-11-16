@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -261,16 +262,12 @@ def test_job_list_cursor_is_bound_to_the_project_filter(
 def test_job_operations_pass_the_job_id_through_to_agentctl(
     adapter: LocalJobs, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The gateway's stable job identity is agentctl's launch job_id.
-
-    Red if an operation drops it, which leaves the call addressing a queue
-    position that a reorder may have given to another job.
-    """
+    """The optional job ID reaches each read and control as a filter."""
     job_id = "fixture-verify-3f9a21c8"
-    moved = {**JOB_ROW, "task_id": 44, "job_id": job_id}
+    selected = {**JOB_ROW, "task_id": 41, "job_id": job_id}
     seen: dict[str, Any] = {}
 
-    def record(name: str, value: Any = moved) -> Any:
+    def record(name: str, value: Any = selected) -> Any:
         def call(*args: Any, **kwargs: Any) -> Any:
             seen[name] = (args, kwargs)
             return value
@@ -282,12 +279,12 @@ def test_job_operations_pass_the_job_id_through_to_agentctl(
     monkeypatch.setattr(launch, "cancel", record("cancel"))
     monkeypatch.setattr(launch, "retry", record("retry"))
     monkeypatch.setattr(
-        launch, "clean", record("clean", {**moved, "cleaned": True, "removed": []})
+        launch, "clean", record("clean", {**selected, "cleaned": True, "removed": []})
     )
     monkeypatch.setattr(
         job_queries,
         "result",
-        record("result", {**moved, "kind": "exit", "value": None}),
+        record("result", {**selected, "kind": "exit", "value": None}),
     )
 
     for operation, arguments in (
@@ -304,7 +301,7 @@ def test_job_operations_pass_the_job_id_through_to_agentctl(
             {"task_id": 41, "job_id": job_id, **arguments},
         )
         assert answer["job_id"] == job_id
-        assert answer["task_id"] == "44"
+        assert answer["task_id"] == "41"
 
     for name in ("wait", "get", "cancel", "retry", "clean", "result"):
         args, kwargs = seen[name]
@@ -357,57 +354,79 @@ def test_a_job_id_that_is_a_path_is_refused(adapter: LocalJobs) -> None:
     assert refused.value.code == "invalid_request"
 
 
-def test_job_logs_reads_the_log_of_the_job_the_reference_addresses(
+def test_job_logs_reads_only_the_selected_task(
     adapter: LocalJobs, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The job_id is resolved once and the log comes from that task.
-
-    Red if the read re-addresses the answering id without the job_id: a
-    `pueue switch` between the two reads hands back another job's log under
-    this job's launch job_id.
-    """
     job_id = "fixture-verify-3f9a21c8"
     jobs_dir = adapter.config.jobs_dir
     jobs_dir.mkdir(parents=True, exist_ok=True)
-
-    def task(task_id: int, name: str) -> pueue.Task:
-        artifacts.begin({"log_path": str(jobs_dir / f"{name}.log")}, "fixture-input")
-        (jobs_dir / f"{name}.log").write_text(f"log of {name}")
-        return pueue.Task(
-            task_id=task_id,
-            label="fixture:verify",
-            group="normal",
-            status="Done",
-            result="Success",
-            exit_code=0,
-            path=str(jobs_dir),
-            dependencies=(),
-            command=f"agentctl-run {jobs_dir / f'{name}.json'}",
-        )
-
-    mine = task(44, job_id)
-    occupant = task(44, "fixture-other-0badc0de")
-
-    # Id 41 names nothing now; the job_id finds its job by the one command
-    # that names its launch input, never through the whole history.
-    monkeypatch.setattr(
-        launch.pueue, "task", lambda task_id: {45: occupant}.get(task_id)
+    log_path = jobs_dir / f"{job_id}.log"
+    artifacts.begin({"log_path": str(log_path)}, "fixture-input")
+    log_path.write_text(f"log of {job_id}")
+    task = pueue.Task(
+        task_id=41,
+        label="fixture:verify",
+        group="normal",
+        status="Done",
+        result="Success",
+        exit_code=0,
+        path=str(jobs_dir),
+        dependencies=(),
+        command=f"agentctl-run {jobs_dir / f'{job_id}.json'}",
     )
-    monkeypatch.setattr(
-        launch.pueue,
-        "tasks_by_command",
-        lambda fragment: {
-            candidate.task_id: candidate
-            for candidate in (mine, occupant)
-            if fragment in candidate.command
-        },
-    )
-    monkeypatch.setattr(launch.pueue, "log", lambda _task_id: "")
+    monkeypatch.setattr(pueue, "task", lambda task_id: task if task_id == 41 else None)
+    monkeypatch.setattr(pueue, "log", lambda _task_id: "")
 
-    answer = _call(adapter, "job.logs", {"task_id": 41, "job_id": job_id})
+    answer = adapter.logs(task_id=41, job_id=job_id)
     assert answer["job_id"] == job_id
-    assert answer["task_id"] == "44"
+    assert answer["task_id"] == "41"
     assert answer["content"] == f"log of {job_id}"
+
+    with pytest.raises(JobOwnerError):
+        adapter.logs(task_id=41, job_id="fixture-other-0badc0de")
+
+
+def test_job_logs_keeps_the_job_and_page_on_one_attempt(adapter, root, monkeypatch):
+    job_id = "fixture-verify-output-race"
+    adapter.config.inputs_dir.mkdir(parents=True)
+    path = adapter.config.inputs_dir / f"{job_id}.json"
+    document = {
+        "job_id": job_id,
+        "queue_task_id": 41,
+        "working_directory": str(root),
+        "log_path": str(adapter.config.jobs_dir / f"{job_id}.log"),
+        "pool": "normal",
+    }
+    path.write_text(json.dumps(document))
+    selected = pueue.Task(
+        task_id=41,
+        label="fixture:verify",
+        group="normal",
+        status="Running",
+        result=None,
+        exit_code=None,
+        path=str(root),
+        dependencies=(),
+        command=f"agentctl-run {path}",
+    )
+    monkeypatch.setattr(pueue, "task", lambda task_id: selected)
+    original_view = job_queries.artifact_view
+
+    def start_after_view(config, task, attempt=None):
+        view = original_view(config, task, attempt)
+        if not view["attempts"]:
+            started = artifacts.begin(document, str(path))
+            Path(started["log_path"]).write_text("new attempt output")
+        return view
+
+    monkeypatch.setattr(job_queries, "artifact_view", start_after_view)
+    first = adapter.logs(task_id=41, job_id=job_id)
+    assert first["attempt"] == 0 and first["attempt_count"] == 0
+    assert first["available"] is False and first["content"] == ""
+    assert first["checkout"]["path"] == str(root)
+    second = adapter.logs(task_id=41, job_id=job_id)
+    assert second["attempt"] == 1 and second["content"] == "new attempt output"
+    assert second["checkout"]["path"] == str(root)
 
 
 def _task(

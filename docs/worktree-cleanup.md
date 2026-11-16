@@ -1,11 +1,27 @@
 # Worktree cleanup
 
-Checkout retirement is an explicit owner action through `agentctl worktree clean`.
-Integration, age and the absence of running processes do not establish that
-a checkout is released: its owner may need it between native jobs. Confirm that
-work is complete and preserve its working bytes and useful compiler outputs
-before requesting retirement. See [the command contract](agentctl.md) for
-recovery refs and preservation checks.
+`agentctl worktree clean PROJECT` removes registered non-main worktrees whose
+work is published. `--path CHECKOUT` limits the command to named checkouts.
+Locked worktrees and the project's own checkout stay in place.
+
+A checkout is published when its HEAD is in the default branch's history, its
+tree equals the current default branch's tree, or a merged pull request has
+exactly this HEAD and its merge commit is in the default branch's history.
+The command fetches the default branch before these checks. A merged pull
+request for an older head does not publish later commits on the same branch.
+
+Tracked changes and untracked files that Git does not ignore prevent removal.
+Ignored files are removed with the checkout. An unfinished queue job whose
+working directory is the checkout or one of its subdirectories also prevents
+removal; the result names its task ID, job label and state. Other processes are
+neither inspected nor stopped and can lose their working directory.
+
+The command saves HEAD under
+`refs/agentctl/recovery/checkouts/<path-hash>/<HEAD>`, runs `wt remove` in the
+foreground without terminating processes, then removes the checkout's exact
+Cargo cache directory and its local and remote branches. Branch deletion
+requires each branch still to name the published HEAD. A failure leaves its
+reason in the command's result. See [the command contract](agentctl.md).
 
 ## Compiler targets
 
@@ -59,14 +75,8 @@ Interrupted renamed entries meet the same checks.
 The grace period uses the newest marker, target and profile `deps/` mtime.
 `sinnix.features.dev.languages.cargoCache.minIdleHours` keeps recently selected
 or built targets after checkout removal. Cargo build locks also prevent removal.
-A qualified target is renamed under its build lock before deletion, so a build
+A removable target is renamed under its build lock before deletion, so a build
 that starts later selects a fresh target.
-
-Provisioning and target selection do not migrate warm targets or release old
-snapshot references. Before activating a new cache root, inspect its existing
-contents and target holders, preserve needed artifacts, then verify the installed
-unit and effective target from a real declared job. Existing target leases remain
-explicit until their owners release them.
 
 Managed sessions and Cargo direnv environments default to `CARGO_INCREMENTAL=0`.
 An explicit `CARGO_INCREMENTAL=1` enables incremental rebuilds. Declared AgentCTL operation values

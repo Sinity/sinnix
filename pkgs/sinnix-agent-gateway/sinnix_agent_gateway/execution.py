@@ -379,16 +379,16 @@ class LocalJobs:
         job_id = _job_id_argument(arguments)
         offset = int(arguments.get("offset") or 0)
         max_bytes = int(arguments.get("max_bytes") or MAX_LOG_BYTES)
-        page = job_queries.read_job_artifact(
+        task = job_queries.read_task(self.config, task_id, job_id)
+        view = job_queries._job_detail(self.config, task, arguments.get("attempt"))
+        page = job_queries._read_artifact(
             self.config,
-            task_id,
-            job_id,
-            attempt=arguments.get("attempt"),
-            offset=offset,
-            limit=max_bytes,
-        )
-        view = job_queries.get_job(
-            task_id, self.config, job_id, attempt=page["attempt"]
+            task,
+            view["attempt"],
+            "log",
+            offset,
+            max_bytes,
+            selected_view=view,
         )
         return {
             **job_payload(view),

@@ -146,8 +146,9 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
                 source_ref=ref,
             )
         else:
-            key = "job_id" if job_id is not None else "task_id"
-            if str(value.get(key)) != str(identity[key]):
+            if str(value.get("task_id")) != str(task_id) or (
+                job_id is not None and value.get("job_id") != job_id
+            ):
                 raise ProtocolError(
                     "owner_failed", "job owner response names another job"
                 )

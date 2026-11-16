@@ -54,8 +54,8 @@ def test_job_start_get_logs_and_wait_round_trip(
     assert json.loads(capsys.readouterr().out)[0]["label"] == "fixture:check"
 
     fake_pueue.finish_when_waited(1, lambda fake: fake.succeed(1))
-    assert cli.main(["job", "wait", "1"]) == cli.EXIT_REFUSED
-    assert "needs --job-id" in capsys.readouterr().err
+    assert cli.main(["job", "wait", "1"]) == 0
+    assert "succeeded" in capsys.readouterr().out
     assert cli.main(["--json", "job", "wait", "1", "--job-id", started["job_id"]]) == 0
     assert json.loads(capsys.readouterr().out)["phase"] == "succeeded"
 
@@ -114,7 +114,8 @@ def test_cli_cancel_before_start_retains_not_started_across_reads(
         document = json.loads(capsys.readouterr().out)
         assert document["phase"] == "cancelled"
         assert document["started"] is False
-        assert document["disposition"] == {"outcome": "cancelled", "started": False}
+        assert document["cancellation"]["started"] is False
+        assert document["cancellation"]["stopped"] is True
 
 
 def test_job_list_is_newest_first_and_bounded_unless_all(
@@ -552,7 +553,7 @@ def test_view_json_is_the_snapshot(
 def test_pressure_tick_reports_the_decision(
     cli_config: Config, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    from agentctl import launch, pressure
+    from agentctl import pressure
 
     monkeypatch.setattr(
         pressure,
@@ -561,47 +562,11 @@ def test_pressure_tick_reports_the_decision(
     )
     monkeypatch.setattr(pressure.pueue, "groups_status", lambda: {"agent": "Running"})
 
-    calls = []
-    monkeypatch.setattr(
-        launch,
-        "release_holds",
-        lambda config, **kwargs: (
-            calls.append(config) or {"released": [7], "waiting": []}
-        ),
-    )
     assert cli.main(["pressure", "tick"]) == 0
     output = capsys.readouterr()
     decision = json.loads(output.out)
     assert decision["action"] == "clear"
-    assert decision["holds_released"] == [7]
-    assert len(calls) == 1
-    assert calls[0].event_spool == cli_config.event_spool
     assert "pressure clear" in output.err
-
-
-def test_retired_destructive_cleanup_is_refused_before_touching_evidence(
-    cli_config: Config, tmp_path: Path
-) -> None:
-    state = cli_config.state_dir
-    historical = state / "jobs-archive" / "history.json"
-    current = state / "jobs" / "fixture.attempts" / "1" / "output.log"
-    historical.parent.mkdir(parents=True)
-    current.parent.mkdir(parents=True)
-    historical.write_bytes(b"historical evidence")
-    current.write_bytes(b"current attempt")
-    external = tmp_path / "external-evidence"
-    external.write_bytes(b"external evidence")
-    retained_link = state / "native"
-    retained_link.symlink_to(external)
-
-    with pytest.raises(SystemExit) as usage:
-        cli.main(["job", "clean", "--daemon-era"])
-
-    assert usage.value.code == cli.EXIT_USAGE
-    assert historical.read_bytes() == b"historical evidence"
-    assert current.read_bytes() == b"current attempt"
-    assert retained_link.is_symlink()
-    assert external.read_bytes() == b"external evidence"
 
 
 def test_job_start_passes_arguments_after_a_bare_double_dash(
@@ -737,9 +702,6 @@ def test_wait_archived_cancellation_retains_job_failure_exit(
         cli.main(["job", "cancel", str(own["task_id"]), "--job-id", own["job_id"]]) == 0
     )
     capsys.readouterr()
-    fake_pueue.next_id = own["task_id"]
-    assert cli.main(["job", "start", "fixture", "check"]) == 0
-    capsys.readouterr()
     assert (
         cli.main(
             [
@@ -789,44 +751,6 @@ def test_worktree_cleanup_can_target_one_completed_checkout(
         == cli.EXIT_OK
     )
     assert calls == [("fixture", [target])]
-
-
-@pytest.mark.parametrize("failure", [False, True])
-def test_queue_maintenance_reports_worktree_outcome_separately(
-    cli_config, monkeypatch, capsys, failure
-):
-    jobs = [{"task_id": 17, "state": "cleaned"}]
-    monkeypatch.setattr(cli.launch, "clean_terminal", lambda _: jobs)
-    result = (
-        [{"project": "fixture", "error": "holder census unavailable"}]
-        if failure
-        else [{"project": "fixture", "removed": ["candidate"], "kept": []}]
-    )
-    monkeypatch.setattr(cli.worktree_cleanup, "clean_published", lambda _, **__: result)
-    code = cli.main(["job", "clean", "--all-terminal", "--worktrees", "--json"])
-    observed = json.loads(capsys.readouterr().out)
-    assert observed["jobs"] == jobs and observed["queue_cleanup"] == "completed"
-    assert observed["worktrees"] == result
-    assert observed["worktree_cleanup"] == ("failed" if failure else "completed")
-    assert code == (cli.EXIT_REFUSED if failure else cli.EXIT_OK)
-
-
-def test_incomplete_cancel_has_refused_exit_status(cli_config, monkeypatch, capsys):
-    from agentctl import launch
-
-    monkeypatch.setattr(
-        launch,
-        "cancel",
-        lambda *args, **kwargs: {
-            "task_id": 42,
-            "label": "fixture:check",
-            "phase": "unresolved",
-            "state": "incomplete",
-            "terminal": False,
-        },
-    )
-    assert cli.main(["job", "cancel", "42"]) == cli.EXIT_REFUSED
-    assert json.loads(capsys.readouterr().out)["terminal"] is False
 
 
 @pytest.mark.parametrize("timeouts", [(900, 1800), (0, 0)])

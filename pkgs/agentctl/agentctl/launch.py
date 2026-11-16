@@ -1,7 +1,7 @@
-"""Job mutations: admission, enqueue, cancellation, retry and queue cleanup.
+"""Job creation, cancellation, retry and queue cleanup.
 
 Pueue and systemd own execution state; artifacts owns invocation storage.
-Stable-identity reads and bounded artifact projections belong to job_queries.
+Job reads belong to job_queries.
 """
 
 from __future__ import annotations
@@ -13,39 +13,28 @@ import os
 import pwd
 import re
 import subprocess
-import time
 import uuid
-from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, Iterator, Mapping, Sequence, TextIO
+from typing import Any, Callable, Mapping, Sequence
 
 import tomllib
 from sinnix_lib.atomic import atomic_publish
 
-from . import artifacts, cgroups, gitcmd, job_queries, pools, pueue
+from . import artifacts, gitcmd, job_queries, pueue
 from .config import Config
-from .job_queries import HOLD_REASON
 from .launch_input import scratch_path, write_input
 from .limits import CALL_TIMEOUT_SECONDS, SHORT_ID, SYSTEMCTL_TIMEOUT_SECONDS
 from .projects import AdmissionEnvelope, ProjectAdapter, ProjectOperation
-from .pueue import PueueError, PueueGroupError, Task
+from .pueue import PueueError, PueueGroupError, PueueTimeout, Task
 from .run import (
-    Outcome,
-    append_event,
     cancel_marker_for,
     systemd_environment,
 )
 
-LAUNCHER_POOL_VARIABLE = "AGENTCTL_POOL"
-ADMISSION_LOCK_NAME = "admission.lock"
-ADMISSION_LOCK_SECONDS = 60.0
-ADMISSION_LOCK_POLL_SECONDS = 0.05
-# How long a cancel waits for the wrapper to record `cancelled` after its
-# unit is stopped before pueue kills the wrapper outright.
-CANCEL_SETTLE_SECONDS = 15.0
-CANCEL_POLL_SECONDS = 0.5
+# Give the wrapper time to save output after its unit stops.
+CANCEL_FINISH_SECONDS = 15.0
 
 
 class EnqueueUncertain(job_queries.JobError):
@@ -370,39 +359,27 @@ def enqueue(
     if result_kind != "exit":
         launch["result_path"] = str(config.jobs_dir / f"{job_id}.result")
     input_path = config.inputs_dir / f"{job_id}.json"
-    with admission_lock(config):
-        hold = None if stashed else _admission_hold(config, group, label=label)
-        if hold is not None:
-            launch["hold"] = hold
-        write_input(input_path, launch)
-        if before_enqueue is not None:
-            before_enqueue(job_id)
-        try:
-            task_id = pueue.add(
-                group=group,
-                label=label,
-                command=(job_queries.QUEUE_RUN_EXECUTABLE, str(input_path)),
-                working_directory=working_directory,
-                after=after,
-                stashed=stashed or hold is not None,
-                priority=priority,
-            )
-        except PueueGroupError:
-            if not (idempotency_key is not None and after):
-                input_path.unlink(missing_ok=True)
-            raise
-        except PueueError as error:
-            raise EnqueueUncertain(job_id, error) from error
-        # Keep queue acknowledgement and the hold marker in the same admission
-        # transaction. A release between add and this write could enqueue a
-        # task while the stale local launch value restores its consumed hold.
-        launch["queue_task_id"] = task_id
-        write_input(input_path, launch)
-        if hold is not None:
-            append_event(
-                config.event_spool,
-                {"kind": "pool-hold", "action": "held", "task_id": task_id, **hold},
-            )
+    write_input(input_path, launch)
+    if before_enqueue is not None:
+        before_enqueue(job_id)
+    try:
+        task_id = pueue.add(
+            group=group,
+            label=label,
+            command=(job_queries.QUEUE_RUN_EXECUTABLE, str(input_path)),
+            working_directory=working_directory,
+            after=after,
+            stashed=stashed,
+            priority=priority,
+        )
+    except PueueGroupError:
+        if not (idempotency_key is not None and after):
+            input_path.unlink(missing_ok=True)
+        raise
+    except PueueError as error:
+        raise EnqueueUncertain(job_id, error) from error
+    launch["queue_task_id"] = task_id
+    write_input(input_path, launch)
     task = pueue.task(task_id)
     view = (
         job_queries.job_view(task)
@@ -411,120 +388,6 @@ def enqueue(
     )
     view.update(job_queries.launch_selection(launch))
     return view
-
-
-@contextmanager
-def admission_lock(config: Config, *, wait: bool = True) -> Iterator[None]:
-    """Serialize the queue observation and enqueue that admission depends on."""
-    path = config.state_dir / ADMISSION_LOCK_NAME
-    path.parent.mkdir(parents=True, exist_ok=True)
-    deadline = time.monotonic() + ADMISSION_LOCK_SECONDS
-    with path.open("a", encoding="utf-8") as handle:
-        while True:
-            try:
-                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except BlockingIOError as error:
-                if not wait or time.monotonic() >= deadline:
-                    raise job_queries.JobError(
-                        f"admission lock busy: {path}"
-                    ) from error
-                time.sleep(ADMISSION_LOCK_POLL_SECONDS)
-        try:
-            yield
-        finally:
-            fcntl.flock(handle, fcntl.LOCK_UN)
-
-
-def _admission_hold(config: Config, group: str, *, label: str) -> dict[str, Any] | None:
-    partners = pools.exclusive_partners(config.pools, group)
-    if not partners:
-        return None
-    launcher = os.environ.get(LAUNCHER_POOL_VARIABLE)
-    if launcher in partners:
-        raise job_queries.JobError(
-            f"{label} runs in pool {group!r}, which excludes its launcher {launcher!r}"
-        )
-    blocking = pools.blocking_tasks(config.pools, group, pueue.live().tasks)
-    if not blocking:
-        return None
-    return {
-        "reason": HOLD_REASON,
-        "pool": group,
-        "excluded_by": list(partners),
-        "waiting_for": list(blocking),
-        "held_at": datetime.now(UTC).isoformat(),
-    }
-
-
-def _consume_hold(config: Config, task: Task, expected: Mapping[str, Any]) -> bool:
-    """Clear the exact admission intent after its queued task was released.
-
-    The launch input outlives queue transitions. Leaving the marker there would
-    make a later operator stash look like an unresolved AgentCTL hold.
-    """
-    path = job_queries.launch_input_path(task)
-    value = job_queries.read_launch_input(config, task)
-    if (
-        path is None
-        or value is None
-        or value.get("job_id") != job_queries.job_id_of(task)
-        or value.get("pool") != task.group
-        or value.get("hold") != dict(expected)
-    ):
-        return False
-    updated = dict(value)
-    updated.pop("hold", None)
-    updated["queue_task_id"] = task.task_id
-    write_input(path, updated)
-    return True
-
-
-def release_holds(
-    config: Config, *, wait: bool = True
-) -> dict[str, list[dict[str, Any]]]:
-    """Release only AgentCTL-created cross-pool holds whose partners drained."""
-    try:
-        with admission_lock(config, wait=False) if not wait else admission_lock(config):
-            tasks = pueue.live().tasks
-            held = {
-                task.task_id: hold
-                for task in tasks.values()
-                if (hold := job_queries.admission_hold(config, task)) is not None
-            }
-            released: list[dict[str, Any]] = []
-            waiting: list[dict[str, Any]] = []
-            for task_id in sorted(held):
-                task = tasks[task_id]
-                blockers = pools.blocking_tasks(
-                    config.pools,
-                    task.group,
-                    tasks,
-                    task_id=task_id,
-                    held=frozenset(held),
-                )
-                row = {
-                    "task_id": task_id,
-                    "label": task.label,
-                    "pool": task.group,
-                    "excluded_by": list(
-                        pools.exclusive_partners(config.pools, task.group)
-                    ),
-                    "waiting_for": list(blockers),
-                }
-                if blockers:
-                    waiting.append(row)
-                    continue
-                pueue.enqueue(task_id)
-                _consume_hold(config, task, held[task_id])
-                released.append(row)
-                append_event(
-                    config.event_spool,
-                    {"kind": "pool-hold", "action": "released", **row},
-                )
-            return {"released": released, "waiting": waiting}
-    except (job_queries.JobError, PueueError) as error:
-        return {"released": [], "waiting": [{"error": str(error)}]}
 
 
 def _idempotent_job_id(key: str) -> str:
@@ -563,9 +426,10 @@ def lookup_operation_request(
         )
     ):
         raise job_queries.JobError(f"idempotent launch identity mismatch for {job_id}")
-    task = job_queries.find_task(
-        pueue.tasks(), document.get("queue_task_id", -1), job_id
-    )
+    task_id = document.get("queue_task_id")
+    task = pueue.task(task_id) if isinstance(task_id, int) else None
+    if task is not None and job_queries.job_id_of(task) != job_id:
+        raise job_queries.JobError(f"task {task_id} does not match job {job_id}")
     if task is not None:
         return {**job_queries.get_job(task.task_id, config, job_id), "reused": True}
     if document.get("queue_task_id") is not None or artifacts.attempts(document):
@@ -821,36 +685,19 @@ def active_tasks(project: ProjectAdapter, operation: ProjectOperation) -> list[i
     ]
 
 
-# A not-started cancellation is a launch-input disposition, never an attempt
-# outcome file: writing the compatibility outcome path would look like a
-# started attempt and could clobber a previous successful retry's alias.
-NOT_STARTED_CANCEL = {"outcome": Outcome.CANCELLED.value, "started": False}
-
-
-def _write_disposition(
-    config: Config, task: Task, disposition: Mapping[str, Any]
-) -> None:
-    path = job_queries.launch_input_path(task)
-    if path is None or not job_queries.owns_path(config, task, path):
-        raise job_queries.JobError("cannot record cancellation disposition")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with (path.with_name(path.name + ".lock")).open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        write_input(job_queries.disposition_path(path), dict(disposition))
-
-
 def _stop_unit(unit: str) -> None:
     try:
-        subprocess.run(
+        completed = subprocess.run(
             ["systemctl", "--user", "stop", unit],
             capture_output=True,
             check=False,
             timeout=CALL_TIMEOUT_SECONDS,
             env=systemd_environment(),
         )
-    except (OSError, subprocess.SubprocessError):
-        # The cgroup observation below decides whether cancellation completed.
-        pass
+    except (OSError, subprocess.SubprocessError) as error:
+        raise job_queries.JobError(f"could not stop {unit}: {error}") from error
+    if completed.returncode != 0 and _unit_state(unit) != "stopped":
+        raise job_queries.JobError(f"could not stop {unit}")
 
 
 def _unit_state(unit: str) -> str:
@@ -893,10 +740,9 @@ def cancel(
     expected_attempt: int | None = None,
     actor: str | None = None,
     reason: str | None = None,
-    settle_seconds: float | None = None,
-    sleep: Callable[[float], None] = time.sleep,
+    finish_seconds: float = CANCEL_FINISH_SECONDS,
 ) -> dict[str, Any]:
-    """Optionally compare an attempt token while holding its allocation lock."""
+    """Stop the job's service before removing or killing its queue task."""
     actor = actor if actor is not None else pwd.getpwuid(os.getuid()).pw_name
     if not isinstance(actor, str) or not actor.strip() or len(actor) > 256:
         raise job_queries.JobError(
@@ -906,47 +752,115 @@ def cancel(
         raise job_queries.JobError(
             "cancellation reason must be at most 4096 characters"
         )
-    request = {
-        "actor": actor.strip(),
-        "uid": os.getuid(),
-        "reason": reason,
-        "requested_at": datetime.now(UTC).isoformat(),
-    }
-    if expected_attempt is None:
-        return _cancel(
-            config,
-            task_id,
-            job_id=job_id,
-            settle_seconds=settle_seconds,
-            sleep=sleep,
-            cancellation=request,
-        )
-    if job_id is None:
-        raise job_queries.JobError("expected_attempt requires a stable job id")
-    task = job_queries.addressed(task_id, job_id)
+    if expected_attempt is not None and job_id is None:
+        raise job_queries.JobError("expected_attempt requires a job id")
+    task = job_queries.task_by_id(task_id, job_id)
+    job_id = job_id or job_queries.job_id_of(task)
+    unit = job_queries.unit_of(task)
     document = job_queries.read_launch_input(config, task) or {}
     log = document.get("log_path")
-    if not log or not job_queries.owns_path(config, task, Path(log)):
-        raise job_queries.JobError("cannot verify the job's execution attempt")
+    if log is not None and not job_queries.owns_path(config, task, Path(log)):
+        raise job_queries.JobError("cannot read the job's launch input")
+    if log is None and job_id is not None:
+        log = str(config.jobs_dir / f"{job_id}.log")
+        document = {**document, "log_path": log}
+    if log is None:
+        if expected_attempt is not None:
+            raise job_queries.JobError("cannot verify the job's execution attempt")
+        if not task.terminal:
+            if task.started_at is None:
+                pueue.remove([task_id])
+            else:
+                pueue.kill(task_id)
+        return {
+            **job_queries.job_view(pueue.task(task_id) or task),
+            "state": "terminal"
+            if task.terminal
+            else "removed"
+            if task.started_at is None
+            else "stopped",
+            "unit": None,
+            "already_terminal": task.terminal,
+        }
     root = artifacts.root_for(Path(log))
     root.mkdir(parents=True, exist_ok=True)
+    removed = False
     with (root / ".allocation.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+        task = job_queries.task_by_id(task_id, job_id)
         current = job_queries.artifact_view(config, task)["attempt"]
-        if current != expected_attempt:
+        if expected_attempt is not None and current != expected_attempt:
             raise job_queries.JobError(
                 f"execution attempt changed: expected {expected_attempt}, found {current}"
             )
-        return _cancel(
-            config,
-            task.task_id,
-            job_id=job_id,
-            settle_seconds=settle_seconds,
-            sleep=sleep,
-            allocation_lock=lock,
-            expected_attempt=expected_attempt,
-            cancellation=request,
+        if task.terminal:
+            if unit is not None:
+                _stop_unit(unit)
+            return {
+                **job_queries.job_view(task),
+                "state": "terminal",
+                "unit": unit,
+                "already_terminal": True,
+            }
+        unfinished = job_queries.unfinished_attempt(config, task)
+        started = task.started_at is not None or unfinished
+        number = artifacts.attempt_for_start(document, task.started_at)
+        request = _record_cancellation(
+            document,
+            number if task.started_at is not None else 0,
+            {
+                "actor": actor.strip(),
+                "uid": os.getuid(),
+                "reason": reason,
+                "requested_at": datetime.now(UTC).isoformat(),
+                "started": started,
+            },
         )
+        write_input(cancel_marker_for(log), {"attempt": number})
+        if unit is not None:
+            _stop_unit(unit)
+        request = _record_cancellation(
+            document, request["attempt"], {**request, "stopped": True}
+        )
+        selected = job_queries.task_by_id(task_id, job_id)
+        if not selected.terminal and selected.started_at is None:
+            try:
+                pueue.remove([task_id])
+                removed = True
+            except PueueError:
+                selected = job_queries.task_by_id(task_id, job_id)
+                if not selected.terminal and selected.started_at is None:
+                    raise
+                if not selected.terminal:
+                    pueue.kill(task_id)
+        task = selected
+    if not removed and not task.terminal:
+        try:
+            pueue.wait(task_id, timeout_seconds=finish_seconds)
+        except PueueTimeout:
+            with (root / ".allocation.lock").open("a") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                selected = job_queries.task_by_id(task_id, job_id)
+                if (
+                    job_queries.artifact_view(config, selected)["attempt"] > number
+                    or selected.started_at != task.started_at
+                ):
+                    raise job_queries.JobError(
+                        "execution attempt changed during cancellation"
+                    ) from None
+                if not selected.terminal:
+                    if selected.started_at is None:
+                        pueue.remove([task_id])
+                        removed = True
+                    else:
+                        pueue.kill(task_id)
+    return {
+        **job_queries.get_job(task_id, config, job_id),
+        "state": "removed" if removed else "stopped",
+        "unit": unit,
+        "already_terminal": False,
+        "cancellation": request,
+    }
 
 
 def _record_cancellation(
@@ -964,468 +878,64 @@ def _record_cancellation(
     return record
 
 
-def _retain_disposition(
-    config: Config, task: Task, disposition: Mapping[str, Any], *, owned: bool
-) -> None:
-    if owned:
-        _write_disposition(config, task, disposition)
-
-
-def _unresolved_cancel(
-    view: Mapping[str, Any],
-    *,
-    unit: str | None,
-    disposition: Mapping[str, Any],
-) -> dict[str, Any]:
-    return {
-        **view,
-        "phase": "unresolved",
-        "started": True,
-        "state": "unresolved",
-        "unit": unit,
-        "disposition": dict(disposition),
-    }
-
-
-def _cancelled_not_started(
-    view: Mapping[str, Any], disposition: Mapping[str, Any]
-) -> dict[str, Any]:
-    return {
-        **view,
-        "phase": Outcome.CANCELLED.value,
-        "terminal": True,
-        "started": False,
-        "state": "removed",
-        "unit": None,
-        "removed": [],
-        "disposition": dict(disposition),
-    }
-
-
-def _cancel_not_started(
-    config: Config,
-    task: Task,
-    view: Mapping[str, Any],
-    *,
-    allocation_locked: bool = False,
-    cancellation: Mapping[str, Any],
-) -> dict[str, Any] | None:
-    """Drop a queued launch and retain cancelled/not-started, or give up.
-
-    Returns None only when the queue still holds a started attempt: the
-    caller must address that attempt. A started attempt whose queue row is
-    already gone is unresolved, never not-started.
-    """
-    intent = {"cancel_requested": True, "confirmed": False}
-    try:
-        _write_disposition(config, task, intent)
-        owned = True
-    except job_queries.JobError:
-        owned = False
-    document = job_queries.read_launch_input(config, task) or {}
-    if owned:
-        view = {**view, "cancellation": _record_cancellation(document, 0, cancellation)}
-    log = document.get("log_path")
-    lock_root = None
-    marker = None
-    if (
-        owned
-        and isinstance(log, str)
-        and job_queries.owns_path(config, task, Path(log))
-    ):
-        marker = cancel_marker_for(log)
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        lock_root = artifacts.root_for(Path(log))
-        lock_root.mkdir(parents=True, exist_ok=True)
-    lock_handle = None
-    if lock_root is not None and not allocation_locked:
-        lock_handle = (lock_root / ".allocation.lock").open("a")
-        fcntl.flock(lock_handle, fcntl.LOCK_EX)
-    try:
-        before = job_queries.attempt_count(config, task)
-        marker_attempt = None
-        if marker is not None:
-            records = artifacts.attempts(document)
-            latest = records[-1]["attempt"] if records else 0
-            marker_attempt = (
-                latest
-                if latest and job_queries.unfinished_attempt(config, task)
-                else latest + 1
-            )
-            write_input(marker, {"attempt": marker_attempt})
-        current = pueue.task(task.task_id)
-        if current is not None and current.started_at is not None:
-            return None
-        if job_queries.unfinished_attempt(
-            config, current if current is not None else task
-        ):
-            if current is not None and current.started_at is not None:
-                return None
-            unresolved = {
-                **intent,
-                "unresolved": True,
-                "reason": "runner started during cancel",
-            }
-            target = current if current is not None else task
-            _retain_disposition(config, target, unresolved, owned=owned)
-            return _unresolved_cancel(
-                job_queries.job_view(target) if current is not None else view,
-                unit=job_queries.unit_of(target),
-                disposition=unresolved,
-            )
-        if current is not None:
-            try:
-                pueue.remove([current.task_id])
-            except PueueError:
-                current = pueue.task(current.task_id)
-                if current is not None and (
-                    current.started_at is not None
-                    or job_queries.unfinished_attempt(config, current)
-                ):
-                    return None
-                if current is not None:
-                    unresolved = {
-                        **intent,
-                        "unresolved": True,
-                        "reason": "queue still holds the not-started launch after remove failed",
-                    }
-                    _retain_disposition(config, current, unresolved, owned=owned)
-                    return _unresolved_cancel(
-                        job_queries.job_view(current),
-                        unit=job_queries.unit_of(current),
-                        disposition=unresolved,
-                    )
-        current = pueue.task(task.task_id)
-        started = (
-            job_queries.attempt_count(config, task) > before
-            or job_queries.unfinished_attempt(config, task)
-            or (current is not None and current.started_at is not None)
-        )
-        if started and current is not None:
-            return None
-        if started:
-            unresolved = {
-                **intent,
-                "unresolved": True,
-                "reason": "runner started during cancel",
-            }
-            _retain_disposition(config, task, unresolved, owned=owned)
-            return _unresolved_cancel(
-                view, unit=job_queries.unit_of(task), disposition=unresolved
-            )
-        if current is not None:
-            unresolved = {
-                **intent,
-                "unresolved": True,
-                "reason": "queue still holds the launch after remove",
-            }
-            _retain_disposition(config, current, unresolved, owned=owned)
-            return _unresolved_cancel(
-                job_queries.job_view(current),
-                unit=job_queries.unit_of(current),
-                disposition=unresolved,
-            )
-        confirmed = dict(NOT_STARTED_CANCEL)
-        if marker is not None and marker_attempt is not None:
-            try:
-                if json.loads(marker.read_text()).get("attempt") == marker_attempt:
-                    marker.unlink(missing_ok=True)
-            except (OSError, UnicodeDecodeError, json.JSONDecodeError, AttributeError):
-                pass
-        _retain_disposition(config, task, confirmed, owned=owned)
-        return _cancelled_not_started(view, confirmed)
-    finally:
-        if lock_handle is not None:
-            fcntl.flock(lock_handle, fcntl.LOCK_UN)
-            lock_handle.close()
-
-
-def _cancel(
-    config: Config,
-    task_id: int,
-    *,
-    job_id: str | None = None,
-    settle_seconds: float | None = None,
-    sleep: Callable[[float], None] = time.sleep,
-    allocation_lock: TextIO | None = None,
-    expected_attempt: int | None = None,
-    cancellation: Mapping[str, Any],
-) -> dict[str, Any]:
-    """Make the task not run: drop it while queued, stop its unit while running.
-
-    pueue kills the wrapper with SIGKILL, which stops nothing inside the unit
-    and leaves no outcome record, so the unit is stopped first and the
-    wrapper is given ``settle_seconds`` to record `cancelled` and exit on its
-    own; only a wrapper still running after that is killed. `systemctl stop`
-    ends the wrapper's wait with a success status, which is why the cancel
-    marker is written before it: the wrapper reports `cancelled` when it
-    finds one, and consumes the marker.
-    """
-    if settle_seconds is None:
-        settle_seconds = CANCEL_SETTLE_SECONDS
-    task = job_queries.addressed(task_id, job_id)
-    task_id = task.task_id
-    view = job_queries.job_view(task)
-    if task.terminal:
-        obstacle = cgroups.cancellation_obstacle(
-            job_queries.read_disposition(config, task)
-        )
-        if obstacle is not None:
-            return {
-                **view,
-                "state": "incomplete",
-                "phase": "unresolved",
-                "terminal": False,
-                "unit": obstacle["unit"],
-                "cgroup_observation": obstacle,
-                "cancellation_incomplete": True,
-                "already_terminal": True,
-            }
-        return {**view, "state": "terminal", "unit": None, "already_terminal": True}
-    if task.started_at is None:
-        stopped = _cancel_not_started(
-            config,
-            task,
-            view,
-            allocation_locked=allocation_lock is not None,
-            cancellation=cancellation,
-        )
-        if stopped is not None:
-            return {**stopped, "already_terminal": False}
-        live = pueue.task(task_id)
-        if live is None:
-            raise job_queries.JobError(
-                "cancel raced runner start and the queue no longer holds the launch"
-            )
-        task = live
-        view = job_queries.job_view(task)
-    unit = job_queries.unit_of(task)
-    cgroup = None
-    declared_log = (job_queries.read_launch_input(config, task) or {}).get("log_path")
-    log = (
-        Path(declared_log)
-        if declared_log and job_queries.owns_path(config, task, Path(declared_log))
-        else None
-    )
-    if log is not None:
-        marker = cancel_marker_for(log)
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        root = artifacts.root_for(log)
-        root.mkdir(parents=True, exist_ok=True)
-        allocation = (root / ".allocation.lock").open("a")
-        if allocation_lock is None:
-            fcntl.flock(allocation, fcntl.LOCK_EX)
-        try:
-            records = artifacts.attempts(
-                job_queries.read_launch_input(config, task) or {}
-            )
-            latest = records[-1]["attempt"] if records else 0
-            active_attempt = (
-                expected_attempt
-                if allocation_lock is not None
-                else latest
-                if latest and job_queries.unfinished_attempt(config, task)
-                else latest + 1
-            )
-            request = _record_cancellation(
-                job_queries.read_launch_input(config, task) or {},
-                active_attempt,
-                cancellation,
-            )
-            write_input(marker, {"attempt": active_attempt})
-            if unit is not None:
-                cgroup = cgroups.unit_cgroup(unit)
-                _write_disposition(
-                    config,
-                    task,
-                    {
-                        "outcome": Outcome.CANCELLED.value,
-                        "cancellation_incomplete": True,
-                        "unresolved": True,
-                        "started": True,
-                        "unit": unit,
-                        "cgroup": cgroup,
-                        "attempt": active_attempt,
-                    },
-                )
-                _stop_unit(unit)
-        finally:
-            if allocation_lock is None:
-                fcntl.flock(allocation, fcntl.LOCK_UN)
-            allocation.close()
-    elif unit is not None:
-        cgroup = cgroups.unit_cgroup(unit)
-        _stop_unit(unit)
-    # The guard pins selection through publication of the stop request. The
-    # wrapper needs the same lock to consume its marker and publish completion.
-    if allocation_lock is not None:
-        fcntl.flock(allocation_lock, fcntl.LOCK_UN)
-    deadline = time.monotonic() + settle_seconds
-    current = pueue.task(task_id)
-    while current is not None and not current.terminal:
-        if time.monotonic() >= deadline:
-            try:
-                if allocation_lock is None:
-                    pueue.kill(task_id)
-                else:
-                    # A restart may allocate after the request lock is released.
-                    # Never escalate an old guarded request onto a newer wrapper.
-                    fcntl.flock(allocation_lock, fcntl.LOCK_EX)
-                    try:
-                        observed = pueue.task(task_id)
-                        if job_queries.artifact_view(config, task)[
-                            "attempt"
-                        ] != expected_attempt or (
-                            observed is not None
-                            and (
-                                job_queries.job_id_of(observed)
-                                != job_queries.job_id_of(task)
-                                or observed.started_at != task.started_at
-                            )
-                        ):
-                            raise job_queries.JobError(
-                                "execution attempt changed while waiting for cancellation"
-                            )
-                        # A published receipt means finalization has passed the
-                        # lock and may exit/restart while pueue acknowledges it.
-                        if (
-                            observed is not None
-                            and not observed.terminal
-                            and job_queries.unfinished_attempt(config, task)
-                        ):
-                            pueue.kill(task_id)
-                    finally:
-                        fcntl.flock(allocation_lock, fcntl.LOCK_UN)
-            except PueueError:
-                pass
-            current = pueue.task(task_id)
-            break
-        sleep(CANCEL_POLL_SECONDS)
-        current = pueue.task(task_id)
-    state = _unit_state(unit) if unit is not None else "stopped"
-    observation = (
-        cgroups.observe(unit, cgroup) if unit is not None else {"status": "empty"}
-    )
-    incomplete = observation["status"] != "empty"
-    if incomplete:
-        state = "incomplete"
-    if log is not None and unit is not None:
-        _write_disposition(
-            config,
-            task,
-            {
-                "outcome": Outcome.CANCELLED.value,
-                "cancellation_incomplete": incomplete,
-                "unresolved": incomplete,
-                "started": True,
-                "attempt": active_attempt,
-                **observation,
-            },
-        )
-    return {
-        **(job_queries.job_view(current) if current is not None else view),
-        "state": state,
-        **({"unresolved": True} if state in {"unresolved", "incomplete"} else {}),
-        "unit": unit,
-        **job_queries.outcome(
-            config, current if current is not None else task, attempt=expected_attempt
-        ),
-        **(
-            {
-                "phase": "unresolved",
-                "terminal": False,
-                "cancellation_incomplete": True,
-                "cgroup_observation": observation,
-            }
-            if incomplete
-            else {}
-        ),
-        "already_terminal": False,
-        **({"cancellation": request} if log is not None else {}),
-    }
-
-
-def _unlink_all(paths: Sequence[Path]) -> list[str]:
-    removed = []
-    for path in paths:
-        try:
-            path.unlink()
-            removed.append(str(path))
-        except OSError:
-            continue
-    return removed
-
-
 def clean(config: Config, task_id: int, job_id: str | None = None) -> dict[str, Any]:
-    """Remove a terminal queue entry; retain its launch and execution evidence."""
-    if job_id is not None and not job_queries.JOB_ID.fullmatch(job_id):
-        raise job_queries.JobError(f"{job_id!r} is not a job id")
+    """Remove a terminal queue entry, keeping its input and output."""
     task = job_queries.read_task(config, task_id, job_id)
     if task.status != "Archived" and not task.terminal:
         raise job_queries.JobError(
-            f"task {task.task_id} is still {task.status.lower()}; cancel it first"
+            f"task {task_id} is still {task.status.lower()}; cancel it first"
         )
-    view = job_queries.get_job(task.task_id, config, job_queries.job_id_of(task))
-    _require_cancellation_drained(config, task)
+    view = job_queries.get_job(task_id, config, job_queries.job_id_of(task))
     if task.status != "Archived":
-        pueue.remove([task.task_id])
-    log = job_queries.artifact_path(config, task, ".log")
-    removed = _unlink_all([cancel_marker_for(log)]) if log is not None else []
-    return {**view, "cleaned": True, "removed": removed, "retained": True}
+        pueue.remove([task_id])
+    return {**view, "cleaned": True, "removed": [], "retained": True}
 
 
-def clean_terminal(config: Config) -> list[dict[str, Any]]:
-    """Clean every terminal job agentctl launched; other queue entries stay."""
-    tasks = pueue.tasks()
-    return [
-        clean(config, task.task_id, job_queries.job_id_of(task))
-        for task in sorted(tasks.values(), key=lambda item: item.task_id)
-        if task.terminal and job_queries.launch_input_path(task) is not None
-    ]
-
-
-def _require_cancellation_drained(config: Config, task: Task) -> None:
-    obstacle = cgroups.cancellation_obstacle(job_queries.read_disposition(config, task))
-    if obstacle is not None:
-        raise job_queries.JobError(f"cancellation incomplete: {obstacle}")
+def clean_terminal(
+    config: Config, *, now: datetime | None = None
+) -> list[dict[str, Any]]:
+    """Remove jobs finished more than 24 hours ago; keep recent task IDs."""
+    moment = now or datetime.now(UTC)
+    removed = []
+    for task in sorted(pueue.tasks().values(), key=lambda item: item.task_id):
+        if (
+            not task.terminal
+            or not task.ended_at
+            or job_queries.launch_input_path(task) is None
+        ):
+            continue
+        try:
+            ended = datetime.fromisoformat(task.ended_at)
+        except ValueError:
+            continue
+        if ended.tzinfo is None:
+            ended = ended.replace(tzinfo=UTC)
+        if (moment - ended).total_seconds() > 24 * 60 * 60:
+            removed.append(clean(config, task.task_id, job_queries.job_id_of(task)))
+    return removed
 
 
 def retry(config: Config, task_id: int, job_id: str | None = None) -> dict[str, Any]:
-    """Restart in place, applying the same cross-pool admission as a new launch."""
-    with admission_lock(config):
-        task = job_queries.addressed(task_id, job_id)
-        if not task.terminal:
-            raise job_queries.JobError(
-                f"task {task.task_id} is still {task.status.lower()}"
-            )
-        _require_cancellation_drained(config, task)
-        # The old attempt's cancellation request stays in its artifact directory.
-        # A drained guard must not attach to the next attempt's reused unit name.
-        if job_queries.read_disposition(config, task):
-            _write_disposition(config, task, {})
-        hold = _admission_hold(config, task.group, label=task.label)
-        if hold is not None:
-            value = job_queries.read_launch_input(config, task)
-            path = job_queries.launch_input_path(task)
-            if (
-                value is None
-                or path is None
-                or value.get("job_id") != job_queries.job_id_of(task)
-            ):
+    """Restart a terminal task in place, after any cancellation finishes."""
+    task = job_queries.task_by_id(task_id, job_id)
+    document = job_queries.read_launch_input(config, task) or {}
+    log = document.get("log_path")
+    if log:
+        if not job_queries.owns_path(config, task, Path(log)):
+            raise job_queries.JobError("cannot read the job's launch input")
+        root = artifacts.root_for(Path(log))
+        root.mkdir(parents=True, exist_ok=True)
+        with (root / ".allocation.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            task = job_queries.task_by_id(task_id, job_id)
+            if not task.terminal:
                 raise job_queries.JobError(
-                    f"task {task.task_id} has no owned launch input for a held retry"
+                    f"task {task_id} is still {task.status.lower()}"
                 )
-            pueue.restart(task.task_id, stashed=True)
-            write_input(path, {**value, "queue_task_id": task.task_id, "hold": hold})
-            append_event(
-                config.event_spool,
-                {
-                    "kind": "pool-hold",
-                    "action": "held",
-                    "task_id": task.task_id,
-                    **hold,
-                },
-            )
-        else:
-            pueue.restart(task.task_id)
-    return job_queries.get_job(task.task_id, config, job_id)
+            artifacts.cancellation_path(Path(log), 0).unlink(missing_ok=True)
+            pueue.restart(task_id)
+    else:
+        if not task.terminal:
+            raise job_queries.JobError(f"task {task_id} is still {task.status.lower()}")
+        pueue.restart(task_id)
+    return job_queries.get_job(task_id, config, job_id)

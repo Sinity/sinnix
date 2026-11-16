@@ -84,9 +84,7 @@ def test_job_review_preserves_native_receipt_and_incident_uses_observe(
 
 
 @pytest.mark.parametrize("target", [{"task_id": 41}, {"ref": "sinnix://jobs/41"}])
-def test_job_review_follows_launch_identity_across_reorders(
-    tmp_path, monkeypatch, target
-):
+def test_job_review_passes_both_ids_to_the_reader(tmp_path, monkeypatch, target):
     server, _, fake = make_server(tmp_path, monkeypatch)
     job_id = "fixture-worker-original"
 
@@ -94,7 +92,7 @@ def test_job_review_follows_launch_identity_across_reorders(
         assert args["job_id"] == job_id
         return {
             **DONE,
-            "task_id": "43",
+            "task_id": "41",
             "job_id": job_id,
             "content": "original output",
         }
@@ -106,7 +104,7 @@ def test_job_review_follows_launch_identity_across_reorders(
         {"intent": "job.review", "job": {**target, "job_id": job_id}},
     )
     assert response["result"]["outcome"] == "ok", response
-    assert response["data"]["ref"] == "sinnix://jobs/43"
+    assert response["data"]["ref"] == "sinnix://jobs/41"
     assert (
         response["data"]["components"][0]["data"]["data"]["content"]
         == "original output"

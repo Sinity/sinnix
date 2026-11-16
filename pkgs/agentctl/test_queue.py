@@ -1,269 +1,233 @@
-"""Queue state and cheap job addressing.
-
-The live test drives a private pueued; the fake test proves a job read never
-loads the queue's whole history.
-"""
+"""Queue ordering and masked byte pages shared by the CLI and gateway."""
 
 from __future__ import annotations
 
+import base64
 import json
-import time
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from agentctl import job_queries, pueue
-from agentctl.config import Config, PoolPolicy
-from conftest import FakePueue
-
-GROUP = "group"
+from agentctl import artifacts, job_queries, pueue
+from agentctl.config import Config
 
 
-def _until(task_id: int, status: str, *, seconds: float = 20.0) -> pueue.Task:
-    deadline = time.monotonic() + seconds
-    while True:
-        task = pueue.task(task_id)
-        if task is not None and task.status == status:
-            return task
-        if time.monotonic() > deadline:
-            raise AssertionError(f"task {task_id} never reached {status}: {task}")
-        time.sleep(0.05)
-
-
-def test_queue_state_names_what_holds_each_slot_and_who_waits(
-    live_pueue: str, config: Config, tmp_path: Path
-) -> None:
-    pueue.group_add(GROUP, 1)
-    long = pueue.add(
-        group=GROUP,
-        label="fixture:shell",
-        command=("sleep", "60"),
-        working_directory=tmp_path,
-    )
-    _until(long, "Running")
-    first = pueue.add(
-        group=GROUP,
-        label="fixture:shell",
-        command=("true",),
-        working_directory=tmp_path,
-    )
-    second = pueue.add(
-        group=GROUP,
-        label="fixture:shell",
-        command=("true",),
-        working_directory=tmp_path,
+@pytest.fixture
+def config(tmp_path: Path) -> Config:
+    return Config(
+        project_roots=(),
+        event_spool=tmp_path / "events.jsonl",
+        state_dir=tmp_path / "state",
+        agentctl_executable="agentctl",
     )
 
-    state = job_queries.queue_state(config, [GROUP])[GROUP]
-    assert (state["parallel"], state["status"]) == (1, "Running")
-    assert [entry["task_id"] for entry in state["running"]] == [long]
-    assert [entry["task_id"] for entry in state["queued"]] == [first, second]
-    assert state["queued_count"] == 2
-    assert state["oldest_queued_seconds"] is not None
 
-    position = job_queries.job_queue(config, job_queries.job_view(pueue.task(second)))
-    assert position["position"] == 2 and position["ahead"] == [first]
-    assert [entry["task_id"] for entry in position["occupied_by"]] == [long]
-    running = job_queries.job_queue(config, job_queries.job_view(pueue.task(long)))
-    assert running["position"] is None and running["occupied_by"] == []
-
-    missing = job_queries.queue_state(config, ["absent"])["absent"]
-    assert missing["known"] is False and missing["running"] == []
-    pueue.kill(long)
-    pueue.remove([first, second])
-
-
-def test_a_job_read_by_job_id_never_loads_the_queue_history(
-    fake_pueue: FakePueue, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Anti-vacuity: the full status read raises here, so a lookup that fell
-    back to it would fail instead of answering."""
-    inputs = tmp_path / "inputs"
-    fake_pueue.groups[GROUP] = 1
-    first = fake_pueue.add(
-        group=GROUP,
-        label="fixture:shell",
-        command=("agentctl-run", str(inputs / "fixture-shell-aaaa1111.json")),
-        working_directory=tmp_path,
-    )
-    moved = fake_pueue.add(
-        group=GROUP,
-        label="fixture:shell",
-        command=("agentctl-run", str(inputs / "fixture-shell-bbbb2222.json")),
-        working_directory=tmp_path,
-    )
-    snapshot = dict(fake_pueue._tasks)
-
-    def history() -> dict[int, pueue.Task]:
-        raise AssertionError("a job read loaded the whole queue history")
-
-    monkeypatch.setattr(pueue, "tasks", history)
-    monkeypatch.setattr(
-        pueue,
-        "tasks_by_command",
-        lambda fragment: {
-            key: task for key, task in snapshot.items() if fragment in task.command
-        },
-    )
-
-    assert job_queries.locate(first, "fixture-shell-aaaa1111").task_id == first
-    # The id now names another job: the job_id finds its own.
-    assert job_queries.locate(first, "fixture-shell-bbbb2222").task_id == moved
-    assert job_queries.locate(first, "fixture-shell-cccc3333") is None
-
-
-def _native_job(
-    fake,
-    config,
-    tmp_path,
-    name,
-    *,
-    status="Queued",
-    group="normal",
-    priority=0,
-    dependencies=(),
+def task(
+    config, number, *, status="Queued", group="normal", priority=0, dependencies=()
 ):
+    name = f"fixture-job-{number}"
     config.inputs_dir.mkdir(parents=True, exist_ok=True)
-    identity = "fixture-" + name
-    path = config.inputs_dir / (identity + ".json")
+    path = config.inputs_dir / f"{name}.json"
     path.write_text(
         json.dumps(
             {
-                "job_id": identity,
-                "project_root": str(tmp_path / name),
-                "working_directory": str(tmp_path / name),
+                "job_id": name,
+                "queue_task_id": number,
+                "project_root": f"/fixture/project-{number}",
+                "working_directory": f"/fixture/project-{number}",
                 "pool": group,
+                "log_path": str(config.jobs_dir / f"{name}.log"),
+                "result_path": str(config.jobs_dir / f"{name}.result"),
             }
         )
     )
-    task_id = fake.add(
+    return pueue.Task(
+        task_id=number,
+        label=f"fixture-{number}:check",
         group=group,
-        label=name + ":check",
-        command=("agentctl-run", str(path)),
-        working_directory=tmp_path / name,
+        status=status,
+        result="Success" if status == "Done" else None,
+        exit_code=0 if status == "Done" else None,
+        path=f"/fixture/project-{number}",
+        dependencies=dependencies,
+        command=f"agentctl-run {path}",
+        enqueued_at="2026-01-01T00:00:00+00:00",
+        started_at="2026-01-01T00:00:00+00:00" if status == "Running" else None,
         priority=priority,
     )
-    fake._tasks[task_id] = replace(
-        fake.task(task_id), status=status, dependencies=dependencies
-    )
-    return fake.task(task_id)
 
 
-def test_queue_uses_native_priority_and_names_current_cross_project_holder(
-    fake_pueue, config, tmp_path
-):
-    ended = _native_job(fake_pueue, config, tmp_path, "ended", status="Running")
-    fake_pueue.succeed(ended.task_id)
-    holder = _native_job(
-        fake_pueue, config, tmp_path, "other-project", status="Running"
+def test_queue_orders_by_priority_and_reports_running_jobs(config, monkeypatch):
+    ended = task(config, 1, status="Done")
+    running = task(config, 2, status="Running")
+    first = task(config, 3)
+    urgent = task(config, 4, priority=50)
+    current = pueue.Status(
+        {entry.task_id: entry for entry in (ended, running, first, urgent)},
+        {"normal": {"status": "Running", "parallel_tasks": 1}},
     )
-    early = _native_job(fake_pueue, config, tmp_path, "earlier")
-    urgent = _native_job(fake_pueue, config, tmp_path, "urgent", priority=50)
-    answer = job_queries.job_queue(config, job_queries.job_view(early))
-    assert answer["position"] == 2 and answer["ahead"] == [urgent.task_id]
+    monkeypatch.setattr(pueue, "live", lambda: current)
+    answer = job_queries.job_queue(
+        config, job_queries.job_view(first), now=datetime(2026, 1, 1, 0, 1, tzinfo=UTC)
+    )
+    assert answer["position"] == 2 and answer["ahead"] == [4]
     assert answer["reason"] == "pool-full"
-    assert [r["task_id"] for r in answer["occupied_by"]] == [holder.task_id]
-    assert [
-        (r["job_id"], r["project"], r["working_directory"])
-        for r in answer["occupied_by"]
-    ] == [("fixture-other-project", "other-project", str(tmp_path / "other-project"))]
-    assert [r["priority"] for r in answer["queued"]] == [50, 0]
-    assert ended.task_id not in [r["task_id"] for r in answer["running"]]
-    assert job_queries.job_queue(config, job_queries.job_view(urgent))["ahead"] == []
+    assert [row["task_id"] for row in answer["occupied_by"]] == [2]
+    assert [row["priority"] for row in answer["queued"]] == [50, 0]
+    assert answer["occupied_by"][0]["working_directory"] == "/fixture/project-2"
+    assert answer["oldest_queued_seconds"] == 60
+    assert (
+        job_queries.job_queue(config, job_queries.job_view(running))["reason"]
+        == "running"
+    )
+    assert job_queries.job_queue(config, job_queries.job_view(ended)) is None
+    missing = job_queries.queue_state(config, ["absent"])["absent"]
+    assert missing["known"] is False and missing["running"] == []
 
 
-def test_queue_distinguishes_dependencies_pause_and_available_slots(
-    fake_pueue, config, tmp_path
-):
-    dependency = _native_job(
-        fake_pueue, config, tmp_path, "dependency", group="bulk", status="Running"
+def test_queue_reports_dependencies_pauses_and_available_slots(config, monkeypatch):
+    dependency = task(config, 1, status="Running", group="bulk")
+    blocked = task(config, 2, dependencies=(1,), priority=100)
+    ready = task(config, 3)
+    current = pueue.Status(
+        {entry.task_id: entry for entry in (dependency, blocked, ready)},
+        {"normal": {"status": "Running", "parallel_tasks": 1}},
     )
-    blocked = _native_job(
-        fake_pueue,
-        config,
-        tmp_path,
-        "blocked",
-        priority=100,
-        dependencies=(dependency.task_id,),
-    )
-    ready = _native_job(fake_pueue, config, tmp_path, "ready")
+    monkeypatch.setattr(pueue, "live", lambda: current)
     answer = job_queries.job_queue(config, job_queries.job_view(blocked))
-    assert answer["reason"] == "dependencies" and answer["waiting_for"] == [
-        dependency.task_id
-    ]
-    answer = job_queries.job_queue(config, job_queries.job_view(ready))
-    assert answer["reason"] == "ready" and answer["ahead"] == []
-    fake_pueue.paused.add("normal")
+    assert answer["reason"] == "dependencies" and answer["waiting_for"] == [1]
+    assert (
+        job_queries.job_queue(config, job_queries.job_view(ready))["reason"] == "ready"
+    )
+    current.groups["normal"]["status"] = "Paused"
     assert (
         job_queries.job_queue(config, job_queries.job_view(ready))["reason"]
         == "group-paused"
     )
-    fake_pueue.paused.clear()
-    fake_pueue._tasks[ready.task_id] = replace(ready, status="Paused")
-    next_job = _native_job(fake_pueue, config, tmp_path, "next")
-    answer = job_queries.job_queue(config, job_queries.job_view(next_job))
+    current.groups["normal"]["status"] = "Running"
+    current.tasks[3] = replace(ready, status="Paused")
+    queued = task(config, 4)
+    current.tasks[4] = queued
+    answer = job_queries.job_queue(config, job_queries.job_view(queued))
     assert answer["reason"] == "pool-full"
     assert answer["occupied_by"][0]["phase"] == "paused"
-    fake_pueue.groups["normal"] = 0
+    current.tasks[3] = replace(ready, status="Stashed")
     assert (
-        job_queries.job_queue(config, job_queries.job_view(next_job))["reason"]
-        == "ready"
+        job_queries.job_queue(config, job_queries.job_view(current.tasks[3]))["reason"]
+        == "stashed"
     )
 
 
-def test_admission_inspection_recomputes_blockers_instead_of_retained_ids(
-    fake_pueue, config, tmp_path
-):
-    config = replace(
-        config,
-        pools={
-            "normal": PoolPolicy(1, exclusive_with=("bulk",)),
-            "bulk": PoolPolicy(1),
-        },
+def test_queue_job_id_is_a_filter_without_searching_other_tasks(config, monkeypatch):
+    first = task(config, 1)
+    second = task(config, 2)
+    current = pueue.Status(
+        {1: second, 2: first},
+        {"normal": {"status": "Running", "parallel_tasks": 1}},
     )
-    old = _native_job(
-        fake_pueue, config, tmp_path, "old", status="Running", group="bulk"
-    )
-    fake_pueue.succeed(old.task_id)
-    current = _native_job(
-        fake_pueue, config, tmp_path, "current", status="Running", group="bulk"
-    )
-    held = _native_job(fake_pueue, config, tmp_path, "held", status="Stashed")
-    path = config.inputs_dir / "fixture-held.json"
-    data = json.loads(path.read_text())
-    data["hold"] = {
-        "reason": "pool-exclusivity",
-        "pool": "normal",
-        "waiting_for": [old.task_id],
-    }
-    path.write_text(json.dumps(data))
-    answer = job_queries.job_queue(config, job_queries.job_view(held))
-    assert answer["reason"] == "pool-exclusivity"
-    assert answer["waiting_for"] == [current.task_id]
-    assert answer["occupied_by"][0]["job_id"] == "fixture-current"
-    fake_pueue.succeed(current.task_id)
-    answer = job_queries.job_queue(config, job_queries.job_view(held))
-    assert answer["reason"] == "admission-release"
-    assert answer["waiting_for"] == [] and answer["occupied_by"] == []
-    data.pop("hold")
-    path.write_text(json.dumps(data))
-    assert (
-        job_queries.job_queue(config, job_queries.job_view(held))["reason"] == "stashed"
-    )
-
-
-def test_inspection_follows_stable_job_and_never_names_a_reused_id_as_its_blocker(
-    fake_pueue, config, tmp_path
-):
-    first = _native_job(fake_pueue, config, tmp_path, "first")
-    second = _native_job(fake_pueue, config, tmp_path, "second", priority=50)
-    old = job_queries.job_view(first)
-    fake_pueue._tasks[first.task_id] = replace(second, task_id=first.task_id)
-    fake_pueue._tasks[second.task_id] = replace(first, task_id=second.task_id)
-    answer = job_queries.job_queue(config, old)
-    assert answer["position"] == 2
-    assert answer["ahead"] == [first.task_id]
-    fake_pueue.succeed(second.task_id)
-    answer = job_queries.job_queue(config, old)
+    monkeypatch.setattr(pueue, "live", lambda: current)
+    answer = job_queries.job_queue(config, job_queries.job_view(first))
     assert answer["reason"] == "not-in-live-queue"
-    assert answer["occupied_by"] == [] and answer["position"] is None
+    assert answer["position"] is None and answer["occupied_by"] == []
+
+
+def output(config, monkeypatch, *, content=b"", result=False):
+    selected = task(config, 1, status="Running")
+    document = job_queries.read_launch_input(config, selected)
+    current = artifacts.begin(document, str(job_queries.launch_input_path(selected)))
+    path = Path(current["result_path" if result else "log_path"])
+    path.write_bytes(content)
+    monkeypatch.setattr(pueue, "task", lambda number: selected if number == 1 else None)
+    return selected, document, path
+
+
+def test_byte_pages_mask_secrets_crossing_page_boundaries(config, monkeypatch):
+    secret = "fixture-secret-value"
+    monkeypatch.setenv("FIXTURE_API_KEY", secret)
+    original = ("before " + secret + " after\n").encode()
+    selected, _, _ = output(config, monkeypatch, content=original)
+    split = original.index(secret.encode()) + 5
+    first = job_queries.read_job_artifact(config, selected.task_id, limit=split)
+    second = job_queries.read_job_artifact(
+        config, selected.task_id, offset=first["next_offset"], limit=1000
+    )
+    joined = base64.b64decode(first["base64"]) + base64.b64decode(second["base64"])
+    assert first["offset"] == 0 and second["offset"] == split
+    assert first["returned_bytes"] == split
+    assert second["next_offset"] is None
+    assert len(joined) == len(original) and b"[REDACTED" in joined
+    assert secret[:5].encode() not in joined and secret[5:].encode() not in joined
+    assert first["text"].encode() + second["text"].encode() == joined
+
+
+def test_result_pages_pin_the_attempt_and_preserve_all_bytes(config, monkeypatch):
+    original = json.dumps({"message": "żółw" * 50}, ensure_ascii=False).encode()
+    selected, document, _ = output(config, monkeypatch, content=original, result=True)
+    first = job_queries.result(config, selected.task_id, limit=17)
+    assert first["attempt"] == first["page"]["attempt"] == 1
+    assert first["value"] is None and first["page"]["complete"] is False
+    following = artifacts.begin(document, str(job_queries.launch_input_path(selected)))
+    Path(following["result_path"]).write_text('{"next": true}')
+    restored = bytearray()
+    offset = 0
+    while True:
+        page = job_queries.read_job_artifact(
+            config,
+            selected.task_id,
+            attempt=1,
+            artifact="result",
+            offset=offset,
+            limit=17,
+        )
+        restored.extend(base64.b64decode(page["base64"]))
+        if page["next_offset"] is None:
+            break
+        offset = page["next_offset"]
+    assert bytes(restored) == original
+    assert job_queries.result(config, selected.task_id)["value"] == {"next": True}
+    assert job_queries.result(config, selected.task_id, attempt=1)[
+        "value"
+    ] == json.loads(original)
+
+
+def test_result_page_uses_the_attempt_selected_before_a_retry_starts(
+    config, monkeypatch
+):
+    selected = task(config, 1, status="Running")
+    monkeypatch.setattr(pueue, "task", lambda number: selected)
+    original_view = job_queries.artifact_view
+
+    def start_after_view(config, current, attempt=None):
+        view = original_view(config, current, attempt)
+        if not view["attempts"]:
+            document = job_queries.read_launch_input(config, current)
+            started = artifacts.begin(
+                document, str(job_queries.launch_input_path(current))
+            )
+            Path(started["result_path"]).write_text('{"started": true}')
+        return view
+
+    monkeypatch.setattr(job_queries, "artifact_view", start_after_view)
+    before = job_queries.result(config, selected.task_id)
+    assert before["attempt"] == before["page"]["attempt"] == 0
+    assert before["page"]["available"] is False
+    after = job_queries.result(config, selected.task_id)
+    assert after["attempt"] == 1 and after["value"] == {"started": True}
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"offset": -1},
+        {"offset": True},
+        {"limit": 0},
+        {"limit": True},
+        {"limit": 8_000_001},
+        {"artifact": "other"},
+    ],
+)
+def test_output_page_rejects_invalid_ranges(config, monkeypatch, arguments):
+    selected, _, _ = output(config, monkeypatch, content=b"fixture")
+    with pytest.raises(job_queries.JobError):
+        job_queries.read_job_artifact(config, selected.task_id, **arguments)

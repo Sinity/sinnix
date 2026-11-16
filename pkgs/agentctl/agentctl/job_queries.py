@@ -1,7 +1,6 @@
-"""Stable-identity job queries over native queue and retained invocation artifacts.
+"""Job queries over queue tasks and saved output.
 
-Reads preserve selected attempts, bounded/redacted bytes and historical job
-identity. Waiting observes completion; it never changes admission or cancels.
+Reads select attempts and mask secrets. Waiting observes completion.
 """
 
 from __future__ import annotations
@@ -11,14 +10,13 @@ import os
 import re
 import shlex
 import stat
-import time
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
 from sinnix_lib.secrets import mask_secret_values, masked_window, secret_values
 
-from . import artifacts, cgroups, pools, pueue
+from . import artifacts, pueue
 from .config import Config
 from .launch_input import secret_environment
 from .pueue import PueueError, PueueTimeout, Task
@@ -27,7 +25,6 @@ from .run import (
     MAX_LOG_BYTES,
     MAX_RESULT_BYTES,
     REFUSED_EXIT_CODE,
-    SLOT_OCCUPIED_EXIT_CODE,
     TIMEOUT_EXIT_CODE,
     VANISHED_EXIT_CODE,
     Outcome,
@@ -43,13 +40,8 @@ QUEUE_RUN_EXECUTABLE = "agentctl-run"
 MAX_LAUNCH_INPUT_BYTES = 1_048_576
 # Bound on an outcome file read back; the largest historical one is 1.4 MB.
 MAX_OUTCOME_BYTES = 2 * MAX_LAUNCH_INPUT_BYTES
-# How long a wait blocks on one task id before re-reading which id the job
-# it waits for is at.
-WAIT_SLICE_SECONDS = 5.0
 MAX_SNAPSHOT_ROWS = 100
 MAX_SNAPSHOT_TEXT = 256
-# The retained intent on a task stashed by cross-pool admission.
-HOLD_REASON = "pool-exclusivity"
 
 
 class JobError(RuntimeError):
@@ -110,23 +102,6 @@ def _age_seconds(stamp: str | None, now: datetime) -> float | None:
     return max(0.0, (now - moment).total_seconds())
 
 
-def admission_hold(config: Config, task: Task) -> dict[str, Any] | None:
-    """An exact retained AgentCTL hold, distinct from an operator's stash."""
-    if task.status != "Stashed":
-        return None
-    value = read_launch_input(config, task) or {}
-    hold = value.get("hold")
-    if (
-        not isinstance(hold, Mapping)
-        or hold.get("reason") != HOLD_REASON
-        or hold.get("pool") != task.group
-        or value.get("job_id") != job_id_of(task)
-        or value.get("pool") != task.group
-    ):
-        return None
-    return dict(hold)
-
-
 def queue_state(
     config: Config,
     groups: Sequence[str] | None = None,
@@ -134,11 +109,7 @@ def queue_state(
     now: datetime | None = None,
     live: pueue.Status | None = None,
 ) -> dict[str, dict[str, Any]]:
-    """Each group's occupancy from the unfinished tasks alone.
-
-    What a caller needs to tell "queued behind X" from "hung": the width,
-    who holds each slot and for how long, what is waiting and since when.
-    """
+    """The running and waiting jobs in each requested group."""
     live = live or pueue.live()
     moment = now or datetime.now(UTC)
     selected = sorted(live.groups) if groups is None else list(groups)
@@ -163,7 +134,7 @@ def queue_state(
                 "working_directory": document.get("working_directory") or task.path,
                 "priority": task.priority,
                 "phase": phase_of(task),
-                # What the slot is doing, from the launch input the job owns.
+                # The command comes from this job's launch input.
                 "argv": [str(word) for word in argv]
                 if isinstance(argv, list)
                 else None,
@@ -174,7 +145,7 @@ def queue_state(
         running = [
             row(task, task.started_at) for task in members if task.status == "Running"
         ]
-        # Native order is priority descending, then ID ascending.
+        # Pueue orders by priority descending, then ID ascending.
         queued = [
             {
                 **row(task, task.enqueued_at),
@@ -212,25 +183,16 @@ def job_queue(
 ) -> dict[str, Any] | None:
     """Where one unfinished job stands: its group's occupancy and its place.
 
-    ``job`` is a job view. A terminal job has no queue. A queued job names the
-    jobs ahead of it, the dependencies it waits for, and the running jobs that
-    hold the slots it needs; a running job is reported with its group only.
+    A terminal job has no queue. A queued job names its dependencies and the
+    running jobs and higher-priority jobs ahead of it.
     """
     group = job.get("group")
     if job.get("terminal") or not isinstance(group, str) or not group:
         return None
     live = pueue.live()
-    # IDs can move or be reused. Resolve the stable identity in this same
-    # unfinished snapshot before naming anyone as a blocker.
-    identity = job.get("job_id")
-    task = (
-        next(
-            (entry for entry in live.tasks.values() if job_id_of(entry) == identity),
-            None,
-        )
-        if identity
-        else live.tasks.get(job.get("task_id"))
-    )
+    task = live.tasks.get(job.get("task_id"))
+    if task is not None and job.get("job_id") not in {None, job_id_of(task)}:
+        task = None
     group = task.group if task else group
     state = queue_state(config, [group], now=now, live=live)[group]
     result = {
@@ -247,29 +209,6 @@ def job_queue(
     if task.status == "Paused":
         return {**result, "reason": "task-paused"}
     if task.status == "Stashed":
-        if admission_hold(config, task) is not None:
-            # Retained admission intent explains the stash, but only current
-            # unfinished native tasks can still hold it.
-            held = frozenset(
-                entry.task_id
-                for entry in live.tasks.values()
-                if admission_hold(config, entry) is not None
-            )
-            blockers = pools.blocking_tasks(
-                config.pools, group, live.tasks, task_id=task.task_id, held=held
-            )
-            occupied = [job_view(live.tasks[dep]) for dep in blockers]
-            for entry in occupied:
-                owner = read_launch_input(config, live.tasks[entry["task_id"]]) or {}
-                entry.update(launch_selection(owner))
-                entry.setdefault("working_directory", entry["path"])
-            return {
-                **result,
-                "reason": "pool-exclusivity" if blockers else "admission-release",
-                "waiting_for": list(blockers),
-                "occupied_by": occupied,
-                "excluded_by": list(pools.exclusive_partners(config.pools, group)),
-            }
         return {**result, "reason": "stashed"}
     waiting = [dep for dep in task.dependencies if dep in live.tasks]
     if state["status"] == "Paused":
@@ -281,9 +220,9 @@ def job_queue(
     if task.task_id not in ids:
         return {**result, "reason": "not-queued"}
     position = ids.index(task.task_id)
-    holders = [*state["running"], *state["paused"]]
+    running_jobs = [*state["running"], *state["paused"]]
     width = state["parallel"]
-    free = max(0, width - len(holders)) if width else len(eligible)
+    free = max(0, width - len(running_jobs)) if width else len(eligible)
     reason = (
         "ready" if position < free else "pool-full" if not free else "priority-order"
     )
@@ -292,7 +231,7 @@ def job_queue(
         "reason": reason,
         "position": position + 1,
         "ahead": ids[:position],
-        "occupied_by": holders if reason != "ready" else [],
+        "occupied_by": running_jobs if reason != "ready" else [],
     }
 
 
@@ -317,7 +256,6 @@ _WRAPPER_PHASES = {
     REFUSED_EXIT_CODE: "refused",
     CANCELLED_EXIT_CODE: Outcome.CANCELLED.value,
     VANISHED_EXIT_CODE: Outcome.VANISHED.value,
-    SLOT_OCCUPIED_EXIT_CODE: Outcome.SLOT_OCCUPIED.value,
 }
 
 
@@ -529,8 +467,7 @@ def attach_bindings(
 ) -> list[dict[str, Any]]:
     """Each row with the binding recorded in the launch input its task names.
 
-    One selected-id read for the page. A queue id can move after listing,
-    so a job id, when present, owns the binding's identity.
+    Read the selected task IDs once and check each optional job ID.
     """
     tasks = pueue.tasks_by_ids(
         [
@@ -541,13 +478,12 @@ def attach_bindings(
             and value >= 0
         ]
     )
-    job_ids = index_tasks_by_job_id(tuple(tasks.values()))
     attached = []
     for row in rows:
         task_id, job_id = row.get("task_id"), row.get("job_id")
-        task = find_task(tasks, task_id, job_id, job_ids=job_ids)
-        if task is None and isinstance(job_id, str) and JOB_ID.fullmatch(job_id):
-            task = locate(task_id, job_id)
+        task = tasks.get(task_id)
+        if task is not None and job_id is not None and job_id_of(task) != job_id:
+            task = None
         binding = (
             (read_launch_input(config, task) or {}).get("binding") if task else None
         )
@@ -562,23 +498,19 @@ def _task(task_id: int) -> Task:
     return task
 
 
-def locate(task_id: int, job_id: str | None = None) -> Task | None:
-    """The task carrying this job, read without the queue's whole history.
-
-    The id is tried first, since a queue is rarely reordered; a job_id
-    that does not match it is looked up by the one command that names its
-    launch input.
-    """
-    task = pueue.task(task_id) if isinstance(task_id, int) and task_id >= 0 else None
-    if job_id is None or (task is not None and job_id_of(task) == job_id):
-        return task
-    matches = pueue.tasks_by_command(f"{job_id}.json")
-    return find_task(matches, task_id, job_id)
+def task_by_id(task_id: int, job_id: str | None = None) -> Task:
+    """Read one queue task, checking the optional job ID on that same row."""
+    task = _task(task_id)
+    if job_id is not None and job_id_of(task) != job_id:
+        raise JobError(f"task {task_id} does not match job {job_id}")
+    return task
 
 
-def read_task(config: Config, task_id: int, job_id: str | None) -> Task:
-    task = locate(task_id, job_id)
+def read_task(config: Config, task_id: int, job_id: str | None = None) -> Task:
+    task = pueue.task(task_id) if task_id >= 0 else None
     if task is not None:
+        if job_id is not None and job_id_of(task) != job_id:
+            raise JobError(f"task {task_id} does not match job {job_id}")
         return task
     if job_id is None or not JOB_ID.fullmatch(job_id):
         raise JobError(
@@ -592,6 +524,8 @@ def read_task(config: Config, task_id: int, job_id: str | None) -> Task:
         document = None
     if not isinstance(document, dict):
         raise JobError(f"no retained launch {job_id}")
+    if task_id >= 0 and document.get("queue_task_id") != task_id:
+        raise JobError(f"task {task_id} does not match retained job {job_id}")
     return Task(
         task_id=document.get("queue_task_id", task_id),
         label=document.get("label", ""),
@@ -653,7 +587,7 @@ def get_job(
         raise JobError(
             "attempt_offset must be nonnegative and attempt_limit must be 1..100"
         )
-    task = read_task(config, task_id, job_id) if config else addressed(task_id, job_id)
+    task = read_task(config, task_id, job_id) if config else task_by_id(task_id, job_id)
     if config is None:
         return job_view(task)
     return _job_detail(config, task, attempt, attempt_offset, attempt_limit)
@@ -692,7 +626,7 @@ def _job_detail(
     outcome_path = Path(selected_outcome).resolve() if selected_outcome else None
     if outcome_path is not None and not owns_path(config, task, outcome_path):
         outcome_path = None
-    receipt = _outcome_from_path(outcome_path).get("outcome") or {}
+    record = _outcome_from_path(outcome_path).get("outcome") or {}
     records = view["attempts"]
     view["attempts"] = records[attempt_offset : attempt_offset + attempt_limit]
     view["attempt_count"] = len(records)
@@ -701,52 +635,42 @@ def _job_detail(
         if attempt_offset + attempt_limit < len(records)
         else None
     )
-    if receipt:
-        view["outcome"] = receipt
+    if record:
+        view["outcome"] = record
     view["queue_present"] = task.status != "Archived"
     if task.status == "Archived":
         view.update(
             phase=(
                 "succeeded"
-                if receipt.get("outcome") == "success"
-                else receipt.get("outcome", "unknown")
+                if record.get("outcome") == "success"
+                else record.get("outcome", "unknown")
             ),
-            terminal=bool(receipt),
-            exit_code=receipt.get("exit_code"),
+            terminal=bool(record),
+            exit_code=record.get("exit_code"),
         )
-    if isinstance(receipt.get("scratch"), dict):
-        view["scratch"] = receipt["scratch"]
-    disposition = read_disposition(config, task)
-    if disposition:
-        view["disposition"] = disposition
-        view.update(
-            _disposition_view(
-                disposition,
-                attempt=attempt,
-                receipt=receipt,
-                queue_terminal=task.terminal,
-            )
-        )
-    if launch_input.get("log_path"):
-        queued_cancel = (
-            attempt is None and disposition and disposition.get("started") is False
-        )
-        request_attempt = 0 if queued_cancel else view["attempt"]
-        if (
-            attempt is None
-            and not queued_cancel
-            and task.started_at is not None
-            and (
-                request_attempt == 0
-                or (not task.terminal and not unfinished_attempt(config, task))
-            )
-        ):
-            request_attempt += 1
-        request = artifacts.cancellation(
-            Path(launch_input["log_path"]), request_attempt
-        )
+    if isinstance(record.get("scratch"), dict):
+        view["scratch"] = record["scratch"]
+    log = launch_input.get("log_path")
+    if log:
+        number = view["attempt"]
+        if attempt is None and task.started_at is not None:
+            number = artifacts.attempt_for_start(launch_input, task.started_at)
+        elif attempt is None and task.status == "Archived":
+            pending = artifacts.cancellation(Path(log), number + 1)
+            if pending and pending.get("stopped"):
+                number += 1
+        request = artifacts.cancellation(Path(log), number)
+        queued = artifacts.cancellation(Path(log), 0) if attempt is None else None
+        request = queued or request
         if request:
             view["cancellation"] = request
+            if request.get("stopped") and (task.terminal or task.status == "Archived"):
+                view.update(
+                    phase="cancelled",
+                    terminal=True,
+                    started=request.get("started", True),
+                )
+                view["exit_code"] = CANCELLED_EXIT_CODE
     return view
 
 
@@ -775,7 +699,7 @@ def read_job_artifact(
     offset: int = 0,
     limit: int = MAX_RESULT_BYTES,
 ) -> dict[str, Any]:
-    """A byte-addressed bounded view and canonical path to the complete artifact.
+    """A bounded byte page and the path to the complete output file.
 
     Text decodes this page as UTF-8 with replacement; base64 preserves exact
     bytes, including characters split across byte offsets. Follow next_offset
@@ -860,6 +784,35 @@ def _read_artifact(
     }
 
 
+def result(
+    config: Config,
+    task_id: int,
+    job_id: str | None = None,
+    *,
+    attempt: int | None = None,
+    offset: int = 0,
+    limit: int = MAX_RESULT_BYTES,
+) -> dict[str, Any]:
+    """Bound the view only; large typed results remain complete valid artifacts."""
+    task = read_task(config, task_id, job_id)
+    view = _job_detail(config, task, attempt)
+    page = _read_artifact(
+        config, task, view["attempt"], "result", offset, limit, selected_view=view
+    )
+    value: Any = None
+    if page["complete"]:
+        try:
+            value = json.loads(page["text"])
+        except json.JSONDecodeError:
+            value = page["text"]
+    return {
+        **view,
+        "kind": "artifact" if page["available"] else "exit",
+        "value": value,
+        "page": page,
+    }
+
+
 def _secret_values(config: Config, task: Task) -> tuple[bytes, ...]:
     """Values to mask in what a job wrote: its own secrets and the reader's.
 
@@ -933,35 +886,6 @@ def logs(
     return task_logs(config, read_task(config, task_id, job_id), attempt=attempt)
 
 
-def result(
-    config: Config,
-    task_id: int,
-    job_id: str | None = None,
-    *,
-    attempt: int | None = None,
-    offset: int = 0,
-    limit: int = MAX_RESULT_BYTES,
-) -> dict[str, Any]:
-    """Bound the view only; large typed results remain complete valid artifacts."""
-    task = read_task(config, task_id, job_id)
-    view = _job_detail(config, task, attempt)
-    page = _read_artifact(
-        config, task, view["attempt"], "result", offset, limit, selected_view=view
-    )
-    value: Any = None
-    if page["complete"]:
-        try:
-            value = json.loads(page["text"])
-        except json.JSONDecodeError:
-            value = page["text"]
-    return {
-        **view,
-        "kind": "artifact" if page["available"] else "exit",
-        "value": value,
-        "page": page,
-    }
-
-
 def outcome(config: Config, task: Task, attempt: int | None = None) -> dict[str, Any]:
     log = artifact_path(config, task, ".log", attempt)
     return _outcome_from_path(outcome_path_for(log) if log is not None else None)
@@ -970,71 +894,6 @@ def outcome(config: Config, task: Task, attempt: int | None = None) -> dict[str,
 def _outcome_from_path(path: Path | None) -> dict[str, Any]:
     record = read_outcome(path, MAX_OUTCOME_BYTES)
     return {"outcome": record} if record is not None else {}
-
-
-def disposition_path(input_path: Path) -> Path:
-    return input_path.with_name(input_path.name + ".disposition")
-
-
-def read_disposition(config: Config, task: Task) -> dict[str, Any] | None:
-    path = launch_input_path(task)
-    if path is None or not owns_path(config, task, path):
-        return None
-    raw = read_bounded(disposition_path(path), MAX_LAUNCH_INPUT_BYTES)
-    if raw is None:
-        return None
-    try:
-        value = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return None
-    return dict(value) if isinstance(value, dict) else None
-
-
-def _disposition_view(
-    disposition: Mapping[str, Any],
-    *,
-    attempt: int | None,
-    receipt: Mapping[str, Any],
-    queue_terminal: bool = True,
-) -> dict[str, Any]:
-    """Latest job disposition; a selected attempt keeps its own receipt."""
-    if (
-        attempt is not None
-        and isinstance(disposition.get("attempt"), int)
-        and disposition["attempt"] != attempt
-    ):
-        return {}
-    if disposition.get("cancellation_incomplete") or (
-        queue_terminal and "cgroup" in disposition
-    ):
-        obstacle = cgroups.cancellation_obstacle(disposition)
-        if obstacle is not None:
-            return {
-                "phase": "unresolved",
-                "started": True,
-                "terminal": False,
-                "cancellation_incomplete": True,
-                "cgroup_observation": obstacle,
-            }
-        disposition = {**disposition, "unresolved": False}
-    if disposition.get("unresolved"):
-        return {"phase": "unresolved", "started": True}
-    if disposition.get("outcome") != Outcome.CANCELLED.value:
-        return {}
-    started = disposition.get("started")
-    overlay: dict[str, Any] = {
-        "phase": Outcome.CANCELLED.value,
-        "terminal": True,
-        "started": started is not False,
-    }
-    if started is False:
-        overlay["started"] = False
-        if attempt is None:
-            overlay["outcome"] = dict(disposition)
-            overlay["exit_code"] = disposition.get("exit_code", CANCELLED_EXIT_CODE)
-        elif receipt:
-            overlay["outcome"] = dict(receipt)
-    return overlay
 
 
 def attempt_count(config: Config, task: Task) -> int:
@@ -1060,65 +919,6 @@ def unfinished_attempt(config: Config, task: Task) -> bool:
     return not (isinstance(outcome, str) and Path(outcome).exists())
 
 
-def find_task(
-    tasks: Mapping[int, Task],
-    task_id: object,
-    job_id: object = None,
-    *,
-    job_ids: Mapping[str, Task] | None = None,
-) -> Task | None:
-    """Resolve a stored job identity after pueue may have reassigned its id."""
-    if isinstance(job_id, str):
-        if job_ids is not None:
-            return job_ids.get(job_id)
-        return next(
-            (task for task in tasks.values() if job_id_of(task) == job_id),
-            None,
-        )
-    return tasks.get(task_id) if isinstance(task_id, int) else None
-
-
-def index_tasks_by_job_id(tasks: Sequence[Task]) -> dict[str, Task]:
-    """Index launch identities once for callers resolving several saved jobs."""
-    job_ids: dict[str, Task] = {}
-    for task in tasks:
-        job_id = job_id_of(task)
-        if job_id is not None:
-            job_ids.setdefault(job_id, task)
-    return job_ids
-
-
-def addressed(task_id: int, job_id: str | None = None) -> Task:
-    """The task carrying this job now, whatever id the queue moved it to.
-
-    `pueue switch` exchanges the ids of two queued tasks, so an id names a
-    position in the queue and not a job. The job id does name one:
-    pueue carries a task's command wherever it moves the task, and the
-    job_id is the launch input path inside that command. A caller that
-    holds a job_id addresses its own job; one that holds only an id
-    addresses whatever the queue keeps at that position, which one read of
-    that position answers.
-    """
-    if job_id is None:
-        return _task(task_id)
-    task = locate(task_id, job_id)
-    if task is None:
-        raise JobError(f"pueue has no task for job {job_id}")
-    return task
-
-
-def _wait_slice(task: Task, remaining: float) -> float:
-    """How long to block on one task id before proving the job still has it.
-
-    `pueue switch` moves only a queued or stashed task, so a running task
-    keeps its id until it is terminal and the whole remaining wait blocks on
-    it; anything else is re-read often enough to notice the queue reordering.
-    """
-    if task.status == "Running":
-        return max(remaining, 1.0)
-    return max(min(remaining, WAIT_SLICE_SECONDS), 1.0)
-
-
 def wait(
     task_id: int,
     *,
@@ -1126,72 +926,22 @@ def wait(
     job_id: str | None = None,
     config: Config | None = None,
 ) -> dict[str, Any]:
-    """Block until the job is terminal, following it across queue task ids.
-
-    ``job_id`` is the job id the caller started; without one the
-    job is the one the queue holds at ``task_id`` when the wait begins. A
-    caller that followed the id alone would wake on a stranger's task, or
-    sleep past the end of its own.
-    """
-    deadline = time.monotonic() + timeout_seconds
-    if job_id is None:
-        job_id = job_id_of(_task(task_id))
-
-    def observe() -> tuple[Task, dict[str, Any]]:
-        nonlocal task_id
-        task = (
-            read_task(config, task_id, job_id)
-            if config is not None
-            else addressed(task_id, job_id)
-        )
-        # Keep the current hint; every lookup still checks the job id.
-        task_id = task.task_id
-        if config is not None and task.status == "Archived":
-            view = _job_detail(config, task, None)
-            if not view.get("terminal"):
-                raise JobError(
-                    f"job {job_id} is absent from pueue with no verified terminal outcome"
-                )
-            return task, view
-        view = job_view(task)
-        if config is not None:
-            disposition = read_disposition(config, task)
-            if disposition:
-                view.update(
-                    _disposition_view(
-                        disposition,
-                        attempt=None,
-                        receipt={},
-                        queue_terminal=task.terminal,
-                    )
-                )
-        return task, view
-
-    task, view = observe()
-    detail: str | None = None
-    while True:
-        if view.get("terminal"):
-            return view
-        remaining = deadline - time.monotonic()
-        if remaining <= 0 or detail is not None:
-            timed_out = {**view, "wait_timed_out": True}
-            return timed_out if detail is None else {**timed_out, "detail": detail}
-        if task.terminal:
-            # Queue completion can precede privileged descendant termination.
-            time.sleep(min(remaining, 0.5))
-            task, view = observe()
-            continue
-        blocking = _wait_slice(task, remaining)
-        try:
-            pueue.wait(task.task_id, timeout_seconds=blocking)
-        except PueueTimeout:
-            # A slice covering the whole remaining wait is the caller's own
-            # timeout; a shorter one expired only to re-read the queue.
-            if blocking >= remaining:
-                task, view = observe()
-                if view.get("terminal"):
-                    return view
-                return {**view, "wait_timed_out": True}
-        except PueueError as error:
-            detail = str(error)
-        task, view = observe()
+    """Wait on the assigned task ID and check its optional job ID on each read."""
+    task = read_task(config, task_id, job_id) if config else task_by_id(task_id, job_id)
+    view = _job_detail(config, task, None) if config else job_view(task)
+    if view["terminal"]:
+        return view
+    if task.status == "Archived":
+        raise JobError(f"job {job_id} has no terminal result")
+    detail = None
+    try:
+        pueue.wait(task_id, timeout_seconds=timeout_seconds)
+    except PueueTimeout:
+        pass
+    except PueueError as error:
+        detail = str(error)
+    task = read_task(config, task_id, job_id) if config else task_by_id(task_id, job_id)
+    view = _job_detail(config, task, None) if config else job_view(task)
+    if view["terminal"]:
+        return view
+    return {**view, "wait_timed_out": True, **({"detail": detail} if detail else {})}

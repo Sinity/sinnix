@@ -2,151 +2,18 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 import threading
 from pathlib import Path
 
 import pytest
 from agentctl import worktree_cleanup as cleanup
 from agentctl import worktrunk
-from agentctl.config import Config
-from agentctl.projects import load_project_adapter
 from agentctl.worktrunk import (
     Worktree,
     WorktrunkError,
-    worktrunk_create,
-    worktrunk_find,
     worktrunk_list,
     worktrunk_remove,
 )
-from conftest import write_project
-
-
-@pytest.mark.parametrize("probe", ["direct", "privileged", "refused"])
-def test_cleanup_keeps_an_open_file_holder_outside_the_checkout(
-    tmp_path: Path, config: Config, monkeypatch: pytest.MonkeyPatch, probe: str
-) -> None:
-    root = _repository(tmp_path / "repo")
-    write_project(root, worktrees=tmp_path / "worktrees")
-    project = load_project_adapter(root)
-    target = tmp_path / "worktrees" / "lane"
-    branch = "feature/worker"
-    worktrunk_create(root, branch, path=target, base="master")
-    held = target / "held\nfile.txt"
-    held.write_text("neutral fixture\n")
-    subprocess.run(["git", "-C", str(target), "add", "--", held.name], check=True)
-    _commit(target, "fixture file")
-    process = subprocess.Popen(
-        [
-            sys.executable,
-            "-c",
-            "import sys; f=open(sys.argv[1]); print('ready', flush=True); sys.stdin.read()",
-            str(held),
-        ],
-        cwd=tmp_path,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        text=True,
-    )
-    # Limit the census to this real process, keeping the real procfs reads.
-    original = Path.iterdir
-    monkeypatch.setattr(
-        Path,
-        "iterdir",
-        lambda path: (
-            iter([Path(f"/proc/{process.pid}")])
-            if path == Path("/proc")
-            else original(path)
-        ),
-    )
-    monkeypatch.setattr(cleanup, "_task_users", lambda _path: [])
-    if probe != "direct":
-        original_open_files = cleanup._process_open_files
-
-        def denied(entry: Path) -> list[Path]:
-            if entry.name == str(process.pid):
-                raise PermissionError("fixture denial")
-            return original_open_files(entry)
-
-        def privileged(entry: Path) -> list[Path]:
-            if probe == "refused":
-                raise cleanup.CleanupError("fixture privileged denial")
-            return [held]
-
-        monkeypatch.setattr(cleanup, "_process_open_files", denied)
-        monkeypatch.setattr(cleanup, "_privileged_open_files", privileged)
-    try:
-        assert process.stdout is not None
-        assert process.stdout.readline().strip() == "ready"
-        result = cleanup._drop_branch(
-            config,
-            project,
-            branch,
-            recorded_path=target,
-        )
-        assert result is not None
-        if probe == "refused":
-            assert "fixture privileged denial" in result
-        else:
-            assert "open file" in result and str(held) in result
-        assert target.is_dir()
-        assert process.poll() is None
-    finally:
-        process.communicate("done", timeout=5)
-    assert (
-        cleanup._drop_branch(
-            config,
-            project,
-            branch,
-            recorded_path=target,
-        )
-        is None
-    )
-    assert not target.exists()
-
-
-def test_privileged_open_files_preserve_newlines(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    target = tmp_path / "held\r\nfile"
-    monkeypatch.setattr(
-        cleanup.subprocess,
-        "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(
-            args=args[0],
-            returncode=0,
-            stdout=os.fsencode(target) + b"\0",
-            stderr=b"",
-        ),
-    )
-    assert cleanup._privileged_open_files(tmp_path / "123") == [target]
-
-
-def test_privileged_open_files_refuse_reused_pid(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    times = iter(("before", "after"))
-    monkeypatch.setattr(cleanup, "_process_starttime", lambda _entry: next(times))
-    monkeypatch.setattr(cleanup, "_privileged_open_files", lambda _entry: [])
-    with pytest.raises(cleanup.CleanupError, match="changed during open-file probe"):
-        cleanup._stable_privileged_open_files(tmp_path / "123")
-
-
-def test_privileged_open_files_refusal_fails_closed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(
-        cleanup.subprocess,
-        "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(
-            args=args[0],
-            returncode=1,
-            stdout=b"",
-            stderr=b"sudo denied",
-        ),
-    )
-    with pytest.raises(cleanup.CleanupError, match="sudo denied"):
-        cleanup._privileged_open_files(tmp_path / "123")
 
 
 def _repository(root: Path) -> Path:
@@ -208,24 +75,6 @@ def _spy(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     return calls
 
 
-def test_create_places_the_worktree_at_the_requested_path_and_remove_reverses_it(
-    tmp_path: Path,
-) -> None:
-    root = _repository(tmp_path / "repo")
-    target = tmp_path / "worktrees" / "lane"
-
-    created = worktrunk_create(root, "feature/lane", path=target, base="master")
-
-    assert created.path == target
-    assert created.branch == "feature/lane"
-    assert target.is_dir()
-
-    worktrunk_remove(root, "feature/lane")
-
-    assert not target.exists()
-    assert worktrunk_find(root, "feature/lane") is None
-
-
 def test_agentctl_remove_uses_scoped_worktrunk_remove_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -248,8 +97,8 @@ def test_agentctl_remove_uses_scoped_worktrunk_remove_contract(
 def test_terminal_release_keeps_the_exact_branch_head(tmp_path: Path) -> None:
     """Anti-vacuity: branch deletion would make this worker commit unreachable."""
     root = _repository(tmp_path / "repo")
-    target = tmp_path / "worktrees" / "lane"
-    worktrunk_create(root, "feature/worker", path=target, base="master")
+    target = tmp_path / "worktrees" / "checkout"
+    _worktree(root, "feature/worker", target)
     (target / "worker.txt").write_text("candidate\n")
     subprocess.run(["git", "-C", str(target), "add", "worker.txt"], check=True)
     _commit(target, "worker candidate")
@@ -273,206 +122,6 @@ def test_terminal_release_keeps_the_exact_branch_head(tmp_path: Path) -> None:
     ).stdout.strip()
     assert not target.exists()
     assert retained == head
-
-
-@pytest.mark.parametrize("checkout_present", [False, True])
-def test_retiring_a_squashed_branch_retains_its_original_commit(
-    tmp_path: Path,
-    config: Config,
-    monkeypatch: pytest.MonkeyPatch,
-    checkout_present: bool,
-) -> None:
-    root = _repository(tmp_path / "repo")
-    write_project(root, worktrees=tmp_path / "worktrees")
-    project = load_project_adapter(root)
-    target = tmp_path / "worktrees" / "lane"
-    branch = "feature/worker"
-    worktrunk_create(root, branch, path=target, base="master")
-    (target / "worker.txt").write_text("candidate\n")
-    subprocess.run(["git", "-C", str(target), "add", "worker.txt"], check=True)
-    _commit(target, "worker candidate")
-    head = subprocess.check_output(
-        ["git", "-C", str(target), "rev-parse", "HEAD"], text=True
-    ).strip()
-    (root / "worker.txt").write_text("candidate\n")
-    subprocess.run(["git", "-C", str(root), "add", "worker.txt"], check=True)
-    _commit(root, "squash landing")
-    assert (
-        subprocess.run(
-            ["git", "-C", str(root), "merge-base", "--is-ancestor", head, "master"]
-        ).returncode
-        == 1
-    )
-    if not checkout_present:
-        worktrunk_remove(root, branch, keep_branch=True, reap=False)
-    monkeypatch.setattr(cleanup, "_task_users", lambda _path: [])
-    monkeypatch.setattr(cleanup, "_process_users", lambda _path: [])
-    for _attempt in range(2):
-        assert (
-            cleanup._drop_branch(
-                config,
-                project,
-                branch,
-                recorded_path=target,
-                delete_branch=True,
-            )
-            is None
-        )
-    assert not target.exists()
-    assert (
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(root),
-                "show-ref",
-                "--verify",
-                "--quiet",
-                f"refs/heads/{branch}",
-            ]
-        ).returncode
-        == 1
-    )
-    refs = subprocess.check_output(
-        [
-            "git",
-            "-C",
-            str(root),
-            "for-each-ref",
-            "--format=%(objectname)",
-            "refs/agentctl/recovery/",
-        ],
-        text=True,
-    ).splitlines()
-    assert head in refs
-    # Reflogs and unreachable-object grace must not be the preservation route.
-    subprocess.run(
-        ["git", "-C", str(root), "reflog", "expire", "--expire=now", "--all"],
-        check=True,
-    )
-    subprocess.run(["git", "-C", str(root), "gc", "--prune=now"], check=True)
-    assert (
-        subprocess.check_output(
-            ["git", "-C", str(root), "show", f"{head}:worker.txt"], text=True
-        )
-        == "candidate\n"
-    )
-
-
-def test_branch_retirement_refuses_a_concurrent_move(
-    tmp_path: Path,
-    config: Config,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    root = _repository(tmp_path / "repo")
-    write_project(root, worktrees=tmp_path / "worktrees")
-    project = load_project_adapter(root)
-    branch = "feature/worker"
-    subprocess.run(["git", "-C", str(root), "branch", branch], check=True)
-    first = subprocess.check_output(
-        ["git", "-C", str(root), "rev-parse", branch], text=True
-    ).strip()
-    _commit(root, "new commit", allow_empty=True)
-    second = subprocess.check_output(
-        ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
-    ).strip()
-    preserve = cleanup._recovery_ref
-
-    def move_after_preservation(*args: object) -> str:
-        ref = preserve(*args)
-        subprocess.run(
-            ["git", "-C", str(root), "update-ref", f"refs/heads/{branch}", second],
-            check=True,
-        )
-        return ref
-
-    monkeypatch.setattr(cleanup, "_recovery_ref", move_after_preservation)
-    reason = cleanup._drop_branch(config, project, branch, delete_branch=True)
-    assert reason and reason.startswith("branch kept;")
-    assert (
-        subprocess.check_output(
-            ["git", "-C", str(root), "rev-parse", branch], text=True
-        ).strip()
-        == second
-    )
-    refs = subprocess.check_output(
-        [
-            "git",
-            "-C",
-            str(root),
-            "for-each-ref",
-            "--format=%(objectname)",
-            "refs/agentctl/recovery/",
-        ],
-        text=True,
-    ).splitlines()
-    assert first in refs
-
-
-def test_terminal_release_archives_ignored_descriptor_artifacts_across_a_retry(
-    tmp_path: Path, config: Config, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Anti-vacuity: the real release path must retain ignored evidence before retrying."""
-    root = _repository(tmp_path / "repo")
-    write_project(root, worktrees=tmp_path / "worktrees")
-    descriptor = root / ".agentctl" / "project.toml"
-    descriptor.write_text(
-        descriptor.read_text().replace(
-            "[workspace]",
-            '[workspace]\nretain_artifacts = [".cache/verify/*.json"]',
-        )
-    )
-    (root / ".gitignore").write_text(".cache/\n")
-    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
-    _commit(root, "fixture descriptor")
-    project = load_project_adapter(root)
-    target = tmp_path / "worktrees" / "lane"
-    branch = "feature/worker"
-    worktrunk_create(root, branch, path=target, base="master")
-    receipt = target / ".cache" / "verify" / "receipt.json"
-    receipt.parent.mkdir(parents=True)
-    receipt.write_text('{"attempt": 1}\n')
-    initial = cleanup._digest(receipt)
-    artifacts: list[dict[str, str]] = []
-    monkeypatch.setattr(cleanup, "_task_users", lambda _path: [])
-    monkeypatch.setattr(cleanup, "_process_users", lambda _path: [])
-
-    def fail_remove(*_args: object, **_kwargs: object) -> None:
-        raise WorktrunkError("simulated release failure")
-
-    monkeypatch.setattr(cleanup.worktrunk, "worktrunk_remove", fail_remove)
-    first = cleanup._drop_branch(
-        config,
-        project,
-        branch,
-        recorded_path=target,
-        artifacts=artifacts,
-    )
-
-    assert first == "simulated release failure"
-    first_destination = cleanup._artifact_destination(
-        config, target, receipt.relative_to(target), initial
-    )
-    assert first_destination.read_text() == '{"attempt": 1}\n'
-    assert receipt.exists(), "a failed removal must leave the checkout intact"
-
-    receipt.write_text('{"attempt": 2}\n')
-    updated = cleanup._digest(receipt)
-    monkeypatch.setattr(cleanup.worktrunk, "worktrunk_remove", worktrunk_remove)
-    second = cleanup._drop_branch(
-        config,
-        project,
-        branch,
-        recorded_path=target,
-        artifacts=artifacts,
-    )
-
-    second_destination = cleanup._artifact_destination(
-        config, target, receipt.relative_to(target), updated
-    )
-    assert second is None and not target.exists()
-    assert first_destination.read_text() == '{"attempt": 1}\n'
-    assert second_destination.read_text() == '{"attempt": 2}\n'
 
 
 def test_detached_recovery_retains_each_head_after_a_failed_release(
@@ -520,61 +169,14 @@ def test_the_listing_reads_the_registry_and_marks_gits_own_checkout(
     tmp_path: Path,
 ) -> None:
     root = _repository(tmp_path / "repo")
-    _worktree(root, "feature/lane", tmp_path / "lane")
+    _worktree(root, "feature/check", tmp_path / "checkout")
 
     listed = worktrunk_list(root)
 
     assert [(tree.branch, tree.path, tree.main) for tree in listed] == [
         ("master", root, True),
-        ("feature/lane", tmp_path / "lane", False),
+        ("feature/check", tmp_path / "checkout", False),
     ]
-
-
-def test_a_lookup_over_a_hundred_worktrees_statuses_none_of_them(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Anti-vacuity: the `wt list` this replaced ran three `git status` per
-    worktree, one of which refreshes that worktree's index. Measured over 101
-    worktrees it was 303 status processes for a single branch lookup, and over
-    the 169 live ones it saturated the disk for minutes.
-    """
-    root = _repository(tmp_path / "repo")
-    for index in range(100):
-        _worktree(root, f"unrelated/{index}", tmp_path / f"w{index}")
-    calls = _spy(monkeypatch)
-
-    found = worktrunk_find(root, "unrelated/42")
-
-    assert found is not None and found.path == tmp_path / "w42"
-    assert not [call for call in calls if "status" in call]
-    assert not [call for call in calls if Path(call[0]).name == "wt"]
-
-
-def test_a_branch_with_no_worktree_is_found_without_a_path(tmp_path: Path) -> None:
-    """A caller about to create a worktree must tell this from an absent branch."""
-    root = _repository(tmp_path / "repo")
-    subprocess.run(["git", "-C", str(root), "branch", "feature/idle"], check=True)
-
-    assert worktrunk_find(root, "feature/idle") == Worktree(
-        branch="feature/idle", path=None
-    )
-    assert worktrunk_find(root, "feature/never-existed") is None
-
-
-def test_a_worktree_whose_directory_is_gone_keeps_its_registered_path(
-    tmp_path: Path,
-) -> None:
-    """The landing unregisters such a branch before recreating it, so the
-    lookup must publish the path rather than drop the entry."""
-    root = _repository(tmp_path / "repo")
-    _worktree(root, "feature/lane", tmp_path / "lane")
-    subprocess.run(["rm", "-rf", str(tmp_path / "lane")], check=True)
-
-    found = worktrunk_find(root, "feature/lane")
-
-    assert found is not None
-    assert found.path == tmp_path / "lane"
-    assert not found.path.is_dir()
 
 
 def test_a_detached_worktree_does_not_answer_for_its_former_branch(
@@ -582,8 +184,8 @@ def test_a_detached_worktree_does_not_answer_for_its_former_branch(
 ) -> None:
     """A worktree that carries no branch must not shadow or break a lookup."""
     root = _repository(tmp_path / "repo")
-    target = tmp_path / "worktrees" / "lane"
-    worktrunk_create(root, "feature/lane", path=target, base="master")
+    target = tmp_path / "worktrees" / "checkout"
+    _worktree(root, "feature/check", target)
     subprocess.run(["git", "-C", str(target), "checkout", "-q", "--detach"], check=True)
 
     listed = worktrunk_list(root)
@@ -591,12 +193,8 @@ def test_a_detached_worktree_does_not_answer_for_its_former_branch(
     assert any(tree.branch is None for tree in listed), (
         "the fixture must actually produce a branchless item"
     )
-    assert worktrunk_find(root, "feature/lane") == Worktree(
-        branch="feature/lane", path=None
-    )
-    assert worktrunk_find(root, "master") == Worktree(
-        branch="master", path=root, main=True
-    )
+    assert Worktree(branch=None, path=target) in listed
+    assert Worktree(branch="master", path=root, main=True) in listed
 
 
 def _fake_wt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str) -> Path:
@@ -616,8 +214,7 @@ def _fake_wt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str) -> Path
 def test_two_removals_in_one_repository_never_overlap(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Anti-vacuity: the fixture holds the repository for 200 ms, so without the
-    per-repository lock the two calls interleave every time."""
+    """Concurrent removals share the repository lock."""
     root = _repository(tmp_path / "repo")
     ledger = tmp_path / "ledger"
     _fake_wt(
@@ -658,7 +255,7 @@ def test_removal_returns_only_once_the_shared_index_lock_is_released(
         "exit 0\n",
     )
 
-    worktrunk_remove(root, "feature/lane")
+    worktrunk_remove(root, "feature/check")
 
     assert not index_lock.exists()
 
@@ -672,6 +269,6 @@ def test_an_index_lock_the_mutation_did_not_create_is_left_alone(
     index_lock.write_text("")
     _fake_wt(tmp_path, monkeypatch, "exit 0\n")
 
-    worktrunk_remove(root, "feature/lane")
+    worktrunk_remove(root, "feature/check")
 
     assert index_lock.exists()

@@ -1,4 +1,4 @@
-"""Where agentctl finds its projects and native job artifacts.
+"""Where agentctl finds its projects and saved job output.
 
 The host renders `/etc/sinnix/agentctl.json`; `AGENTCTL_CONFIG` overrides the
 path for tests and checkouts under development. Absent both, the defaults
@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping
@@ -31,19 +30,10 @@ class ConfigError(ValueError):
 
 
 @dataclass(frozen=True)
-class AdaptivePool:
-    floor: int
-    job_memory_bytes: int
-    slice: str
-
-
-@dataclass(frozen=True)
 class PoolPolicy:
     """One pueue group's declared parallelism."""
 
     parallel: int
-    adaptive: AdaptivePool | None = None
-    exclusive_with: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -54,7 +44,7 @@ class Config:
     agentctl_executable: str
     private_project_catalog: Path | None = None
     # Each pueue group's declared width. `pools apply` writes it into the
-    # running daemon, whose queue remains the admission authority.
+    # running daemon, which schedules the tasks.
     pools: Mapping[str, PoolPolicy] = field(default_factory=dict)
     # The file this configuration was read from. Every task agentctl queues
     # carries it as AGENTCTL_CONFIG, so the agentctl calls inside a task read
@@ -118,55 +108,12 @@ def _pools(value: Any) -> dict[str, PoolPolicy]:
             raise ConfigError(f"pools has an invalid pueue group name: {name!r}")
         if not isinstance(declaration, Mapping):
             raise ConfigError(f"pools.{name} must be an object with `parallel`")
-        unknown = set(declaration) - {
-            "parallel",
-            "adaptive",
-            "exclusive_with",
-        }
+        unknown = set(declaration) - {"parallel"}
         if unknown:
             raise ConfigError(
                 f"pools.{name} declares unknown field(s): " + ", ".join(sorted(unknown))
             )
-        excluded = declaration.get("exclusive_with", [])
-        if not isinstance(excluded, list) or any(
-            not isinstance(pool, str) or POOL_NAME.fullmatch(pool) is None
-            for pool in excluded
-        ):
-            raise ConfigError(f"pools.{name}.exclusive_with must name valid pools")
-        adaptive = declaration.get("adaptive")
-        if adaptive is not None:
-            if not isinstance(adaptive, Mapping) or set(adaptive) != {
-                "floor",
-                "job_memory_bytes",
-                "slice",
-            }:
-                raise ConfigError(
-                    f"pools.{name}.adaptive requires floor, job_memory_bytes and slice"
-                )
-            floor = _parallel(name, adaptive["floor"])
-            budget = _parallel(name, adaptive["job_memory_bytes"])
-            unit = adaptive["slice"]
-            if (
-                floor > _parallel(name, declaration.get("parallel"))
-                or not isinstance(unit, str)
-                or not re.fullmatch(r"[a-zA-Z0-9_-]+\.slice", unit)
-            ):
-                raise ConfigError(
-                    f"pools.{name}.adaptive has an invalid floor or slice"
-                )
-            adaptive = AdaptivePool(floor=floor, job_memory_bytes=budget, slice=unit)
-        parsed[name] = PoolPolicy(
-            parallel=_parallel(name, declaration.get("parallel")),
-            adaptive=adaptive,
-            exclusive_with=tuple(excluded),
-        )
-    for name, policy in parsed.items():
-        unknown = set(policy.exclusive_with) - set(parsed)
-        if unknown:
-            raise ConfigError(
-                f"pools.{name}.exclusive_with names undeclared pool(s): "
-                + ", ".join(sorted(unknown))
-            )
+        parsed[name] = PoolPolicy(parallel=_parallel(name, declaration.get("parallel")))
     return parsed
 
 
