@@ -121,7 +121,14 @@ mkFeatureModule {
             }
           ).systemd.user;
         home-manager.users.${user}.home = {
-          packages = [ cargoTarget ];
+          # rust-analyzer is the fallback for editors and agent language
+          # servers started outside a project environment; inside one, the
+          # project toolchain's own rust-analyzer comes first on PATH. The
+          # compilers stay per project.
+          packages = [
+            cargoTarget
+            pkgs.rust-analyzer
+          ];
           # Short-lived checkouts otherwise retain a second compiler cache in
           # each target. A caller can explicitly opt into incremental rebuilds.
           sessionVariables.CARGO_INCREMENTAL = "0";
