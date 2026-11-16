@@ -165,6 +165,40 @@ def test_squash_merged_pull_request_retires_checkout_and_branches(owned, monkeyp
     ).splitlines()
 
 
+def test_default_branch_comes_from_origin_not_the_main_checkouts_branch(
+    owned, monkeypatch
+):
+    from agentctl.projects import load_project_adapter
+
+    config, project, path = owned
+    # A descriptor without a workspace section names no default base.
+    descriptor = project.root / ".agentctl" / "project.toml"
+    text = descriptor.read_text()
+    start = text.index("[workspace]")
+    end = text.index("[operations.", start)
+    descriptor.write_text(text[:start] + text[end:])
+    project = load_project_adapter(project.root)
+    assert project.workspace is None
+    owned = (config, project, path)
+    remote = origin(owned)
+    # The main checkout sits on an older feature branch that origin also has.
+    git(project.root, "switch", "-qc", "elsewhere")
+    git(project.root, "push", "-q", "origin", "elsewhere")
+    git(project.root, "fetch", "-q", "origin")
+    # A checkout cloned long ago, or never fully fetched, has no origin/HEAD,
+    # and fetching one branch does not create it.
+    git(project.root, "remote", "set-head", "origin", "--delete")
+    git(project.root, "config", "remote.origin.followRemoteHEAD", "never")
+    (path / "feature").write_text("published\n")
+    git(path, "add", "feature")
+    git(path, "commit", "-qm", "feature")
+    head = git(path, "rev-parse", "HEAD")
+    merge = squash_merge_on_forge(remote, "published\n")
+    forge(monkeypatch, {"number": 7, "headRefOid": head, "mergeCommit": {"oid": merge}})
+    assert native.Published(project).base == merge
+    assert clean(owned)["removed"] == ["candidate"]
+
+
 def test_unmerged_branch_on_forge_is_kept_with_the_missing_fact(owned, monkeypatch):
     _, _, path = owned
     remote = origin(owned)

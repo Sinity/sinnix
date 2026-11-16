@@ -275,7 +275,8 @@ is terminal. An explicit path also identifies the author's
 completed registered checkout when only foreground checks were needed; it
 never overrides a known active job or unavailable terminal evidence. Each pass
 first fetches the default branch from `origin`, because a squash merge exists
-only there. Publication is then proved by Git ancestry, a matching published
+only there. The default branch is the descriptor's `workspace.default_base`,
+or else origin's HEAD; the main checkout's current branch never stands in. Publication is then proved by Git ancestry, a matching published
 tree, a merged PR for the checkout's branch whose head is exactly the
 checkout's HEAD and whose merge commit is on the fetched default branch, or a
 local merge check showing the default branch already contains the change.

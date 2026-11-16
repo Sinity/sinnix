@@ -39,8 +39,10 @@ from .worktree_cleanup import (
 CACHE_TAG = b"Signature: 8a477f597d28d172789f06886806bc55"
 
 
-def _base(project) -> str:
+def _base(project, default: str | None) -> str:
     names = [project.workspace.default_base] if project.workspace else []
+    if default:
+        names.append(f"refs/remotes/origin/{default}")
     names.append("refs/remotes/origin/HEAD")
     branch = gitcmd.git(
         project.root,
@@ -69,26 +71,52 @@ def _base(project) -> str:
     raise CleanupError("default branch could not be resolved")
 
 
-def _remote_default(project) -> str | None:
-    """The origin branch the default base tracks, when it is a remote ref."""
-    base = project.workspace.default_base if project.workspace else "origin/master"
-    for prefix in ("refs/remotes/origin/", "origin/"):
-        if base.startswith(prefix):
-            return base.removeprefix(prefix)
-    return None
-
-
 def _has_origin(root: Path) -> bool:
     return "origin" in _git(root, "remote").split()
 
 
-def _fetch_default(project) -> str | None:
+def _remote_default(project) -> str | None:
+    """The origin branch that is the project's default branch.
+
+    The descriptor's default base names it. Without one, origin's HEAD does,
+    as last fetched or else as origin advertises it. The main checkout's
+    current branch never does: it can be any feature branch.
+    """
+    if project.workspace:
+        base = project.workspace.default_base
+        for prefix in ("refs/remotes/origin/", "origin/"):
+            if base.startswith(prefix):
+                return base.removeprefix(prefix)
+        return None
+    if not _has_origin(project.root):
+        return None
+    known = gitcmd.git(
+        project.root,
+        "symbolic-ref",
+        "--quiet",
+        "refs/remotes/origin/HEAD",
+        ok_statuses=(0, 1),
+        error=CleanupError,
+    )
+    if known.startswith("refs/remotes/origin/"):
+        return known.removeprefix("refs/remotes/origin/")
+    try:
+        advertised = _git(project.root, "ls-remote", "--symref", "origin", "HEAD")
+    except CleanupError:
+        return None
+    for line in advertised.splitlines():
+        target, _, name = line.partition("\t")
+        if name == "HEAD" and target.startswith("ref: refs/heads/"):
+            return target.removeprefix("ref: refs/heads/")
+    return None
+
+
+def _fetch_default(project, branch: str | None) -> str | None:
     """Bring the default branch up to date; a squash merge exists only there.
 
     Returns why the fetch failed, or None. Only the remote-tracking ref moves;
     no checkout or local branch changes.
     """
-    branch = _remote_default(project)
     if branch is None or not _has_origin(project.root):
         return None
     try:
@@ -103,8 +131,9 @@ class Published:
 
     def __init__(self, project):
         self.root = project.root
-        self.fetch_error = _fetch_default(project)
-        self.base = _base(project)
+        self.default = _remote_default(project)
+        self.fetch_error = _fetch_default(project, self.default)
+        self.base = _base(project, self.default)
         history = _git(self.root, "log", "--format=%H %T", self.base).splitlines()
         self.commits = set()
         self.trees = set()
@@ -230,13 +259,15 @@ class Published:
             return False
 
 
-def _delete_remote_branch(project, branch: str, head: str) -> str | None:
+def _delete_remote_branch(
+    project, branch: str, head: str, default: str | None
+) -> str | None:
     """Delete the published branch from origin only while it still names ``head``.
 
     Returns why the remote branch stays, or None when it is gone. The lease
     makes the forge refuse the deletion if anyone moved the branch since.
     """
-    if branch == _remote_default(project) or not _has_origin(project.root):
+    if default is None or branch == default or not _has_origin(project.root):
         return None
     try:
         advertised = _git(
@@ -550,7 +581,9 @@ def clean_native(
                     kept.append({"branch": name, "reason": reason})
                     continue
                 if tree.branch:
-                    note = _delete_remote_branch(project, tree.branch, head)
+                    note = _delete_remote_branch(
+                        project, tree.branch, head, published.default
+                    )
                     if note:
                         kept.append({"branch": f"origin/{tree.branch}", "reason": note})
             else:
