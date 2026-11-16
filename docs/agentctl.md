@@ -273,10 +273,21 @@ Omit `--path` for a project-wide pass. Candidates are the checkouts that
 retained launch inputs name as a job's working directory, once every such job
 is terminal. An explicit path also identifies the author's
 completed registered checkout when only foreground checks were needed; it
-never overrides a known active job or unavailable terminal evidence. Git ancestry, matching published trees or an exact
-merged PR head establish publication; the PR's merge must be reachable from
-the fetched default branch. Optional local merge checks have a shared time and
-size budget. Unproved changes stay with a reason.
+never overrides a known active job or unavailable terminal evidence. Each pass
+first fetches the default branch from `origin`, because a squash merge exists
+only there. Publication is then proved by Git ancestry, a matching published
+tree, a merged PR for the checkout's branch whose head is exactly the
+checkout's HEAD and whose merge commit is on the fetched default branch, or a
+local merge check showing the default branch already contains the change.
+The local check has a shared time and size budget. An unproved checkout stays,
+and its reason names each missing fact (not on the default branch, no merged
+PR or a PR with another head, fetch or forge errors). Uncommitted changes are
+named by path.
+
+Once a checkout is retired, its local branch is deleted (a recovery ref keeps
+the head) and its `origin` branch is deleted too while it still names the
+published head; the push carries that head as a lease, so a branch someone
+moved stays.
 
 Cleanup preserves declared artifacts and nextest reports (under
 `<state_dir>/artifacts/checkouts/`) and the checkout's head as a Git recovery

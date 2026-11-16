@@ -161,13 +161,22 @@ def _ignored_caches(path: Path) -> tuple[Path, ...]:
         "--directory",
         "-z",
     )
-    return tuple(
-        path / name
-        for name in names.split("\0")
-        if name
-        and path / name != path / "target"
-        and (_bytecode_cache(path / name) or _tagged_cache(path / name))
-    )
+    # A tool cache that ignores its own contents (ruff and pytest write a
+    # `.gitignore` of `*` inside) is listed file by file, so each listed path
+    # is attributed to the outermost cache directory that contains it.
+    found: dict[Path, None] = {}
+    for name in names.split("\0"):
+        if not name:
+            continue
+        relative = Path(name)
+        outermost_first = [*reversed(relative.parents[:-1]), relative]
+        for directory in (path / part for part in outermost_first):
+            if directory == path / "target":
+                break
+            if _bytecode_cache(directory) or _tagged_cache(directory):
+                found.setdefault(directory)
+                break
+    return tuple(found)
 
 
 def _remove_cache(target: Path) -> None:
@@ -562,7 +571,7 @@ def _cleanup_obstacle(
         pending.extend((path / name, kind) for name in listing.split("\0") if name)
     while pending:
         candidate, kind = pending.pop()
-        if candidate in disposable:
+        if any(candidate == d or candidate.is_relative_to(d) for d in disposable):
             continue
         mode = candidate.lstat().st_mode
         if stat.S_ISDIR(mode):
@@ -713,7 +722,9 @@ def _drop_branch(
         except (CleanupError, OSError) as error:
             return f"worktree kept; {error}"
         if dirty:
-            return "worktree kept; uncommitted changes"
+            shown = ", ".join(line[3:] for line in dirty[:3])
+            more = f" and {len(dirty) - 3} more" if len(dirty) > 3 else ""
+            return f"worktree kept; uncommitted changes: {shown}{more}"
         if users:
             return f"worktree kept; active user: {users[0]}"
         try:

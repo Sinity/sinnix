@@ -97,11 +97,121 @@ def test_unique_unpublished_change_is_kept(owned):
     git(path, "add", "feature")
     git(path, "commit", "-qm", "feature")
     result = clean(owned)
-    assert (
-        not result["removed"]
-        and result["kept"][0]["reason"] == "publication not proved"
-    )
+    assert not result["removed"]
+    reason = result["kept"][0]["reason"]
+    assert reason.startswith("publication not proved: HEAD ")
+    assert "no merged PR for branch candidate" in reason
+    assert "not already contained in the default branch" in reason
     assert (path / "feature").read_text() == "unpublished\n"
+
+
+def origin(owned):
+    """A bare origin holding master and the candidate branch, as on the forge."""
+    _, project, path = owned
+    remote = project.root.parent / "origin.git"
+    git(project.root.parent, "init", "-q", "--bare", "-b", "master", str(remote))
+    git(project.root, "remote", "add", "origin", str(remote))
+    git(project.root, "push", "-q", "origin", "master")
+    git(project.root, "fetch", "-q", "origin")
+    return remote
+
+
+def squash_merge_on_forge(remote, content):
+    """Land the change and unrelated work on origin's master, not locally."""
+    clone = remote.parent / "merger"
+    git(remote.parent, "clone", "-q", str(remote), str(clone))
+    git(clone, "config", "user.name", "Fixture")
+    git(clone, "config", "user.email", "fixture@example.test")
+    (clone / "feature").write_text(content)
+    (clone / "other").write_text("independent\n")
+    git(clone, "add", ".")
+    git(clone, "commit", "-qm", "squashed feature and later work")
+    git(clone, "push", "-q", "origin", "master")
+    return git(clone, "rev-parse", "HEAD")
+
+
+def forge(monkeypatch, *rows):
+    calls = []
+
+    def pulls(arguments, **kwargs):
+        calls.append(list(arguments))
+        return list(rows)
+
+    monkeypatch.setattr(native.github, "gh_json", pulls)
+    return calls
+
+
+def test_squash_merged_pull_request_retires_checkout_and_branches(owned, monkeypatch):
+    config, project, path = owned
+    remote = origin(owned)
+    (path / "feature").write_text("published\n")
+    git(path, "add", "feature")
+    git(path, "commit", "-qm", "feature")
+    head = git(path, "rev-parse", "HEAD")
+    git(path, "push", "-q", "origin", "candidate")
+    merge = squash_merge_on_forge(remote, "published\n")
+    calls = forge(
+        monkeypatch, {"number": 7, "headRefOid": head, "mergeCommit": {"oid": merge}}
+    )
+    cache(path)
+    result = clean(owned)
+    assert result["removed"] == ["candidate"] and not result["kept"], result
+    assert calls[0][4:6] == ["--head", "candidate"]
+    assert not path.exists()
+    assert git(remote, "branch", "--list", "candidate") == ""
+    assert git(project.root, "branch", "--list", "candidate") == ""
+    assert head in git(
+        project.root, "for-each-ref", "--format=%(objectname)", "refs/agentctl/recovery"
+    ).splitlines()
+
+
+def test_unmerged_branch_on_forge_is_kept_with_the_missing_fact(owned, monkeypatch):
+    _, _, path = owned
+    remote = origin(owned)
+    (path / "feature").write_text("published\n")
+    git(path, "add", "feature")
+    git(path, "commit", "-qm", "feature")
+    git(path, "push", "-q", "origin", "candidate")
+    squash_merge_on_forge(remote, "a different change\n")
+    forge(monkeypatch)
+    result = clean(owned)
+    assert not result["removed"] and path.exists()
+    assert "no merged PR for branch candidate" in result["kept"][0]["reason"]
+    assert git(remote, "branch", "--list", "candidate").strip() == "candidate"
+
+
+def test_merged_pull_request_with_another_head_is_kept(owned, monkeypatch):
+    _, _, path = owned
+    remote = origin(owned)
+    (path / "feature").write_text("first\n")
+    git(path, "add", "feature")
+    git(path, "commit", "-qm", "feature")
+    merged_head = git(path, "rev-parse", "HEAD")
+    merge = squash_merge_on_forge(remote, "first\n")
+    (path / "feature").write_text("second, never published\n")
+    git(path, "commit", "-qam", "later")
+    forge(
+        monkeypatch,
+        {"number": 7, "headRefOid": merged_head, "mergeCommit": {"oid": merge}},
+    )
+    result = clean(owned)
+    assert not result["removed"] and path.exists()
+    assert "no merged PR has head" in result["kept"][0]["reason"]
+
+
+def test_dirty_squash_merged_checkout_is_kept_and_names_the_path(owned, monkeypatch):
+    _, _, path = owned
+    remote = origin(owned)
+    (path / "feature").write_text("published\n")
+    git(path, "add", "feature")
+    git(path, "commit", "-qm", "feature")
+    head = git(path, "rev-parse", "HEAD")
+    merge = squash_merge_on_forge(remote, "published\n")
+    forge(monkeypatch, {"number": 7, "headRefOid": head, "mergeCommit": {"oid": merge}})
+    (path / "notes.txt").write_text("unfinished\n")
+    result = clean(owned)
+    assert not result["removed"] and (path / "notes.txt").exists()
+    assert result["kept"][0]["reason"] == "worktree kept; uncommitted changes: notes.txt"
 
 
 @pytest.mark.parametrize("kind", ["dirty", "ignored", "locked", "holder", "active"])
@@ -556,6 +666,19 @@ def test_tagged_ignored_tool_cache_is_disposable(owned):
     output.mkdir()
     (output / "CACHEDIR.TAG").write_bytes(native.CACHE_TAG)
     (output / "compiler-state").write_bytes(b"derived cache")
+    assert clean(owned)["removed"] == ["candidate"]
+
+
+def test_tool_cache_that_ignores_its_own_contents_is_disposable(owned):
+    _, _, path = owned
+    # Ruff and pytest write this layout in a repository that does not ignore
+    # the cache itself: the cache's own `.gitignore` ignores everything in it,
+    # so Git lists the directory as untracked and each file as ignored.
+    output = path / ".ruff_cache"
+    (output / "0.16.6").mkdir(parents=True)
+    (output / ".gitignore").write_text("*\n")
+    (output / "CACHEDIR.TAG").write_bytes(native.CACHE_TAG)
+    (output / "0.16.6" / "state").write_bytes(b"derived cache")
     assert clean(owned)["removed"] == ["candidate"]
 
 

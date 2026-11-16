@@ -69,11 +69,41 @@ def _base(project) -> str:
     raise CleanupError("default branch could not be resolved")
 
 
+def _remote_default(project) -> str | None:
+    """The origin branch the default base tracks, when it is a remote ref."""
+    base = project.workspace.default_base if project.workspace else "origin/master"
+    for prefix in ("refs/remotes/origin/", "origin/"):
+        if base.startswith(prefix):
+            return base.removeprefix(prefix)
+    return None
+
+
+def _has_origin(root: Path) -> bool:
+    return "origin" in _git(root, "remote").split()
+
+
+def _fetch_default(project) -> str | None:
+    """Bring the default branch up to date; a squash merge exists only there.
+
+    Returns why the fetch failed, or None. Only the remote-tracking ref moves;
+    no checkout or local branch changes.
+    """
+    branch = _remote_default(project)
+    if branch is None or not _has_origin(project.root):
+        return None
+    try:
+        _git(project.root, "fetch", "--quiet", "--no-tags", "origin", branch)
+    except CleanupError as error:
+        return str(error)
+    return None
+
+
 class Published:
-    """One default-branch history, with optional exact merged-PR witnesses."""
+    """One fetched default-branch history, with exact merged-PR witnesses."""
 
     def __init__(self, project):
         self.root = project.root
+        self.fetch_error = _fetch_default(project)
         self.base = _base(project)
         history = _git(self.root, "log", "--format=%H %T", self.base).splitlines()
         self.commits = set()
@@ -82,17 +112,15 @@ class Published:
             commit, tree = row.split()
             self.commits.add(commit)
             self.trees.add(tree)
-        self.pulls: dict[str, str] | None = None
+        # Merged pull requests per head branch (or per searched commit).
+        self.pulls: dict[str, list[dict[str, Any]] | str] = {}
         self.local_deadline: float | None = None
 
-    def contains(self, head: str) -> bool:
-        if head in self.commits:
-            return True
-        tree = _git(self.root, "rev-parse", head + "^{tree}")
-        if tree in self.trees:
-            return True
-        if self.pulls is None:
-            self.pulls = {}
+    def _merged_pulls(self, head: str, branch: str | None) -> list[dict[str, Any]] | str:
+        """Merged PRs for this branch, or the forge error that hid them."""
+        key = branch or head
+        if key not in self.pulls:
+            selector = ["--head", branch] if branch else ["--search", head]
             try:
                 rows = github.gh_json(
                     [
@@ -100,21 +128,62 @@ class Published:
                         "list",
                         "--state",
                         "merged",
-                        "--limit",
-                        "1000",
+                        *selector,
                         "--json",
-                        "headRefOid,mergeCommit",
+                        "number,headRefOid,mergeCommit",
                     ],
                     cwd=self.root,
                 )
-                for row in rows or []:
-                    commit = (row.get("mergeCommit") or {}).get("oid")
-                    if commit in self.commits:
-                        self.pulls[row["headRefOid"]] = commit
-            except github.GithubError:
-                pass
-        if head in self.pulls:
-            return True
+                self.pulls[key] = [row for row in rows or [] if isinstance(row, dict)]
+            except github.GithubError as error:
+                self.pulls[key] = str(error)
+        return self.pulls[key]
+
+    def contains(self, head: str, branch: str | None = None) -> bool:
+        return self.missing(head, branch) is None
+
+    def missing(self, head: str, branch: str | None = None) -> str | None:
+        """None when ``head`` is published; otherwise the facts that are absent."""
+        if head in self.commits:
+            return None
+        tree = _git(self.root, "rev-parse", head + "^{tree}")
+        if tree in self.trees:
+            return None
+        short = head[:12]
+        facts = [f"HEAD {short} is not on {self.base[:12]} of the default branch"]
+        if self.fetch_error:
+            facts.append(f"the default branch could not be fetched ({self.fetch_error})")
+        pulls = self._merged_pulls(head, branch)
+        if isinstance(pulls, str):
+            facts.append(f"the forge could not be asked ({pulls})")
+        else:
+            for row in pulls:
+                commit = (row.get("mergeCommit") or {}).get("oid")
+                if row.get("headRefOid") == head and commit in self.commits:
+                    return None
+            matching = [row for row in pulls if row.get("headRefOid") == head]
+            if matching:
+                facts.append(
+                    f"merged PR #{matching[0].get('number')} has head {short} but its "
+                    "merge commit is not on the fetched default branch"
+                )
+            elif pulls:
+                heads = ", ".join(
+                    f"#{row.get('number')} at {str(row.get('headRefOid'))[:12]}"
+                    for row in pulls[:3]
+                )
+                facts.append(f"no merged PR has head {short} (merged: {heads})")
+            else:
+                facts.append(
+                    f"no merged PR for branch {branch}" if branch
+                    else f"no merged PR has head {short}"
+                )
+        if self._locally_subsumed(head):
+            return None
+        facts.append("the change is not already contained in the default branch")
+        return "publication not proved: " + "; ".join(facts)
+
+    def _locally_subsumed(self, head: str) -> bool:
         if self.local_deadline is None:
             self.local_deadline = time.monotonic() + 2
         if time.monotonic() >= self.local_deadline:
@@ -159,6 +228,36 @@ class Published:
             )
         except (CleanupError, ValueError):
             return False
+
+
+def _delete_remote_branch(project, branch: str, head: str) -> str | None:
+    """Delete the published branch from origin only while it still names ``head``.
+
+    Returns why the remote branch stays, or None when it is gone. The lease
+    makes the forge refuse the deletion if anyone moved the branch since.
+    """
+    if branch == _remote_default(project) or not _has_origin(project.root):
+        return None
+    try:
+        advertised = _git(
+            project.root, "ls-remote", "--heads", "origin", f"refs/heads/{branch}"
+        ).split()
+        if not advertised:
+            return None
+        if advertised[0] != head:
+            return f"remote branch kept; it names {advertised[0][:12]}, not the published {head[:12]}"
+        _git(
+            project.root,
+            "push",
+            "--quiet",
+            f"--force-with-lease=refs/heads/{branch}:{head}",
+            "origin",
+            f":refs/heads/{branch}",
+        )
+    except CleanupError as error:
+        return f"remote branch kept; {error}"
+    print(f"deleted origin/{branch}", file=sys.stderr, flush=True)
+    return None
 
 
 def _owners(config, project, tasks, selected=None) -> dict[Path, dict[str, Any]]:
@@ -326,9 +425,8 @@ def clean_native(
                 continue
             elif tree:
                 head = _git(path, "rev-parse", "HEAD")
-                if not published.contains(head):
-                    reason = "publication not proved"
-                else:
+                reason = published.missing(head, tree.branch)
+                if reason is None:
                     candidates.append((path, tree, head))
             elif (path / ".git").exists() or not owner["heads"]:
                 reason = "unregistered checkout needs inspection"
@@ -451,6 +549,10 @@ def clean_native(
                 if reason:
                     kept.append({"branch": name, "reason": reason})
                     continue
+                if tree.branch:
+                    note = _delete_remote_branch(project, tree.branch, head)
+                    if note:
+                        kept.append({"branch": f"origin/{tree.branch}", "reason": note})
             else:
                 # A removed checkout may leave only its tagged build cache.
                 # Every other byte must already have explicit artifact custody.
