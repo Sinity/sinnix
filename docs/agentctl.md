@@ -214,7 +214,7 @@ wrapper whose task is terminal is stopped; a live one ends the run as
 `slot_occupied`.
 
 **Concurrent builds.** The widths of the pools that run Cargo builds
-(`normal` 1, `bulk` 1, `compile` 1) bound how many run at once, so a job takes its queue slot only
+(`normal` 1, `bulk` 1, `compile` 2) bound how many run at once, so a job takes its queue slot only
 when it can run; no job waits inside its slot.
 
 The complete pressure tick, including adaptive widths and admission hold
@@ -250,10 +250,10 @@ its own pauses.
   `boot`, in the one-slot `system-build` pool, so neither holds a `bulk` slot
   a check is waiting for and an activation never waits behind a product check.
 - **Rust type and lint checks** (the Rust projects' `compile` operations and
-  their Clippy operations) run in the one-slot `compile` pool. They write only
+  their Clippy operations) run in the two-slot `compile` pool. They write only
   metadata, so they neither wait behind test builds nor stop when `normal`
-  and `bulk` are paused, and a lane learns within minutes whether its head
-  compiles.
+  and `bulk` are paused, and an agent learns within minutes whether its head
+  compiles. Focused test builds run in `normal`.
 
 ## Worktrees
 

@@ -477,10 +477,11 @@ in
         assert lib.assertMsg (
           declaredPools ? compile && poolSlices ? agent-ctl-compile
         ) "type and lint checks have a pool and slice of their own";
-        # The build pools' widths are the only bound on concurrent Cargo builds.
+        # The build pools' widths are the only bound on concurrent Cargo builds:
+        # one test build, one full check and two type checks.
         assert lib.assertMsg (
-          declaredPools.normal.parallel + declaredPools.bulk.parallel + declaredPools.compile.parallel <= 3
-        ) "normal, bulk and compile together admit at most three Cargo builds";
+          declaredPools.normal.parallel + declaredPools.bulk.parallel + declaredPools.compile.parallel <= 4
+        ) "normal, bulk and compile together admit at most four Cargo builds";
         assert lib.assertMsg (lib.all (token: !(lib.hasInfix token avoidPattern))
           forbiddenAvoidTokens
         ) "the earlyoom fallback must not exempt agents, browsers, runtimes, or generic shells";

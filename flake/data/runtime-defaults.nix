@@ -343,9 +343,9 @@ rec {
       # or killed rather than paged to disk.
       agent = {
         IOAccounting = true;
-        # Below app and session (100) and the shell (400). The quota keeps a
-        # third of the 24 threads out of reach whatever the weights say,
-        # since an idle desktop's share is otherwise lent away.
+        # Below app and session (100) and the shell (400). The quota equals
+        # all 16 threads, so only the weights hold agents back from the
+        # desktop.
         CPUWeight = 60;
         CPUQuota = "1600%";
         # iocost lends an idle sibling's share, so a low weight costs agents
@@ -503,7 +503,7 @@ rec {
         # starved behind an idle desktop and the coordinator's own polls.
         CPUWeight = 90;
         IOWeight = 100;
-        # Builds, up to three by pool width (normal 1, bulk 1, compile 1).
+        # Builds, up to four by pool width (normal 1, bulk 1, compile 2).
         # Peak memory per job since 2026-11-01, page cache included: Polylogue
         # focused p50 3.6G p90 5.5G, Sinex focused/exec p90 6.8-6.9G, compile
         # and Clippy p90 2.0-3.4G, so four typical builds would sum to ~13G. The plane
@@ -657,8 +657,8 @@ rec {
         IOAccounting = true;
         CPUWeight = 50;
         IOWeight = 50;
-        # Focused Cargo test builds peak at 2-6 GiB each and the pool runs
-        # three; the plane's own ceiling bounds normal and bulk together.
+        # Focused Cargo test builds peak at 2-7 GiB each and the pool runs
+        # one; the plane's own ceiling bounds normal and bulk together.
         MemoryHigh = "12G";
         MemoryMax = "14G";
         MemorySwapMax = "2G";

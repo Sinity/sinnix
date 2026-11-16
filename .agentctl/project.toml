@@ -343,7 +343,7 @@ admission = { memory_mib = 1024 }
 description = "Apply a digest-bound filesystem maintenance plan through native owners"
 exec = ["sinnix-fs", "maintain", "apply"]
 arguments = "required"
-pool = "bulk"
+pool = "background"
 result = "json"
 cache = "none"
 timeout_seconds = 3600
@@ -352,7 +352,7 @@ timeout_seconds = 3600
 description = "Read compression and shared-extent accounting for explicit physical paths"
 exec = ["sinnix-fs", "maintain", "account"]
 arguments = "required"
-pool = "bulk"
+pool = "background"
 result = "json"
 cache = "none"
 timeout_seconds = 7200
@@ -361,7 +361,7 @@ timeout_seconds = 7200
 description = "Measure allocated directory bytes on explicit paths with idle I/O priority"
 exec = ["sudo", "-n", "ionice", "-c", "3", "nice", "-n", "15", "du", "-x", "-B1", "--max-depth=2", "--"]
 arguments = "required"
-pool = "bulk"
+pool = "background"
 result = "exit"
 cache = "none"
 timeout_seconds = 7200
@@ -369,7 +369,7 @@ timeout_seconds = 7200
 [operations.filesystem_store_gc_plan]
 description = "List native unreachable Nix store paths without deleting roots or payloads"
 exec = ["nix-store", "--store", "daemon", "--gc", "--print-dead"]
-pool = "bulk"
+pool = "background"
 result = "exit"
 cache = "none"
 timeout_seconds = 3600
@@ -377,7 +377,7 @@ timeout_seconds = 3600
 [operations.backup_retention_plan]
 description = "Preview installed Borg retention without deleting archives"
 exec = ["sudo", "-n", "systemctl", "start", "borgbackup-retention-plan.service"]
-pool = "bulk"
+pool = "background"
 result = "exit"
 cache = "none"
 timeout_seconds = 28800
@@ -385,7 +385,7 @@ timeout_seconds = 28800
 [operations.backup_maintenance]
 description = "Run due installed Borg pruning and compaction"
 exec = ["sudo", "-n", "systemctl", "start", "borgbackup-maintenance.service"]
-pool = "bulk"
+pool = "background"
 result = "exit"
 cache = "none"
 timeout_seconds = 28800
@@ -401,7 +401,7 @@ timeout_seconds = 1800
 [operations.backup_local_dumps]
 description = "Expire older local daily dumps after matching complete Borg restores"
 exec = ["sudo", "-n", "systemctl", "start", "borgbackup-local-dumps.service"]
-pool = "bulk"
+pool = "background"
 result = "exit"
 cache = "none"
 timeout_seconds = 7500
@@ -428,7 +428,7 @@ timeout_seconds = 1800
 [operations.backup_drain]
 description = "Archive and verify pending native source snapshots"
 exec = ["sudo", "-n", "systemctl", "start", "borgbackup-drain-coordinator.service"]
-pool = "bulk"
+pool = "background"
 result = "exit"
 cache = "none"
 # Native systemd coordinator owns the finite 80h15m maximum deadline.

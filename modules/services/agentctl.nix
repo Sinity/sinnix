@@ -106,8 +106,8 @@ mkServiceModule {
       };
       # The widths of the pools that run Cargo builds (normal, bulk, compile)
       # are the bound on concurrent builds: a job takes its queue slot only
-      # when it can run. Together they admit three, one of them a
-      # metadata-only check. The measure is job completion, not PSI: with
+      # when it can run. Together they admit four, two of them
+      # metadata-only checks. The measure is job completion, not PSI: with
       # normal at 2 beside a bulk build, focused job 625 timed out at 30
       # minutes on 2026-11-02 while still compiling the `polylogue` crate
       # (4.5 CPU-minutes of work when the drive is free), because /realm's
@@ -136,12 +136,12 @@ mkServiceModule {
       # benchmarks of prebuilt binaries use `measure_run`.
       measure.parallel = 1;
       system-build.parallel = 1;
-      # Rust type and lint checks of a lane's change (`compile`, Clippy)
-      # write only metadata and take 1-4 minutes. In their own pool they
-      # never wait behind test builds or for a pause of `normal` and `bulk`,
-      # so a head is known to compile before it is pushed or sent to a cloud
-      # check.
-      compile.parallel = 1;
+      # Rust type and lint checks (`compile`, `fast`, Clippy) write only
+      # metadata and take 1-4 minutes. In their own pool they never wait
+      # behind test builds or for a pause of `normal` and `bulk`, so a head
+      # is known to compile before it is pushed. Two at once: each peaks at
+      # 3.1-3.9 GiB (2026-11-01), inside the compile slice's 8G.
+      compile.parallel = 2;
     };
     description = "Each pueue group's width and cross-pool admission policy.";
   };
