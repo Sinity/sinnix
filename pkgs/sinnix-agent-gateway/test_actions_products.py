@@ -202,7 +202,7 @@ def test_lynchpin_envelope_preserves_metadata_and_inner_unavailability(
 
 
 @pytest.mark.parametrize("terminal", [False, True])
-def test_shell_wait_preserves_job_identity_and_returns_output(
+def test_shell_wait_keeps_the_selected_task_and_output(
     tmp_path: Path, monkeypatch, terminal
 ):
     server, _, fake = make_server(tmp_path, monkeypatch, with_git=True)
@@ -213,7 +213,7 @@ def test_shell_wait_preserves_job_identity_and_returns_output(
     view = {
         **(DONE if terminal else RUNNING),
         "job_id": "fixture-shell-abc",
-        "task_id": "44",
+        "task_id": "41",
     }
     fake.responses["job.wait"] = {**view, "timed_out": not terminal}
     fake.responses["job.logs"] = {**view, "content": "output", "truncated": False}
@@ -229,7 +229,7 @@ def test_shell_wait_preserves_job_identity_and_returns_output(
     )
     assert result["result"]["outcome"] == "ok", result
     data = result["data"]
-    assert data["task_id"] == 44
+    assert data["task_id"] == 41
     assert data["outcome"] == ("terminal" if terminal else "running")
     assert data["output"]["content"] == "output"
     wait_call = next(c for c in fake.calls if c.operation == "job.wait")
