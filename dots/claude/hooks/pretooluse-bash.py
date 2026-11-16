@@ -105,7 +105,8 @@ def install_guard(command, **_):
 
 def force_push_guard(command, **_):
     """Bare force-push; --force-with-lease and --force-if-includes stay allowed."""
-    if any_line(r"git\s+push\s+.*(-f(\s|$)|--force(\s|$))", command):
+    # The flag must belong to the push itself: stop at a command separator.
+    if any_line(r"git\s+push\b[^;&|]*\s(-f|--force)(\s|$)", command):
         return ("Bare force-push blocked — use --force-with-lease or --force-if-includes")
     return None
 
