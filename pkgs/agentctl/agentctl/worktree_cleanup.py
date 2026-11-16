@@ -722,7 +722,7 @@ def _drop_branch(
         except (CleanupError, OSError) as error:
             return f"worktree kept; {error}"
         if dirty:
-            shown = ", ".join(line[3:] for line in dirty[:3])
+            shown = ", ".join(line.split(maxsplit=1)[-1] for line in dirty[:3])
             more = f" and {len(dirty) - 3} more" if len(dirty) > 3 else ""
             return f"worktree kept; uncommitted changes: {shown}{more}"
         if users:

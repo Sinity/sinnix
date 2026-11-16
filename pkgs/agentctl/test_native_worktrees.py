@@ -246,6 +246,10 @@ def test_dirty_squash_merged_checkout_is_kept_and_names_the_path(owned, monkeypa
     result = clean(owned)
     assert not result["removed"] and (path / "notes.txt").exists()
     assert result["kept"][0]["reason"] == "worktree kept; uncommitted changes: notes.txt"
+    (path / "notes.txt").unlink()
+    (path / "tracked.txt").write_text("edited\n")
+    result = clean(owned)
+    assert result["kept"][0]["reason"] == "worktree kept; uncommitted changes: tracked.txt"
 
 
 @pytest.mark.parametrize("kind", ["dirty", "ignored", "locked", "holder", "active"])
