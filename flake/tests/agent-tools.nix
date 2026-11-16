@@ -415,7 +415,8 @@ in
             && budget.CPUWeight < userSlices.app.CPUWeight
             && budget.IOWeight * 10 <= userSlices.app.IOWeight
             && budget ? CPUQuota
-            && sliceBytes budget.MemoryHigh < sliceBytes budget.MemoryMax
+            && budget ? MemoryMax
+            && !(budget ? MemoryHigh)
             && budget ? MemorySwapMax
             && budget ? TasksMax
             && !(budget ? ManagedOOMMemoryPressure)

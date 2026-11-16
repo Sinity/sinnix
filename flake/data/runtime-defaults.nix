@@ -71,7 +71,6 @@ let
   # The ceiling actually set on agent.slice, rounded down from the remainder.
   agentMemory = rec {
     max = 9216;
-    high = 8192;
     # Interactive sessions: protected up to their measured p95 (3.0 GiB).
     cliLow = 3072;
     cliHigh = 6144;
@@ -350,7 +349,12 @@ rec {
       # out-of-memory killer then act inside this slice, where the victim is
       # the job or tool with the highest OOM score (agentctl sets 900 on job
       # units, claude-tool-scope 800 on tool commands, the CLIs 300).
-      # MemoryHigh 1G below the ceiling throttles agent work before a kill.
+      # Agent work slows down at each kind's own MemoryHigh below (CLIs,
+      # tools, job plane). This slice has none: a MemoryHigh here throttled
+      # every kind at once without bound, four runaway allocators were held
+      # there for minutes, and oomd killed a bystander job in the meantime.
+      # At MemoryMax the kernel kills the largest of the highest-scored
+      # processes at once.
       agent = {
         IOAccounting = true;
         # Below app and session (100) and the shell (400). The quota equals
@@ -360,7 +364,6 @@ rec {
         CPUQuota = "1600%";
         # IOCost lends idle shares while favoring the desktop under contention.
         IOWeight = 25;
-        MemoryHigh = mib agentMemory.high;
         MemoryMax = mib agentMemory.max;
         # Idle sessions compress into zram (about 3:1) instead of pinning RAM;
         # 4G of swapped agent pages hold about 1.3G of the zram store.

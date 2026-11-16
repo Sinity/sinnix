@@ -29,7 +29,7 @@ agent ceiling exceeds the remainder.
 | Recovery services                   | 0.25 | `MemoryLow` on `system-critical.slice`                                    |
 | User capture producers              | 0.5  | `MemoryLow` on the user `background.slice`                                |
 | **Left for agent work**             | 9.4  |                                                                            |
-| Agent work ceiling                  | 9.0  | `MemoryMax` on `agent.slice`; `MemoryHigh` 8                              |
+| Agent work ceiling                  | 9.0  | `MemoryMax` on `agent.slice`                                              |
 
 Inside agent work: interactive CLIs (`agent-cli.slice`) keep 3 GiB protected,
 throttle at 6 and stop at 7; tool commands and MCP servers (`agent-tool.slice`)
@@ -78,9 +78,11 @@ consumer.
 
 ### What is killed
 
-When agent work reaches its ceiling, the kernel reclaims inside
-`agent.slice`, throttles it above `MemoryHigh`, and at `MemoryMax` kills
-inside it. The victim is chosen by OOM score, and the scores rank the kinds
+Each kind of agent work slows down at its own `MemoryHigh` (CLIs 6, tools
+4.5, job plane 6). `agent.slice` itself has no `MemoryHigh`: one there
+throttled every kind at once and held runaway allocators for minutes instead
+of ending them. When agent work as a whole reaches its ceiling, the kernel
+reclaims inside `agent.slice` and then kills inside it at once. The victim is chosen by OOM score, and the scores rank the kinds
 of agent work:
 
 1. agentctl job units, `OOMScoreAdjust=900` (measurement jobs 100). A job unit
