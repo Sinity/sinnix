@@ -427,7 +427,21 @@ def lookup_operation_request(
     ):
         raise job_queries.JobError(f"idempotent launch identity mismatch for {job_id}")
     task_id = document.get("queue_task_id")
-    task = pueue.task(task_id) if isinstance(task_id, int) else None
+    if "queue_task_id" not in document:
+        task = next(
+            (
+                entry
+                for entry in pueue.tasks().values()
+                if job_queries.job_id_of(entry) == job_id
+            ),
+            None,
+        )
+        if task is not None:
+            task_id = task.task_id
+            document["queue_task_id"] = task_id
+            write_input(path, document)
+    else:
+        task = pueue.task(task_id) if isinstance(task_id, int) else None
     if task is not None and job_queries.job_id_of(task) != job_id:
         raise job_queries.JobError(f"task {task_id} does not match job {job_id}")
     if task is not None:

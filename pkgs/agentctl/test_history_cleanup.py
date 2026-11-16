@@ -54,7 +54,9 @@ def test_hourly_cleanup_keeps_recent_ids_and_tasks_without_a_known_finish(
         (boundary, "2026-11-15T12:00:00+00:00"),
         (unknown, None),
     ]:
-        fake_pueue._tasks[task.task_id] = replace(task, ended_at=stamp)
+        fake_pueue._tasks[task.task_id] = replace(
+            fake_pueue.task(task.task_id), ended_at=stamp
+        )
     fake_pueue.running(running.task_id)
     now = datetime(2026, 11, 16, 12, tzinfo=UTC)
 

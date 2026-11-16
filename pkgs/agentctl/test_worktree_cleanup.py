@@ -3,7 +3,6 @@
 import os
 import shutil
 import subprocess
-from pathlib import Path
 
 import pytest
 from agentctl import worktree_cleanup as cleanup
@@ -78,25 +77,26 @@ def test_cleanup_refuses_reused_foreign_checkout_path(checkout, tmp_path, monkey
 
 
 def test_cleanup_keeps_inaccessible_detached_checkout(checkout, monkeypatch):
+    if os.geteuid() == 0:
+        pytest.skip("root bypasses directory mode checks")
     _, _, path = checkout
+    git(path, "checkout", "--detach")
     monkeypatch.setattr(
         worktrunk, "worktrunk_list", lambda root: (Worktree(branch=None, path=path),)
     )
-    original = Path.stat
-
-    def denied(candidate, *args, **kwargs):
-        if candidate == path:
-            raise PermissionError("synthetic checkout denial")
-        return original(candidate, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "stat", denied)
 
     def no_remove(*args, **kwargs):
         raise AssertionError("unavailable checkout must not reach removal")
 
     monkeypatch.setattr(worktrunk, "worktrunk_remove", no_remove)
-    reason = drop(checkout)
-    assert reason and "synthetic checkout denial" in reason
+    mode = path.stat().st_mode & 0o7777
+    path.chmod(0)
+    try:
+        reason = drop(checkout)
+        assert reason and str(path) in reason
+    finally:
+        path.chmod(mode)
+    assert path.is_dir()
 
 
 def test_post_removal_broken_link_is_retained_as_residue(checkout, monkeypatch):
@@ -130,7 +130,7 @@ def test_unreadable_untracked_agent_state_prevents_release(checkout, monkeypatch
     state.chmod(0)
     try:
         reason = drop(checkout)
-        assert reason
+        assert reason and "git status" in reason and ".agentctl/interrupted/" in reason
     finally:
         state.chmod(0o700)
     assert payload.read_bytes() == b"original interrupted output"

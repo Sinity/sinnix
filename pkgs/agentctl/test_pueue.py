@@ -13,7 +13,6 @@ import stat
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 from pathlib import Path
 
@@ -421,173 +420,6 @@ def test_a_private_pueue_task_places_its_child_in_the_declared_pool_scope(
     cgroup = log_path.read_text()
     assert f"/{unit_for(launch_path, 'pytest')}" in cgroup
     assert "/agent-ctl-pytest.slice/" in cgroup
-
-
-def test_a_waiting_caller_keeps_its_job_when_the_operator_reorders_the_queue(
-    live_pueue: str, tmp_path: Path
-) -> None:
-    """`pueue switch` exchanges two queued task ids under a blocked waiter.
-
-    Anti-vacuity: only the real daemon reorders a queue. A wait bound to the
-    id it was handed sleeps until the stranger the switch moved there
-    finishes, and then reports that stranger's result as its own.
-    """
-    runner = tmp_path / "bin" / "agentctl-run"
-    runner.parent.mkdir()
-    # The queued command carries the wrapper's shape -- its name and one
-    # launch input path -- because that path is what names the job.
-    runner.write_text('#!/bin/sh\ncase "$1" in *other*) sleep 8 ;; esac\n')
-    runner.chmod(0o755)
-    pueue.group_add("reorder", 1)
-    pueue.pause("reorder")
-    other = pueue.add(
-        group="reorder",
-        label="fixture:check:other",
-        command=(str(runner), str(tmp_path / "other.json")),
-        working_directory=tmp_path,
-    )
-    own = pueue.add(
-        group="reorder",
-        label="fixture:check:own",
-        command=(str(runner), str(tmp_path / "own.json")),
-        working_directory=tmp_path,
-    )
-
-    def reorder() -> None:
-        """The operator's own prioritisation, while the caller is blocked."""
-        time.sleep(1.0)
-        subprocess.run(["pueue", "switch", str(other), str(own)], check=True)
-        pueue.resume("reorder")
-
-    operator = threading.Thread(target=reorder)
-    operator.start()
-    try:
-        waited = job_queries.wait(own, timeout_seconds=60)
-    finally:
-        operator.join()
-
-    assert waited["job_id"] == "own"
-    # The switch put this job at the other's id, and the wait returns it there.
-    assert (waited["task_id"], waited["phase"]) == (other, "succeeded")
-    stranger = pueue.task(own)
-    assert stranger is not None and not stranger.terminal, (
-        "the wait consumed the job the switch moved to its id"
-    )
-
-
-def test_cleanup_after_a_real_reorder_spares_the_queued_job_that_moved(
-    live_pueue: str, config: Config, project_root: Path
-) -> None:
-    """A real `pueue switch` vacates the id a queued job's launch input records.
-
-    Anti-vacuity: selecting the input by that recorded id deletes the launch
-    input of a job the daemon still has queued, and that job then fails
-    before its command with an unusable launch file.
-    """
-    project = load_project_adapter(project_root)
-    pueue.group_add("reorder", 1)
-    pueue.pause("reorder")
-    queued = [
-        launch.enqueue(
-            config,
-            project=project,
-            operation="check",
-            label=f"fixture:check:{name}",
-            group="reorder",
-            argv=["true"],
-            working_directory=project_root,
-            timeout_seconds=60,
-            result_kind="exit",
-            environment={},
-        )
-        for name in ("survivor", "dropped")
-    ]
-    survivor, dropped = queued
-    survivor_input = config.inputs_dir / f"{survivor['job_id']}.json"
-    assert (
-        json.loads(survivor_input.read_text())["queue_task_id"] == survivor["task_id"]
-    )
-
-    subprocess.run(
-        ["pueue", "switch", str(survivor["task_id"]), str(dropped["task_id"])],
-        check=True,
-    )
-    pueue.remove([survivor["task_id"]])
-    vacated = survivor["task_id"]
-
-    with pytest.raises(JobError, match="pueue has no task"):
-        launch.clean(config, vacated)
-
-    assert survivor_input.exists(), "the queued job lost its own launch input"
-    moved = job_queries.get_job(vacated, config, survivor["job_id"])
-    assert (moved["task_id"], moved["job_id"]) == (
-        dropped["task_id"],
-        survivor["job_id"],
-    )
-
-
-def test_a_landing_queued_behind_a_worker_is_cancelled_by_its_own_reference(
-    live_pueue: str, config: Config, project_root: Path
-) -> None:
-    """A batch's worker and landing exchange ids; each cancel reaches its own.
-
-    Anti-vacuity: cancelling by the id the manifest stored kills the other
-    task of the pair, which is the whole run either way.
-    """
-    project = load_project_adapter(project_root)
-    pueue.group_add("batchish", 1)
-    pueue.pause("batchish")
-    worker = launch.enqueue(
-        config,
-        project=project,
-        operation="worker",
-        label="fixture:worker:run:w1",
-        group="batchish",
-        argv=["true"],
-        working_directory=project_root,
-        timeout_seconds=60,
-        result_kind="exit",
-        environment={},
-    )
-    landing = launch.enqueue(
-        config,
-        project=project,
-        operation="integrate",
-        label="fixture:integrate:run",
-        group="batchish",
-        argv=["true"],
-        working_directory=project_root,
-        timeout_seconds=60,
-        result_kind="exit",
-        environment={},
-        after=[worker["task_id"]],
-    )
-
-    landing_input = config.inputs_dir / f"{landing['job_id']}.json"
-    landing_before = landing_input.read_bytes()
-    worker_input = config.inputs_dir / f"{worker['job_id']}.json"
-    worker_before = worker_input.read_bytes()
-
-    subprocess.run(
-        ["pueue", "switch", str(worker["task_id"]), str(landing["task_id"])], check=True
-    )
-
-    cancelled = launch.cancel(config, landing["task_id"], job_id=landing["job_id"])
-
-    assert cancelled["job_id"] == landing["job_id"]
-    assert cancelled["task_id"] == worker["task_id"], (
-        "the landing did not follow the switch to the worker's old id"
-    )
-    assert pueue.task(cancelled["task_id"]) is None
-    assert landing_input.read_bytes() == landing_before
-    retained = job_queries.get_job(
-        cancelled["task_id"], config, job_id=landing["job_id"]
-    )
-    assert retained["queue_present"] is False
-    assert retained["job_id"] == landing["job_id"]
-    survivor = job_queries.get_job(landing["task_id"], config, job_id=worker["job_id"])
-    assert not survivor["terminal"], "the cancel reached the worker, not the landing"
-    assert worker_input.read_bytes() == worker_before
 
 
 def test_kill_reaches_the_whole_process_tree(live_pueue: str, tmp_path: Path) -> None:
@@ -1039,3 +871,49 @@ def test_native_priority_is_retained_when_reading_a_task():
     assert pueue.Task.from_entry(payload).priority == -5
     payload["priority"] = 50
     assert pueue.Task.from_entry(payload).priority == 50
+
+
+def test_reordered_queue_requires_the_current_numeric_id(
+    live_pueue, config, project_root
+):
+    project = load_project_adapter(project_root)
+    pueue.group_add("reorder", 1)
+    pueue.pause("reorder")
+    jobs = [
+        launch.enqueue(
+            config,
+            project=project,
+            operation="check",
+            label=f"fixture:{name}",
+            group="reorder",
+            argv=["true"],
+            working_directory=project_root,
+            timeout_seconds=60,
+            result_kind="exit",
+            environment={},
+        )
+        for name in ("first", "second")
+    ]
+    first, second = jobs
+    inputs = [config.inputs_dir / f"{job['job_id']}.json" for job in jobs]
+    original = [path.read_bytes() for path in inputs]
+    subprocess.run(
+        ["pueue", "switch", str(first["task_id"]), str(second["task_id"])], check=True
+    )
+    controls = [
+        lambda: job_queries.get_job(first["task_id"], config, first["job_id"]),
+        lambda: launch.cancel(config, first["task_id"], job_id=first["job_id"]),
+        lambda: launch.retry(config, first["task_id"], first["job_id"]),
+        lambda: launch.clean(config, first["task_id"], first["job_id"]),
+        lambda: job_queries.wait(
+            first["task_id"], job_id=first["job_id"], config=config, timeout_seconds=1
+        ),
+    ]
+    for control in controls:
+        with pytest.raises(JobError, match="does not match job"):
+            control()
+    selected = job_queries.get_job(first["task_id"], config)
+    assert selected["job_id"] == second["job_id"] and selected["phase"] == "queued"
+    current = job_queries.get_job(second["task_id"], config, first["job_id"])
+    assert current["job_id"] == first["job_id"] and current["phase"] == "queued"
+    assert [path.read_bytes() for path in inputs] == original

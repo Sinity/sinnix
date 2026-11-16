@@ -283,6 +283,10 @@ def git(
             owned=owned,
             cause=None,
         )
+    # Status can return zero while unreadable directories are omitted. Its
+    # callers need a complete listing before treating a checkout as clean.
+    if verb == "status" and stderr.strip():
+        raise error(f"git status could not inspect {path}: {stderr.strip()}")
     return stdout if "-z" in arguments or "--null" in arguments else stdout.strip()
 
 

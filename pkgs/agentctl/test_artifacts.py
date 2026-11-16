@@ -223,6 +223,13 @@ def test_keyed_shell_launch_recovers_lost_queue_ack_without_duplicate(
     assert recovered["reused"] and recovered["task_id"] == 1
     assert len(fake_pueue.added) == 1
 
+    fake_pueue.succeed(recovered["task_id"])
+    launch.clean(config, recovered["task_id"], recovered["job_id"])
+    retained = launch.enqueue_request(config, **arguments)
+    assert retained["reused"] and retained["task_id"] == recovered["task_id"]
+    assert retained["queue_present"] is False
+    assert len(fake_pueue.added) == 1
+
 
 def test_idempotent_request_does_not_repeat_an_uncertain_submission(
     config: Config,
