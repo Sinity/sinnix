@@ -39,12 +39,17 @@ class Source:
         self.attempted: float | None = None
         self.error: str | None = None
         self.seconds: float | None = None
+        self.failures = 0
 
     def due(self, now: float) -> float:
-        """How overdue this source is, as a fraction of its period."""
+        """How overdue this source is, as a fraction of its period.
+
+        Each consecutive failure doubles the wait, up to eight periods, so a
+        source that keeps timing out cannot occupy the refresh thread.
+        """
         if self.attempted is None:
             return float("inf")
-        return (now - self.attempted) / self.period
+        return (now - self.attempted) / (self.period * min(8, 2**self.failures))
 
     def refresh(self) -> None:
         started = time.monotonic()
@@ -53,8 +58,10 @@ class Source:
             self.value = self.collect()
             self.observed = time.time()
             self.error = None
+            self.failures = 0
         except Exception as error:  # a failed source keeps its last value
             self.error = f"{type(error).__name__}: {error}"[:240]
+            self.failures += 1
         self.seconds = time.monotonic() - started
 
     def health(self, now: float) -> dict[str, Any]:

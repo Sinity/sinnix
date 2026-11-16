@@ -8,6 +8,7 @@ from .engine import range_text, span
 
 PANEL_ROWS = 6
 TEXT_FINISHED_ROWS = 20
+IDLE_UNITS_NAMED = 4
 STATE_WORDS = {
     "finished": "finished",
     "merged_not_live": "merged, not yet live",
@@ -171,7 +172,16 @@ def product_line(row: Mapping[str, Any]) -> str:
     if units:
         parts.append(
             f"{len(units) - len(idle)} of {len(units)} units active"
-            + (f", not running: {', '.join(idle)}" if idle else "")
+            + (
+                f", not running: {', '.join(idle[:IDLE_UNITS_NAMED])}"
+                + (
+                    f" and {len(idle) - IDLE_UNITS_NAMED} more"
+                    if len(idle) > IDLE_UNITS_NAMED
+                    else ""
+                )
+                if idle
+                else ""
+            )
         )
     return f"{row['project']}: " + "; ".join(parts)
 

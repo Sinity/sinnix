@@ -392,3 +392,28 @@ def test_summary_lines_are_bounded_for_the_panel() -> None:
     assert len(lines["waiting"]) == text.PANEL_ROWS + 1
     assert lines["waiting"][-1] == "and 3 more on the hub page"
     assert lines["limits"][0].startswith("memory") or lines["limits"]
+
+
+def test_a_source_that_keeps_failing_waits_longer_and_keeps_its_last_value() -> None:
+    from sinnix_runtime.operator_state.service import Source
+
+    answers = iter([lambda: "first", None, None, lambda: "second"])
+
+    def collect() -> str:
+        answer = next(answers)
+        if answer is None:
+            raise RuntimeError("unavailable")
+        return answer()
+
+    source = Source("fixture", 10, collect)
+    assert source.due(0) == float("inf")
+    source.refresh()
+    start = source.attempted
+    assert source.due(start + 10) == 1
+    source.refresh()
+    source.refresh()
+    assert source.value == "first" and source.failures == 2
+    assert "unavailable" in source.error
+    assert source.due(source.attempted + 10) == 0.25
+    source.refresh()
+    assert source.value == "second" and source.failures == 0 and source.error is None
