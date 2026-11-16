@@ -1,31 +1,29 @@
 --!nonstrict
--- Compact read-only capsule. It only consumes shared bridge state; a click
--- opens the panel.
+-- The number of things waiting on the operator, from the operator-state
+-- engine in the hub server. Zero means nothing needs him. A click opens the
+-- panel. The capsule computes nothing: it shows the count it is given.
 
 local view = noctalia.state.get("sinity-hub.view") or { status = "disconnected" }
 
--- The attention count lives on the dedicated attention widget; this capsule
--- is the connection-status surface only.
-local function label()
-  local base = "HUB x"
-  if view.status == "connected" then base = "HUB" end
-  if view.status == "snapshot" then base = "HUB ~" end
-  if view.status == "source-stale" or view.status == "stale" then base = "HUB !" end
-  if view.status == "aggregate" then base = "HUB ?" end
-  local sources = type(view.snapshot) == "table" and view.snapshot.sources or nil
-  local agentctl = type(sources) == "table" and sources.agentctl or nil
-  if type(agentctl) == "table" and agentctl.status == "unavailable" then base = "HUB !" end
-  return base
+local function waiting()
+  local snapshot = view.snapshot
+  local state = type(snapshot) == "table" and type(snapshot.state) == "table" and snapshot.state.operator_state or nil
+  local counts = type(state) == "table" and state.counts or nil
+  if type(counts) ~= "table" or type(counts.waiting) ~= "number" then return nil end
+  return counts.waiting
 end
 
 local function render()
-  local sources = type(view.snapshot) == "table" and view.snapshot.sources or nil
-  local agentctl = type(sources) == "table" and sources.agentctl or nil
-  local agentctlFailed = type(agentctl) == "table" and agentctl.status == "unavailable"
-  local color = (view.status == "stale" or agentctlFailed) and "error" or (view.status == "connected" and "primary" or "secondary")
+  local count = waiting()
+  local stale = view.status == "stale" or view.status == "disconnected"
+  -- "?" when the count is unknown; a trailing "~" when it may be out of date.
+  local label = count == nil and "?" or tostring(count)
+  if count ~= nil and stale then label = label .. "~" end
+  local color = "secondary"
+  if count == nil or stale then color = "error" elseif count > 0 then color = "primary" end
   barWidget.render(ui.row({ gap = 5, align = "center" }, {
     ui.glyph({ name = "heartbeat", size = 14, color = color }),
-    ui.label({ text = label(), color = color, fontWeight = "bold" }),
+    ui.label({ text = label, color = color, fontWeight = "bold" }),
   }))
 end
 

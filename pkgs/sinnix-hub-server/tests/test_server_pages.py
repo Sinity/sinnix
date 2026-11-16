@@ -104,7 +104,7 @@ def hub_server(hub_server_factory, tmp_path: Path) -> str:
 
 @pytest.mark.parametrize(
     "route",
-    ["/", "/work/", "/services/"],
+    ["/", "/state/", "/work/", "/services/"],
 )
 def test_every_page_route_answers_with_a_document(
     hub_server: str, http_get, route: str

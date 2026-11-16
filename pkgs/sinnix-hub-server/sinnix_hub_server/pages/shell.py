@@ -447,6 +447,11 @@ function setPolicy(unit, property, current, button){
 PAGES = (
     ("/", "sinnix", "The three-second read: one verdict, then tiles, then detail"),
     (
+        "/state/",
+        "state",
+        "Agent work across every project: waiting on the operator, running, finished, stalled, forecast, limits",
+    ),
+    (
         "/work/",
         "work",
         "What is running right now, as named workloads rather than a process list",

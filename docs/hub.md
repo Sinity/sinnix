@@ -18,7 +18,8 @@ a sub-path).
 | Route        | What it is                                                     |
 | ------------ | -------------------------------------------------------------- |
 | `/`          | Summary: a verdict, six tiles, then detail                     |
-| `/work/`     | What is running: project commands, pueue groups, jobs, budgets |
+| `/state/`    | Agent work across every project (see "Operator state")         |
+| `/work/`     | What is running: project commands and slice budgets            |
 | `/services/` | Declared services grouped by resource class                    |
 | `/reports/`  | Generated reports (report port only)                           |
 | `/ops/v1/*`  | The hub-server's read and action API                           |
@@ -44,7 +45,8 @@ itself runs no commands. The API only accepts:
 
 - `start`, `stop`, `restart` on a unit listed in
   `/etc/sinnix/runtime-inventory.json` that declares `operatorRestart`;
-- `interrupt` on a queued or running agentctl job;
+- `interrupt` on a queued or running agentctl job, and `retry` on one that
+  ended without success;
 - `stop` on one process, identified by PID and start time, and only inside
   `agent-cli.slice`, `agent-tool.slice` or a slice the inventory marks as killable
   (SIGTERM, then SIGKILL after 3 s);
@@ -56,6 +58,92 @@ Each action carries the target the page observed; if the unit, job or process
 changed in the meantime, the action is refused rather than retargeted. Pages
 build their buttons from the same inventory, so they never offer an action the
 API would refuse. Privilege comes from the existing polkit rule for `wheel`.
+
+## Operator state
+
+One engine (`sinnix_runtime.operator_state`) computes what is going on across
+all agent work, and four views show its document. None of them computes its
+own.
+
+| View             | Reads                                                          |
+| ---------------- | -------------------------------------------------------------- |
+| Desktop bar      | `counts.waiting` from the summary in the hub snapshot          |
+| Desktop panel    | the summary's ready-made lines                                 |
+| `/state/` page   | the whole document                                             |
+| `sinnix state`   | the whole document, as text or with `--json`                   |
+
+The bar shows only the number of things waiting on the operator; zero means
+nothing needs him. The panel and the page list what waits on him first, then
+what runs, then what finished since he last looked, then the rest: stalled or
+looping jobs, limits and load, forecast, the state of each product, recent
+jobs. The page offers cancel on an unfinished job and retry on a failed one,
+through the action API.
+
+"Last looked" is one stored time. It moves when the operator opens the panel
+or the page (`POST /ops/v1/state/looked`), never when `sinnix state` or
+`GET /ops/v1/state` reads the document. `/state/?peek=1` renders the page
+without moving it.
+
+What each part is computed from:
+
+- **Waiting on the operator**: open Beads labelled `human` in every registered
+  project (`bd human list`), and pending Plannotator Inbox items when that
+  tool is installed.
+- **Running**: the agentctl job snapshot. A row names the project and
+  operation, the command, the checkout, the caller recorded at launch, how
+  long, and for a queued job the reason it waits.
+- **Finished**: a first-parent commit on a project's default branch whose pull
+  request checks passed (or that had no pull request), and which the revision
+  running on this machine contains when the product is deployed here. The
+  running revision is `nixos-version --configuration-revision` for the host
+  configuration and, for a product pinned as a flake input, the revision that
+  configuration's `flake.lock` pins. A change on the default branch that the
+  running revision lacks is shown as "merged, not yet live".
+- **Stalled or looping**: a job beyond twice the upper end of its usual range,
+  a running job whose log has been quiet for 30 minutes, and one job failing
+  three times in a row with the same exit code.
+- **Limits and load**: `claude-quota`, the limits the newest Codex session
+  reported, memory, file page cache, swap, pressure, and the agent slices'
+  memory against their limits.
+- **Products**: open tasks, the default branch's hosted check, the last merged
+  change, the running revision and the state of the product's units.
+
+Text an agent wrote (a commit subject, a task title) appears only as a quoted
+field beside the commit, pull request or task that carries it. Every other
+sentence is assembled from the facts above.
+
+The schema reserves two fields that nothing writes yet: `muted` (a mark for a
+companion agent) and `small_next_move`.
+
+### Forecast and the Bead convention
+
+Ranges are the 10th to 90th percentile of past durations and always carry the
+number of samples behind them. With fewer than 8 samples the range is the
+observed minimum to maximum and is marked as resting on few samples.
+
+History comes from the agentctl event log (run time per operation, queue wait
+per pool), the task-runner history database, and Beads closed in the last 120
+days. Four clocks are reported separately: agent working time (claim to
+close), waiting for machine resources (enqueue to start), waiting for the
+operator (tasks labelled `human`, created to closed) and total elapsed
+(created to closed).
+
+A Bead records its forecast inputs in three places:
+
+| Fact          | Where                                                              |
+| ------------- | ------------------------------------------------------------------ |
+| Size class    | label `size:small`, `size:medium`, `size:large` or `size:xlarge`   |
+| Kind of work  | label `kind:<word>`; without one the issue type is the kind        |
+| Own range     | metadata `estimate_low_minutes` and `estimate_high_minutes`        |
+
+A closed Bead without a size label is sized from its single estimate in
+minutes: up to 60 is small, up to 240 medium, up to 960 large, more is extra
+large.
+
+`sinnix estimate range <kind> <size>` answers "how long do tasks like this
+take" from the closed Beads, and `sinnix estimate job <project> <operation>`
+does the same for a declared operation. When the exact kind and size have too
+few closed tasks, the answer says which wider set it used.
 
 ## Swap warning
 

@@ -98,6 +98,17 @@ class AgentCtlClient:
             )
         )
 
+    def retry(self, task_id: str | int, *, job_id: str | None = None) -> dict[str, Any]:
+        """Restart a job that ended without success, in place."""
+        return self._job_response(
+            (
+                "job",
+                "retry",
+                str(task_id),
+                *(("--job-id", job_id) if job_id else ()),
+            )
+        )
+
     def _job_response(self, arguments: Sequence[str]) -> dict[str, Any]:
         value = self._call((self.command, "--json", *arguments))
         if not isinstance(value, dict) or not isinstance(

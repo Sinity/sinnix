@@ -12,6 +12,7 @@ from sinnix_runtime import inventory as runtime_inventory
 from sinnix_runtime.actions import ActionService
 from sinnix_runtime.agent_jobs import AgentCtlClient
 from sinnix_runtime.client import UnixConnection
+from sinnix_runtime.operator_state.service import OperatorState
 from sinnix_runtime.snapshot import SnapshotBuilder, observe_section
 
 from . import feedback, pages
@@ -210,6 +211,17 @@ def main() -> None:
         section_source=observe_section,
         agent_jobs_source=agentctl.snapshot,
     )
+    # One engine computes the operator state; the bar and panel read its
+    # summary from the snapshot, the page and `sinnix state` read it whole.
+    operator_state = OperatorState(
+        layer.operator_state_path,
+        jobs=lambda: (builder.snapshot().get("state") or {}).get("agentctl") or {},
+        units=lambda: (
+            (builder.snapshot().get("state") or {}).get("systemd_units") or []
+        ),
+    )
+    builder.operator_state_source = operator_state.summary
+    operator_state.start()
     builder.anchor_event_path = args.anchor_events or (root / "afk-resume.json")
     builder.hyprland_event_path = args.hyprland_events or (root / "hyprland-events")
     actions = ActionService(
@@ -234,4 +246,5 @@ def main() -> None:
         hub_manifest=args.hub_manifest,
         inventory_path=args.inventory,
         feedback=feedback_spool,
+        operator_state=operator_state,
     )

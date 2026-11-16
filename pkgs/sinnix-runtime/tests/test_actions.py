@@ -233,6 +233,56 @@ class FakeAgentJobs:
             "ended_at": "2026-08-23T10:00:00Z",
         }
 
+    def retry(self, task_id: str, *, job_id=None) -> dict:
+        self.retried = [*getattr(self, "retried", []), task_id]
+        return self.get(task_id) | {"phase": "queued", "terminal": False}
+
+
+def test_retry_restarts_only_a_job_that_ended_without_success(tmp_path: Path) -> None:
+    inventory_path = tmp_path / "inventory.json"
+    inventory(inventory_path)
+    job = {
+        "task_id": "job-1",
+        "label": "fixture:check",
+        "project": "fixture",
+        "operation": "check",
+        "group": "normal",
+        "phase": "failed",
+        "terminal": True,
+        "exit_code": 1,
+    }
+    builder = SnapshotBuilder(
+        tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
+    )
+    builder.refresh()
+
+    def service(row: dict, name: str) -> tuple[ActionService, FakeAgentJobs]:
+        jobs = FakeAgentJobs([row])
+        return (
+            ActionService(
+                builder.snapshot,
+                inventory_path,
+                tmp_path / name,
+                agent_jobs=jobs,
+                unit_state_prober=fake_unit_state_prober,
+            ),
+            jobs,
+        )
+
+    actions, jobs = service(job, "receipts.jsonl")
+    receipt = actions.execute(request("retry", {"task_id": "job-1"}))
+    assert jobs.retried == ["job-1"]
+    assert receipt["previous_state"]["job"]["phase"] == "failed"
+    assert receipt["resulting_state"]["job"]["phase"] == "queued"
+    for row, message in (
+        (job | {"phase": "running", "terminal": False}, "has not ended"),
+        (job | {"phase": "succeeded"}, "nothing to retry"),
+    ):
+        refusing, jobs = service(row, f"{row['phase']}.jsonl")
+        with pytest.raises(ActionError, match=message):
+            refusing.execute(request("retry", {"task_id": "job-1"}, key=row["phase"]))
+        assert not hasattr(jobs, "retried")
+
 
 def test_action_fixtures_are_attested_and_idempotent_across_restart(
     tmp_path: Path,
@@ -345,7 +395,7 @@ def test_action_rejects_unknown_pid_stale_revision_and_unsafe_unit(
                     "parameters": {"mode": "graceful"},
                 }
             )
-        with pytest.raises(ActionError, match="only support interrupt"):
+        with pytest.raises(ActionError, match="only support interrupt and retry"):
             validate_request(request(action, {"task_id": "job-1"}, key=f"{action}-job"))
 
 

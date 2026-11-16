@@ -11,6 +11,8 @@ requires-python = ">=3.12"
 [project.scripts]
 sinnix-observe = "sinnix_runtime.observe.cli:main"
 sinnix-runtime-status = "sinnix_runtime.status:main"
+sinnix-runtime-state = "sinnix_runtime.operator_state.cli:state_main"
+sinnix-runtime-estimate = "sinnix_runtime.operator_state.cli:estimate_main"
 
 [tool.setuptools.packages.find]
 include = ["sinnix_runtime*"]

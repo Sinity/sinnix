@@ -31,6 +31,7 @@ from .feedback import FeedbackSpool
 
 FEEDBACK_PATH = "/feedback"
 FAILURE_PATH = "/v1/health/failure"
+LOOKED_PATH = "/v1/state/looked"
 BODY_LENGTH_ERRORS = frozenset(
     {
         "missing_content_length",
@@ -208,6 +209,20 @@ class Handler(BaseHTTPRequestHandler):
         what the hub server currently believes, which is the whole reason the
         pages moved here from a timer.
         """
+        if pages.canonical(urlsplit(path).path) == "/state/":
+            engine = self.server.operator_state  # type: ignore[attr-defined]
+            manifest = pages.load_manifest(self.server.hub_manifest)  # type: ignore[attr-defined]
+            self._write_html(
+                HTTPStatus.OK,
+                pages.render(
+                    "/state/",
+                    manifest,
+                    None,
+                    None,
+                    operator_state=engine.current() if engine is not None else None,
+                ),
+            )
+            return
         requested = {
             "/": ("storage", "generation"),
             "/work/": ("workloads", "ingestion", "slices"),
@@ -250,8 +265,19 @@ class Handler(BaseHTTPRequestHandler):
         parts = urlsplit(self.path)
         route = parts.path
         query = parse_qs(parts.query)
-        if pages.is_page_route(self.path):
-            self._serve_page(self.path)
+        if pages.is_page_route(route):
+            self._serve_page(route)
+        elif route == "/v1/state":
+            # The whole operator-state document: what `sinnix state` prints
+            # and the state page renders. Reading it never moves "last looked".
+            engine = self.server.operator_state  # type: ignore[attr-defined]
+            if engine is None:
+                self._write(
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    {"error": "no operator-state engine"},
+                )
+            else:
+                self._write(HTTPStatus.OK, engine.current())
         elif self.path == FEEDBACK_PATH:
             # Health only. There is deliberately no way to read the spool back.
             self._write_feedback(
@@ -389,6 +415,7 @@ class Handler(BaseHTTPRequestHandler):
             "/v1/actions",
             "/v1/actions/prepare",
             "/v1/work/focus",
+            LOOKED_PATH,
         }
         if json_route:
             content_types = self.headers.get_all("Content-Type", [])
@@ -421,6 +448,27 @@ class Handler(BaseHTTPRequestHandler):
                 subprocess.SubprocessError,
             ) as error:
                 self._write(HTTPStatus.CONFLICT, {"error": str(error)[:240]})
+            return
+        if self.path == LOOKED_PATH:
+            # The operator opened the panel or the page: "last looked" moves
+            # to the state he was shown.
+            engine = self.server.operator_state  # type: ignore[attr-defined]
+            try:
+                payload = read_json_object(self.headers, self.rfile, max_bytes=4096)
+            except RequestBodyError as error:
+                self._write(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+                return
+            if engine is None:
+                self._write(
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    {"error": "no operator-state engine"},
+                )
+                return
+            shown = payload.get("generated_at")
+            self._write(
+                HTTPStatus.OK,
+                engine.mark_looked(shown if isinstance(shown, str) else None),
+            )
             return
         if self.path == FEEDBACK_PATH:
             self._spool_feedback()
@@ -480,6 +528,7 @@ def serve(
     feedback: FeedbackSpool | None = None,
     emitter_factory: Callable[[], health.Emitter] = health.Emitter,
     sweep_interval: float = health.SWEEP_INTERVAL_SECONDS,
+    operator_state: Any = None,
 ) -> None:
     def stamp(server: ThreadingHTTPServer, is_unix: bool) -> None:
         server.builder = builder  # type: ignore[attr-defined]
@@ -489,6 +538,7 @@ def serve(
         server.inventory_path = inventory_path  # type: ignore[attr-defined]
         server.feedback = feedback  # type: ignore[attr-defined]
         server.emitter_factory = emitter_factory  # type: ignore[attr-defined]
+        server.operator_state = operator_state  # type: ignore[attr-defined]
 
     watchdog = watchdog_period()
     last_ping = 0.0

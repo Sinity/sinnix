@@ -353,6 +353,7 @@ mkServiceModule {
               "/v1/actions"
               "/v1/actions/prepare"
               "/v1/health/failure"
+              "/v1/state/looked"
             ]}
             reverse_proxy unix/${hubSocket}
           }
@@ -396,6 +397,7 @@ mkServiceModule {
           # The pages themselves. Rendered on request by the hub-server from
           # the state it already holds -- no prefix stripping here, unlike
           # /ops/* above: the hub server routes on the page path itself.
+          redir /state /state/
           redir /work /work/
           redir /services /services/
 

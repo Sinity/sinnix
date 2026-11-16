@@ -10,8 +10,7 @@ local STREAM_PATH = ENDPOINT .. "/v1/events"
 -- of the full snapshot (hundreds of KB of inventory and unit rows), and for
 -- the few receipts the panel summarises.
 local SNAPSHOT_STATE_KEYS = table.concat({
-  "agentctl",
-  "live_pressure",
+  "operator_state",
   "runtime_inventory",
   "session_anchor",
   "systemd_units",

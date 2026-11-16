@@ -6,9 +6,10 @@ shows the system as of a timestamp it prints, rather than an empty skeleton
 waiting on XHR. Only the *action* buttons need JavaScript, and they talk to the
 bounded action API this same process serves.
 
-Four routes, one shell:
+Five routes, one shell:
 
   /              the three-second read: a verdict, a row of tiles, then detail
+  /state/        agent work across every project, from the operator-state engine
   /work/         what is *running* -- named workloads, not a process list
   /services/     every attested runtime surface, with lifecycle controls
   /reports/      served by Caddy off disk; the pages only link to it
@@ -39,12 +40,14 @@ from .dashboard import render_dashboard
 from .probes import load_json
 from .services import render_services
 from .shell import PAGES, esc
+from .state import render_state
 from .work import render_work
 
 MANIFEST_SCHEMA = "sinnix-hub-manifest-v1"
 
 ROUTES = (
     "/",
+    "/state/",
     "/work/",
     "/services/",
 )
@@ -112,11 +115,16 @@ def render(
     snapshot: dict[str, Any] | None,
     inventory: dict[str, Any] | None,
     snapshot_error: str | None = None,
+    operator_state: dict[str, Any] | None = None,
 ) -> str:
     generated = (
         dt.datetime.now(dt.timezone.utc).astimezone().isoformat(timespec="seconds")
     )
     route = canonical(path)
+    if route == "/state/":
+        # The engine's own document; the snapshot's observation notice does
+        # not describe it.
+        return render_state(manifest, operator_state, generated)
     if route == "/work/":
         document = render_work(manifest, snapshot, inventory, generated)
     elif route == "/services/":

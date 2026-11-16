@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 import pytest
-from sinnix_hub_server.pages import dashboard, queue, services, shell
+from sinnix_hub_server.pages import dashboard, services, shell, state
 
 
 class Attributes(HTMLParser):
@@ -42,8 +42,8 @@ def test_action_arguments_survive_browser_attribute_decoding():
             ],
         ),
         (
-            queue.job_row(
-                {"task_id": unit, "terminal": False}, dt.datetime.now(dt.timezone.utc)
+            state.job_button(
+                "interrupt", "cancel", {"task_id": unit, "job_id": "j", "attempt": 1}
             ),
             [("act", ["interrupt", "task_id", unit])],
         ),

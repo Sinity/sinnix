@@ -113,8 +113,10 @@ ACTION_FIELDS = {
     "operator_reason",
     "parameters",
 }
+JOB_ACTIONS = frozenset({"interrupt", "retry"})
 ACTIONS = {
     "interrupt",
+    "retry",
     "freeze",
     "thaw",
     "reset_policy",
@@ -196,10 +198,10 @@ def validate_request(value: Any) -> dict[str, Any]:
     parameters = value["parameters"]
     if not isinstance(parameters, dict):
         raise ActionError("parameters must be an object")
-    if "task_id" in target and action != "interrupt":
-        raise ActionError("job targets only support interrupt")
-    if action == "interrupt" and "task_id" not in target:
-        raise ActionError("interrupt requires a job target")
+    if "task_id" in target and action not in JOB_ACTIONS:
+        raise ActionError("job targets only support interrupt and retry")
+    if action in JOB_ACTIONS and "task_id" not in target:
+        raise ActionError(f"{action} requires a job target")
     if (
         action in {"set_policy", "reset_policy", "park", "thaw"}
         and "unit" not in target
@@ -212,8 +214,8 @@ def validate_request(value: Any) -> dict[str, Any]:
         _string(parameters["value"], "value", 64)
         if parameters["property"] not in POLICY_PROPERTIES:
             raise ActionError("unsupported runtime policy property")
-    if action == "interrupt" and parameters:
-        raise ActionError("interrupt accepts no parameters")
+    if action in JOB_ACTIONS and parameters:
+        raise ActionError(f"{action} accepts no parameters")
     if action == "park":
         if set(parameters) != {"deadline_seconds"}:
             raise ActionError("park requires deadline_seconds")
@@ -335,7 +337,13 @@ class ActionService:
                 raise ActionError(
                     f"agentctl job lookup failed: {error}", 503
                 ) from error
-            if job.get("terminal") is True:
+            if request["action"] == "retry":
+                # A retry restarts a job that ended without success.
+                if job.get("terminal") is not True:
+                    raise ActionError("job has not ended", 409)
+                if job.get("phase") == "succeeded":
+                    raise ActionError("job succeeded; nothing to retry", 409)
+            elif job.get("terminal") is True:
                 raise ActionError("job is already terminal", 409)
             return {"kind": "job", "job": self._job_state(job)}
         if "process" in target:
@@ -811,6 +819,16 @@ class ActionService:
                 }
             except AgentCtlError as error:
                 raise ActionError(f"agentctl cancel failed: {error}", 503) from error
+        elif action == "retry":
+            try:
+                return {
+                    "name": action,
+                    "job": self.agent_jobs.retry(
+                        resolved["job"]["task_id"], job_id=resolved["job"]["job_id"]
+                    ),
+                }
+            except AgentCtlError as error:
+                raise ActionError(f"agentctl retry failed: {error}", 503) from error
         elif resolved.get("kind") == "process":
             # Not a systemd unit -- there is nothing for systemctl to
             # target, so this is the one adapter branch that does not shell

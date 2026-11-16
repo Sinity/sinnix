@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from .queue import active_jobs
 from .shell import (
     ACTION_SCRIPT,
     badge,
@@ -25,7 +24,7 @@ from .shell import (
     row,
     tile,
 )
-from .work import live_work_card, running_ledger
+from .work import active_jobs, live_work_card, running_ledger
 
 
 def psi_avg10(pressure: dict[str, Any], key: str) -> float | None:
@@ -446,7 +445,10 @@ def render_dashboard(
             "/work/#running",
         ),
         tile(
-            str(len(jobs)), "jobs queued or running", "info" if jobs else "", "/work/"
+            str(len(jobs)),
+            "jobs queued or running",
+            "info" if jobs else "",
+            "/state/#running",
         ),
     ]
     if memory:

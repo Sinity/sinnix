@@ -26,6 +26,9 @@ class SnapshotBuilder:
         section_source: Callable[[str], dict[str, Any]] | None = None,
         agent_jobs_source: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
+        # The compact operator state the desktop bar and panel read; set by the
+        # hub server once its engine exists.
+        self.operator_state_source: Callable[[], dict[str, Any]] | None = None
         self.snapshot_path = snapshot_path
         self.token_path = token_path
         self.state_path = state_path
@@ -128,6 +131,7 @@ class SnapshotBuilder:
             "state": {
                 **report,
                 "agentctl": agent_jobs,
+                "operator_state": self._operator_state(),
                 "session_anchor": anchor,
                 "hyprland_automation": hyprland,
             },
@@ -137,6 +141,12 @@ class SnapshotBuilder:
         snapshot["sections"]["agentctl"] = {
             **agent_jobs_health,
             "available": agent_jobs_health["status"] == "healthy",
+        }
+        snapshot["sections"]["operator_state"] = {
+            "available": snapshot["state"]["operator_state"] is not None,
+            "observed_at": observed_at,
+            "source": "operator-state",
+            "degradation": None,
         }
         for key in ("session_anchor", "hyprland_automation"):
             snapshot["sections"][key] = {
@@ -227,6 +237,14 @@ class SnapshotBuilder:
                     "degradation": str(error)[:240],
                 },
             )
+
+    def _operator_state(self) -> dict[str, Any] | None:
+        if self.operator_state_source is None:
+            return None
+        try:
+            return self.operator_state_source()
+        except Exception:  # the snapshot outlives a failed summary
+            return None
 
     def _hyprland_snapshot(self) -> dict[str, Any]:
         self.hyprland_socket.poll(self.hyprland_state)

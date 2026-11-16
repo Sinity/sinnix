@@ -28,41 +28,22 @@ local function stateValue(name)
   return view.snapshot.state[name]
 end
 
-local function sourceHealth(name)
-  if type(view.snapshot) ~= "table" or type(view.snapshot.sources) ~= "table" then return nil end
-  local value = view.snapshot.sources[name]
-  if type(value) ~= "table" then return nil end
+-- ## Agent work: the operator-state engine's summary ##
+--
+-- The hub server computes these lines; the panel only places them. Order:
+-- waiting on the operator, running, finished since he last looked, the rest.
+
+local shownFinished = nil
+
+local function operatorState()
+  local value = stateValue("operator_state")
+  if type(value) ~= "table" or type(value.lines) ~= "table" or type(value.counts) ~= "table" then return nil end
   return value
 end
 
-local function pct(value)
-  if type(value) ~= "number" then return "?" end
-  return string.format("%.1f%%", value)
-end
-
--- ## Now: pressure, memory, stalls ##
-
-local function pressureText()
-  local pressure = stateValue("live_pressure")
-  if type(pressure) ~= "table" then return "PSI: unavailable (no live_pressure in snapshot)" end
-  local function some(name)
-    local lane = pressure[name]
-    if type(lane) ~= "table" or type(lane.some) ~= "table" then return "?" end
-    return pct(lane.some.avg10)
-  end
-  return "PSI some avg10: cpu " .. some("cpu") .. ", memory " .. some("memory") .. ", io " .. some("io")
-end
-
-local function memoryText()
-  local pressure = stateValue("live_pressure")
-  local free = type(pressure) == "table" and pressure.free_h
-  if type(free) ~= "string" then return "Memory: unavailable (no free output in snapshot)" end
-  local total, _, available = free:match("Mem:%s+(%S+)%s+(%S+)%s+%S+%s+%S+%s+%S+%s+(%S+)")
-  local swapTotal, swapUsed = free:match("Swap:%s+(%S+)%s+(%S+)")
-  if total == nil then return "Memory: unavailable (free output unrecognized)" end
-  local line = "Memory: " .. available .. " available of " .. total
-  if swapTotal ~= nil then line = line .. "; swap " .. swapUsed .. " of " .. swapTotal .. " used" end
-  return line
+local function listOr(lines, empty)
+  if type(lines) ~= "table" or #lines == 0 then return { empty } end
+  return lines
 end
 
 -- ## Fleet: units, drift, gaps, governance ##
@@ -91,36 +72,7 @@ local function governanceText()
     for _ in pairs(inventory.units) do units = units + 1 end
   end
   local captures = type(inventory.captures) == "table" and #inventory.captures or 0
-  return "Governance: " .. tostring(units) .. " units, " .. tostring(captures) .. " capture lanes, " .. tostring(sliceCount) .. " slices live"
-end
-
--- ## Agents: owner queue snapshot ##
-
-local function agentLines()
-  local health = sourceHealth("agentctl")
-  local snapshot = stateValue("agentctl")
-  if type(snapshot) ~= "table" then
-    local reason = health ~= nil and (" -- " .. text(health.degradation)) or ""
-    return { "Jobs: unavailable" .. reason }
-  end
-  local coverage = type(snapshot.coverage) == "table" and snapshot.coverage or {}
-  local active = type(coverage.active) == "table" and coverage.active or {}
-  local omitted = type(snapshot.omitted) == "table" and snapshot.omitted or {}
-  local lines = { "Jobs: " .. text(active.returned) .. "/" .. text(active.total) .. " active rows, " .. text(omitted.terminal) .. " terminal rows omitted" }
-  local groups = type(snapshot.groups) == "table" and snapshot.groups or {}
-  for name, group in pairs(groups) do
-    if type(group) == "table" then
-      table.insert(lines, "  " .. tostring(name) .. ": " .. text(group.status) .. ", " .. text(group.running) .. " running, " .. text(group.queued) .. " queued")
-    end
-  end
-  local jobs = type(snapshot.jobs) == "table" and snapshot.jobs or {}
-  for index = 1, math.min(#jobs, 4) do
-    local job = jobs[index]
-    if type(job) == "table" then
-      table.insert(lines, "  " .. text(job.label) .. ": " .. text(job.phase) .. " · job " .. text(job.job_id) .. " · attempt " .. text(job.attempt))
-    end
-  end
-  return lines
+  return "Governance: " .. tostring(units) .. " units, " .. tostring(captures) .. " capture lanes"
 end
 
 -- ## Signals: AFK anchor, receipts ##
@@ -177,7 +129,7 @@ local workRequest = 0
 local workBusy = false
 local render
 
-local function workHttp(path, pin, callback)
+local function workHttp(path, body, callback)
   local runtime = noctalia.getenv("XDG_RUNTIME_DIR") or ""
   local tokenPath = noctalia.getConfig("token_path") or "$XDG_RUNTIME_DIR/sinnix/hub.token"
   local token = noctalia.readFile(noctalia.expandPath(tokenPath:gsub("%$XDG_RUNTIME_DIR", runtime)))
@@ -186,7 +138,7 @@ local function workHttp(path, pin, callback)
     url = (noctalia.getConfig("endpoint") or "http://127.0.0.1:3090") .. path,
     headers = { "Authorization: Bearer " .. token:gsub("%s+$", ""), "Content-Type: application/json" },
   }
-  if pin ~= nil then options.method = "POST"; options.body = noctalia.json.encode({ pin = pin }) end
+  if body ~= nil then options.method = "POST"; options.body = noctalia.json.encode(body) end
   local admitted = noctalia.http(options, function(response)
     local ok, value = pcall(noctalia.json.decode, response.body or "")
     callback(response.ok and response.status == 200 and ok and value or nil)
@@ -228,7 +180,7 @@ local function workSection()
     table.insert(children, ui.label({ text = (saved.detail or "") .. " · pin " .. pin.id .. " · " .. (same and "observed" or "stale/unverified; rebind required"), color = "on_surface_variant" }))
     local buttons = {
       ui.button({ text = "Focus exact pin", variant = "outline", controlSize = "sm", onClick = function()
-        workHttp("/v1/work/focus", pin, function(value)
+        workHttp("/v1/work/focus", { pin = pin }, function(value)
           if value == nil then noctalia.notifyError("Destination stale/unverified or focus failed. Refresh and rebind explicitly.") end
         end)
       end }),
@@ -256,18 +208,38 @@ render = function()
   if view.reason ~= nil then
     table.insert(rows, ui.label({ text = "Reason: " .. text(view.reason), color = "on_surface_variant" }))
   end
-  table.insert(rows, infoSection("Now", { pressureText(), memoryText() }))
+  local operator = operatorState()
+  if operator == nil then
+    table.insert(rows, infoSection("Agent work", { "unavailable (no operator_state in snapshot)" }))
+  else
+    local counts, lines = operator.counts, operator.lines
+    table.insert(rows, infoSection("Waiting on you (" .. text(counts.waiting) .. ")", listOr(lines.waiting, "Nothing needs you.")))
+    table.insert(rows, infoSection("Running (" .. text(counts.running) .. " running, " .. text(counts.queued) .. " queued)", listOr(lines.running, "No job is running or queued.")))
+    -- The list shown is the one captured when the panel opened, so it stays
+    -- readable after opening has moved "last looked".
+    local finished = shownFinished or lines.finished
+    table.insert(rows, infoSection("Finished since you last looked (" .. tostring(type(finished) == "table" and #finished or 0) .. ")", listOr(finished, "Nothing new.")))
+    if type(lines.merged_not_live) == "table" and #lines.merged_not_live > 0 then
+      table.insert(rows, infoSection("Merged, not yet live (" .. text(counts.merged_not_live) .. ")", lines.merged_not_live))
+    end
+    if type(lines.stalled) == "table" and #lines.stalled > 0 then
+      table.insert(rows, infoSection("Stalled or looping (" .. text(counts.stalled) .. ")", lines.stalled))
+    end
+    if type(lines.failed) == "table" and #lines.failed > 0 then
+      table.insert(rows, infoSection("Failed since you last looked (" .. text(counts.failed_new) .. ")", lines.failed))
+    end
+    table.insert(rows, infoSection("Limits and load", listOr(lines.limits, "unavailable")))
+    table.insert(rows, infoSection("Products", listOr(lines.products, "no registered project")))
+  end
   local fleet = unitsLines()
   table.insert(fleet, governanceText())
   table.insert(rows, infoSection("Fleet", fleet))
-  local agents = {}
-  for _, line in ipairs(agentLines()) do table.insert(agents, line) end
-  table.insert(rows, infoSection("Agents", agents))
   table.insert(rows, workSection())
   local signals = { anchorText() }
   table.insert(signals, receiptText())
   table.insert(rows, infoSection("Signals", signals))
   table.insert(rows, ui.row({ gap = 6 }, {
+    hubButton("state", "/state/", "Agent work across every project, in full"),
     hubButton("hub", "/", "Open the hub dashboard"),
     hubButton("work", "/work/", "Named workloads running right now"),
     hubButton("services", "/services/", "Runtime surfaces with lifecycle controls"),
@@ -281,6 +253,13 @@ noctalia.state.watch("sinity-hub.view", function(value)
 end)
 
 function onOpen(_context)
+  -- Opening the panel is the operator looking: keep the finished list he is
+  -- about to read, then tell the engine which state he was shown.
+  local operator = operatorState()
+  shownFinished = operator ~= nil and operator.lines.finished or nil
+  if operator ~= nil then
+    workHttp("/v1/state/looked", { generated_at = operator.generated_at }, function(_value) end)
+  end
   refreshWork()
   render()
 end

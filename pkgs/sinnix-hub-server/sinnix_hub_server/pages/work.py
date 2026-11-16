@@ -5,7 +5,6 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any
 
-from .queue import active_jobs, jobs_card, queue_card
 from .shell import (
     ACTION_SCRIPT,
     age_since,
@@ -95,6 +94,17 @@ def ledger_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
 
 def running_ledger(state: dict[str, Any]) -> list[dict[str, Any]]:
     return [entry for entry in ledger_rows(state) if entry.get("status") == "running"]
+
+
+def active_jobs(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Unfinished jobs in the queue snapshot; the state page shows them."""
+    plane = state.get("agentctl")
+    jobs = plane.get("jobs") if isinstance(plane, dict) else None
+    return [
+        job
+        for job in jobs or []
+        if isinstance(job, dict) and job.get("terminal") is not True
+    ]
 
 
 def live_work_card(state: dict[str, Any], now: dt.datetime) -> str:
@@ -219,16 +229,18 @@ def render_work(
     body += (
         '<div class="tiles">'
         + tile(str(len(in_flight)), "commands in flight", "info" if in_flight else "")
-        + tile(str(len(active_jobs(state))), "jobs queued or running")
+        + tile(
+            str(len(active_jobs(state))),
+            "jobs queued or running",
+            href="/state/#running",
+        )
         + tile(
             str(failed_recent), "of last 10 runs failed", "bad" if failed_recent else ""
         )
         + "</div>"
     )
     body += live_work_card(state, now)
-    body += queue_card(state)
     body += slices_card(state)
-    body += jobs_card(state, now)
     body += ledger_card(state, now)
     body += log_card()
     if snapshot is None:

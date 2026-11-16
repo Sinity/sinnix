@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Agent work across all projects, from what waits on the operator to forecast and limits
+# runtimeInputs: bash @sinnix-runtime
+set -euo pipefail
+exec sinnix-runtime-state "$@"

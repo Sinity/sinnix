@@ -83,7 +83,12 @@ mkServiceModule {
             # probe the live host with; /run/current-system/sw/bin is where
             # they are, and the pages render on request rather than from a
             # timer's PATH.
-            Environment = [ "PATH=/run/wrappers/bin:/run/current-system/sw/bin" ];
+            # The operator-state engine also reads hosted checks and usage
+            # limits through `gh` and `claude-quota`, which live in the user
+            # profile.
+            Environment = [
+              "PATH=/run/wrappers/bin:/run/current-system/sw/bin:/etc/profiles/per-user/${userName}/bin"
+            ];
             Restart = "on-failure";
             RestartSec = "2s";
             # The main loop supervises a serial refresh/sweep worker and
