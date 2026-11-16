@@ -170,6 +170,8 @@ cache = "tree+environment"
 description = "Build and activate the workstation configuration"
 exec = ["switch"]
 pool = "system-build"
+# A caller is told which other activations are queued or running, and for whom.
+announce = true
 scratch = "nvme"
 timeout_seconds = 28800
 
@@ -177,6 +179,7 @@ timeout_seconds = 28800
 description = "Build and set the workstation boot default for the next reboot"
 exec = ["boot"]
 pool = "system-build"
+announce = true
 scratch = "nvme"
 timeout_seconds = 28800
 

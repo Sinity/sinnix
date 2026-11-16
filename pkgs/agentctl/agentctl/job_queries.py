@@ -533,6 +533,12 @@ def _snapshot_row(task: Task, config: Config | None = None) -> dict[str, Any]:
                 )
             if isinstance(document.get("caller"), dict):
                 row["caller"] = document["caller"]
+            if document.get("announce") is True:
+                row["announce"] = True
+                if isinstance(document.get("revision"), dict):
+                    row["revision"] = document["revision"]
+            if task.status == "Stashed" and isinstance(document.get("deferred"), dict):
+                row["deferred"] = document["deferred"]
             if isinstance(document.get("working_directory"), str):
                 row["working_directory"] = document["working_directory"][
                     :MAX_SNAPSHOT_TEXT

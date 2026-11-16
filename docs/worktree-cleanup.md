@@ -82,3 +82,31 @@ Managed sessions and Cargo direnv environments default to `CARGO_INCREMENTAL=0`.
 An explicit `CARGO_INCREMENTAL=1` enables incremental rebuilds. Declared AgentCTL operation values
 still take precedence over inherited values. Workspace manifests own debuginfo
 settings.
+
+## Build output of idle checkouts
+
+`agentctl worktree build-output` lists every directory under the registered
+worktree roots (`--root` names others) with the disk use of its build output,
+when the checkout was last used and whether it is live. Build output is the
+checkout's own entry in the compiler cache above, plus these directories
+directly inside the checkout when Git ignores them and tracks nothing in them:
+`target`, `node_modules`, `.venv`, `dist`, `build`, `.pytest_cache`,
+`.mypy_cache`, `.ruff_cache`. Sizes come from `du`, so blocks shared by
+reflink between two targets are counted in each.
+
+Last use is the newest of the checkout directory, its Git `HEAD`, index and
+reflog, the output directories, and the compiler cache's selection marker and
+profile directories. A checkout is live while a process has its working
+directory there, an unfinished job runs there, or a build holds its Cargo
+target lock.
+
+`--expire-idle-days N` selects the build output of checkouts that are not live
+and were last used at least N days ago, and lists it; `--apply` removes it.
+Sources, Git state and the checkout itself are never touched, and the next
+build recreates what was removed. A compiler cache entry is renamed under its
+build lock before deletion, as the evict service does.
+
+Names matching `sinnix.services.agentctl.buildOutputExempt` (shell patterns)
+are listed as exempt and nothing under them is read, sized or removed. The
+list names the checkouts of a campaign whose owner manages their build output;
+it is emptied when that campaign ends.

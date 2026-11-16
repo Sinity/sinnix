@@ -26,12 +26,13 @@ functions. Waiting never cancels a job; queue cleanup keeps its input and output
 | Verb                                                                                          | Does                                                                                                                                                                                                                                                                                                 |
 | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `project list \| get [p] \| operations [p]`                                                   | the configured descriptors                                                                                                                                                                                                                                                                           |
-| `job start [p] <op> [--workspace P] [--wait] [--if-idle] [--fresh] [--priority N] [-- args…]` | queue an operation in its pool, label `<p>:<op>`; `--if-idle` skips it while the same label is queued or running; `--fresh` runs a cached operation even when a matching job exists; `--priority` (-100 to 100, default 0) sets this job's pueue priority: within its pool a higher one starts first |
+| `job start [p] <op> [--workspace P] [--wait] [--if-idle] [--fresh] [--priority N] [--discretionary] [-- args…]` | queue an operation in its pool, label `<p>:<op>`; `--if-idle` skips it while the same label is queued or running; `--fresh` runs a cached operation even when a matching job exists; `--priority` (-100 to 100, default 0) sets this job's pueue priority: within its pool a higher one starts first; `--discretionary` holds the job while the subscription is above the quota threshold |
 | `job list [--project p] [--active] [--all]`                                                   | job rows, newest first (40 unless `--all`)                                                                                                                                                                                                                                                           |
 | `job snapshot [--limit N]`                                                                    | group state and counts plus bounded job rows, unfinished first                                                                                                                                                                                                                                       |
 | `job get \| logs \| result \| cancel \| retry \| wait <id>`                                   | one job by pueue task ID, with optional `--job-id` checked against that row; `--attempt` selects a retry; `logs`/`result` page with `--offset`/`--limit`                                                                                                                                             |
 | `job clean <id> \| --all-terminal`                                                            | remove terminal entries; `--all-terminal` removes only jobs finished more than 24 hours ago; inputs and output stay                                                                                                                                                                                  |
 | `worktree clean [p] [--path P]`                                                               | retire completed checkouts whose work is published, keeping any with unpublished or uncommitted work                                                                                                                                                                                                 |
+| `worktree build-output [--root D] [--expire-idle-days N [--apply]]` | what each checkout's build output occupies and when it was last used; with `--expire-idle-days`, remove that output for idle checkouts (a dry run without `--apply`) |
 | `view [p]`                                                                                    | queue groups, recent failures, active jobs and ready tasks                                                                                                                                                                                                                                           |
 | `events tail [--lines N] [--follow] [--project p]`                                            | the event log (`/realm/state/agentctl/events.jsonl`)                                                                                                                                                                                                                                                 |
 | `pools apply`                                                                                 | write the declared pool widths into the running pueued                                                                                                                                                                                                                                               |
@@ -75,6 +76,29 @@ come from that checkout.
 Queued order follows pueue priority (highest first), then task ID, among jobs
 whose dependencies are satisfied. Paused groups, paused tasks and operator
 stashes have distinct reasons.
+
+### Announced operations
+
+An operation declared `announce = true` changes the live machine (Sinnix
+declares it on `switch` and `boot`). The queue already runs such jobs one at a
+time; the declaration adds visibility at the moment of asking. `job start`
+records the commit the checkout stands on, and when other announced jobs are
+queued or running it prints one line per job on stderr (label, task, phase,
+since when, the calling session and its commit) and returns them as
+`announced_ahead`. The new job is queued as usual. `sinnix state` lists them
+under Activations.
+
+### Discretionary jobs
+
+`job start --discretionary` is the starter saying this job can wait. agentctl
+then runs the configured `quota_check` command. When it answers that the
+subscription is above its threshold and names the reset time, the job is added
+held (pueue's delayed enqueue) and pueue releases it by itself a minute after
+that reset. The launch input records `deferred` (`reason`, `until`); the start
+prints it, and `job snapshot` and `sinnix state` show it as the reason the job
+waits. A check that is absent, fails, or names no reset time defers nothing.
+agentctl never marks a job discretionary by itself: an ordinary `job start`
+does not run the check.
 
 A job has two IDs: pueue's numeric `task_id` and agentctl's string `job_id`.
 Every job verb selects the numeric ID. An optional `--job-id` must match the
@@ -242,6 +266,9 @@ worktrunk; it does not create checkouts or copy artifacts.
 agentctl worktree clean polylogue --path /realm/worktree/finished-change --json
 ```
 
+`agentctl worktree build-output` reports and expires build output without
+retiring anything; see [worktree cleanup](worktree-cleanup.md#build-output-of-idle-checkouts).
+
 Omit `--path` for a project-wide pass. The main checkout and locked checkouts
 stay. Before removal, agentctl fetches the default branch from `origin` (the
 descriptor's `workspace.default_base`, otherwise origin's HEAD). Publication
@@ -328,6 +355,8 @@ generation; reboot remains a separate action.
 | `admission`           | `{ memory_mib }`: the expected footprint, exported as `AGENTCTL_ADMISSION_MEMORY_MIB`. It is not a limit                                                                                                                                                                                                                                          |
 | `unit_properties`     | resource limits for the unit, e.g. `["MemoryMax=3G", "IOReadBandwidthMax=/realm 20M"]`                                                                                                                                                                                                                                                            |
 
+| `announce`            | `true` for an operation that changes the live machine: its caller is told which other announced jobs are queued or running |
+
 Unknown operation fields are ignored with a warning.
 
 `[environment]` declares `kind`, `command`, `inherit`, `unset`, `values` and
@@ -356,7 +385,10 @@ Timeouts, size bounds and exit codes are owned by `limits.py`, `run.py` and
 
 `modules/services/agentctl.nix` renders `/etc/sinnix/agentctl.json`:
 `project_roots`, `event_spool`, `state_dir` and `pools`,
-with each pool as `{parallel}`. It installs `agentctl`, `wt`, `pueue` and
+with each pool as `{parallel}`; `build_output_exempt`
+(`sinnix.services.agentctl.buildOutputExempt`), the worktree names whose build
+output is never examined; and `quota_check`, the command asked before a
+discretionary job is queued. It installs `agentctl`, `wt`, `pueue` and
 `gh`, keeps job state (`~/.local/state/agentctl`, a link to
 `/realm/state/agentctl` beside the event spool) off the root disk, and
 declares these units:

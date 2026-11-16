@@ -198,12 +198,14 @@ def add(
     after: Sequence[int] = (),
     stashed: bool = False,
     priority: int = 0,
+    delay_seconds: int | None = None,
 ) -> int:
     """Enqueue one command and return the task id pueue assigned it.
 
     ``after`` lists the tasks this one waits for; ``stashed`` adds it held, to
-    be released later by :func:`enqueue`. Within a group pueue starts a
-    higher ``priority`` first.
+    be released later by :func:`enqueue`. ``delay_seconds`` adds it held and
+    lets pueue release it by itself after that long. Within a group pueue
+    starts a higher ``priority`` first.
     """
     if not command:
         raise PueueError("pueue add requires a command")
@@ -225,6 +227,8 @@ def add(
         arguments.extend(["--after", str(dependency)])
     if stashed:
         arguments.append("--stashed")
+    if delay_seconds is not None:
+        arguments.extend(["--delay", str(max(1, int(delay_seconds)))])
     if priority:
         # Joined, so pueue's parser does not read a negative value as a flag.
         arguments.append(f"--priority={priority}")

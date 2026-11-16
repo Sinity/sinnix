@@ -79,6 +79,7 @@ _OPERATION_FIELDS = frozenset(
         "admission",
         "unit_properties",
         "environment",
+        "announce",
     }
 )
 #: An operation's declared memory envelope, in MiB. One key today; the table
@@ -210,6 +211,9 @@ class ProjectOperation:
     admission: AdmissionEnvelope | None = None
     unit_properties: tuple[str, ...] = ()
     environment: tuple[tuple[str, str], ...] = ()
+    # An operation that changes the live machine. `job start` tells its caller
+    # which other announced jobs are queued or running, and for whom.
+    announce: bool = False
 
     def catalog_row(self) -> dict[str, Any]:
         return {
@@ -224,6 +228,7 @@ class ProjectOperation:
             "arguments": self.arguments,
             "admission": self.admission.catalog_row() if self.admission else None,
             "unit_properties": list(self.unit_properties),
+            "announce": self.announce,
         }
 
 
@@ -434,6 +439,10 @@ def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation
         if definition["arguments"] not in ARGUMENTS_KINDS:
             raise ProjectConfigError(f"operations.{name}.arguments is invalid")
         fields["arguments"] = definition["arguments"]
+    if "announce" in definition:
+        if not isinstance(definition["announce"], bool):
+            raise ProjectConfigError(f"operations.{name}.announce must be a boolean")
+        fields["announce"] = definition["announce"]
     return ProjectOperation(
         name=name,
         description=description,

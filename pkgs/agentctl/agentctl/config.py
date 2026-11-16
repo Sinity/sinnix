@@ -52,6 +52,12 @@ class Config:
     # queued it.
     config_path: Path | None = None
     inherited_environment: Mapping[str, str] = field(default_factory=dict)
+    # Worktree directory names (shell patterns) whose build output is never
+    # sized or removed by `worktree build-output`.
+    build_output_exempt: tuple[str, ...] = ()
+    # The command that says whether discretionary work may start now; it
+    # prints one JSON object (`ok`, `reason`, `resets_at`). Empty: no check.
+    quota_check: tuple[str, ...] = ()
 
     @property
     def inputs_dir(self) -> Path:
@@ -115,6 +121,16 @@ def _pools(value: Any) -> dict[str, PoolPolicy]:
             )
         parsed[name] = PoolPolicy(parallel=_parallel(name, declaration.get("parallel")))
     return parsed
+
+
+def _strings(value: Any, field: str) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list) or not all(
+        isinstance(item, str) and item for item in value
+    ):
+        raise ConfigError(f"{field} must be a list of non-empty strings")
+    return tuple(value)
 
 
 def _path(value: Any, field: str, fallback: Path) -> Path:
@@ -204,6 +220,10 @@ def load_config(path: Path | None = None) -> Config:
         private_project_catalog=private_catalog_path,
         pools=_pools(raw.get("pools")),
         inherited_environment=dict(inherited_environment),
+        build_output_exempt=_strings(
+            raw.get("build_output_exempt"), "build_output_exempt"
+        ),
+        quota_check=_strings(raw.get("quota_check"), "quota_check"),
     )
 
 

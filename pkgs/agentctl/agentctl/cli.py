@@ -32,12 +32,14 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from . import (
+    build_output,
     job_queries,
     launch,
     operator_view,
     pools,
     worktree_cleanup,
 )
+from .build_output import BuildOutputError
 from .config import Config, ConfigError, load_config, resolve_project
 from .github import GithubError
 from .job_queries import JobError
@@ -71,6 +73,7 @@ _REFUSALS = (
     ProjectEnvironmentError,
 )
 _SUBSTRATE_ERRORS = (
+    BuildOutputError,
     CleanupError,
     GithubError,
     PueueError,
@@ -141,6 +144,31 @@ def parser() -> argparse.ArgumentParser:
     )
     _project_option(clean)
     _output_arguments(clean)
+    output = worktree_verbs.add_parser(
+        "build-output",
+        help="what each checkout's build output occupies and when it was last "
+        "used; with --expire-idle-days, remove it for idle checkouts",
+    )
+    output.add_argument(
+        "--root",
+        type=Path,
+        action="append",
+        help="examine the checkouts in this directory instead of the "
+        "registered worktree roots (repeatable)",
+    )
+    output.add_argument(
+        "--expire-idle-days",
+        type=float,
+        metavar="N",
+        help="select the build output of checkouts unused for N days: never "
+        "sources, never the checkout, never one with a live job or process",
+    )
+    output.add_argument(
+        "--apply",
+        action="store_true",
+        help="with --expire-idle-days: remove what was selected (default: list it)",
+    )
+    _output_arguments(output)
 
     job = verbs.add_parser("job", help="declared operations as pueue tasks")
     job_verbs = job.add_subparsers(dest="job_verb", required=True)
@@ -190,6 +218,12 @@ def parser() -> argparse.ArgumentParser:
         action="store_true",
         help="start nothing while the same operation is queued or running "
         "(what a timer runs)",
+    )
+    start.add_argument(
+        "--discretionary",
+        action="store_true",
+        help="this job can wait: hold it while the subscription is above the "
+        "quota threshold, until the weekly limit resets",
     )
     _output_arguments(start)
     listing = job_verbs.add_parser(
@@ -345,6 +379,8 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
                 skipped, f"{skipped['label']} skipped: task(s) {active} still active"
             )
             return EXIT_OK
+        # Read before this job is added, so the list names only the others.
+        ahead = launch.announced_jobs(config) if operation.announce else []
         started = launch.start_operation(
             config,
             project,
@@ -354,7 +390,22 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             extra_argv=(*rest[1:], *getattr(arguments, "extra", [])),
             fresh=arguments.fresh,
             priority=arguments.priority,
+            discretionary=arguments.discretionary,
         )
+        ahead = [row for row in ahead if row["task_id"] != started.get("task_id")]
+        if ahead:
+            started["announced_ahead"] = ahead
+            for row in ahead:
+                print(
+                    "another activation holds the queue: "
+                    + launch.announcement_line(row),
+                    file=sys.stderr,
+                )
+        if deferred := started.get("deferred"):
+            print(
+                f"deferred until {deferred.get('until')}: {deferred.get('reason')}",
+                file=sys.stderr,
+            )
         if arguments.wait:
             started = job_queries.wait(
                 started["task_id"],
@@ -744,6 +795,21 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
                 f"removed {len(cleaned['removed'])} worktree(s)"
                 + (f"\nkept: {'; '.join(kept)}" if kept else ""),
             )
+            return EXIT_OK
+        if arguments.worktree_verb == "build-output":
+            if arguments.expire_idle_days is None:
+                if arguments.apply:
+                    raise JobError("--apply needs --expire-idle-days")
+                listing = build_output.report(config, roots=arguments.root)
+                out.read(listing, build_output.render_report(listing))
+                return EXIT_OK
+            expired = build_output.expire(
+                config,
+                idle_days=arguments.expire_idle_days,
+                apply=arguments.apply,
+                roots=arguments.root,
+            )
+            out.write(expired, build_output.render_expiry(expired))
             return EXIT_OK
         raise AssertionError(arguments.worktree_verb)
     if verb == "view":

@@ -69,6 +69,7 @@ class FakePueue:
         after: Sequence[int] = (),
         stashed: bool = False,
         priority: int = 0,
+        delay_seconds: int | None = None,
     ) -> int:
         if self.fail_add:
             raise PueueError("fixture pueue add failed")
@@ -78,7 +79,13 @@ class FakePueue:
         self.next_id += 1
         # An idle group starts a task with no dependencies at once; one queued
         # behind others waits for them, and a stashed one waits to be enqueued.
-        status = "Stashed" if stashed else "Queued" if after else "Running"
+        status = (
+            "Stashed"
+            if stashed or delay_seconds is not None
+            else "Queued"
+            if after
+            else "Running"
+        )
         self._tasks[task_id] = Task(
             task_id=task_id,
             label=label,
@@ -103,6 +110,7 @@ class FakePueue:
                 "working_directory": working_directory,
                 "after": tuple(after),
                 "stashed": stashed,
+                "delay_seconds": delay_seconds,
             }
         )
         return task_id

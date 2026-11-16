@@ -302,8 +302,15 @@ def enqueue(
     idempotency_key: str | None = None,
     request_digest: str | None = None,
     priority: int = 0,
+    announce: bool = False,
+    deferred: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Write the launch input, add the pueue task, return the job view.
+
+    ``announce`` records the checkout's commit, so a later caller of an
+    announced operation can be told what this one activates. ``deferred``
+    (``reason``, ``until``, ``delay_seconds``) adds the task held; pueue
+    releases it by itself at ``until``.
 
     ``binding`` is what the caller ties the task to (the gateway's call
     identity); it is stored as written and read back on ``job get``. ``scratch`` names
@@ -338,6 +345,14 @@ def enqueue(
     }
     if caller := caller_from_environment():
         launch["caller"] = caller
+    if announce:
+        launch["announce"] = True
+        if (revision := _revision(working_directory)) is not None:
+            launch["revision"] = revision
+    if deferred is not None:
+        launch["deferred"] = {
+            key: deferred[key] for key in ("reason", "until") if deferred.get(key)
+        }
     if idempotency_key is not None:
         launch["idempotency_key"] = idempotency_key
         launch["request_digest"] = request_digest
@@ -374,6 +389,11 @@ def enqueue(
             after=after,
             stashed=stashed,
             priority=priority,
+            **(
+                {"delay_seconds": int(deferred["delay_seconds"])}
+                if deferred is not None
+                else {}
+            ),
         )
     except PueueGroupError:
         if not (idempotency_key is not None and after):
@@ -390,7 +410,112 @@ def enqueue(
         else {"task_id": task_id, "label": label, "job_id": job_id}
     )
     view.update(job_queries.launch_selection(launch))
+    if "deferred" in launch:
+        view["deferred"] = launch["deferred"]
     return view
+
+
+def _revision(path: Path) -> dict[str, Any] | None:
+    """The commit a checkout stands on, and whether it has uncommitted changes."""
+    try:
+        return {
+            "commit": _git(path, "rev-parse", "HEAD"),
+            "dirty": bool(
+                _git(path, "status", "--porcelain=v1", "--untracked-files=no")
+            ),
+        }
+    except job_queries.JobError:
+        return None
+
+
+def announced_jobs(config: Config) -> list[dict[str, Any]]:
+    """Unfinished jobs of announced operations: who asked, since when, which commit.
+
+    The queue already runs them one after another. This is what a caller is
+    shown when it asks for another one.
+    """
+    rows = []
+    for task in sorted(pueue.tasks().values(), key=lambda task: task.task_id):
+        if task.terminal:
+            continue
+        document = job_queries.read_launch_input(config, task) or {}
+        if document.get("announce") is not True:
+            continue
+        rows.append(
+            {
+                "task_id": task.task_id,
+                "job_id": document.get("job_id"),
+                "label": task.label,
+                "phase": job_queries.phase_of(task),
+                "since": task.started_at
+                or document.get("enqueued_at")
+                or task.enqueued_at,
+                "caller": document.get("caller") or {},
+                "revision": document.get("revision"),
+                "working_directory": document.get("working_directory"),
+            }
+        )
+    return rows
+
+
+def announcement_line(row: Mapping[str, Any]) -> str:
+    caller = row.get("caller") or {}
+    who = (
+        f"{caller.get('harness', 'agent')} session {str(caller['session'])[:8]}"
+        if caller.get("session")
+        else str(caller.get("principal") or "a caller that recorded no session")
+    )
+    if caller.get("bead"):
+        who += f" (task {caller['bead']})"
+    revision = row.get("revision") or {}
+    commit = (
+        f"commit {str(revision['commit'])[:9]}"
+        + (" with uncommitted changes" if revision.get("dirty") else "")
+        if revision.get("commit")
+        else "commit not recorded"
+    )
+    return (
+        f"{row['label']} #{row['task_id']} is {row['phase']} since {row.get('since')}, "
+        f"for {who}, {commit}, in {row.get('working_directory')}"
+    )
+
+
+QUOTA_CHECK_TIMEOUT_SECONDS = 60
+
+
+def discretionary_deferral(config: Config) -> dict[str, Any] | None:
+    """Why and until when a discretionary job waits, or None when it may start.
+
+    Asks the configured quota check. A check that is absent, fails or names no
+    reset time defers nothing: the job starts and the note says why.
+    """
+    if not config.quota_check:
+        return None
+    try:
+        result = subprocess.run(
+            list(config.quota_check),
+            capture_output=True,
+            text=True,
+            timeout=QUOTA_CHECK_TIMEOUT_SECONDS,
+            check=False,
+            stdin=subprocess.DEVNULL,
+        )
+        verdict = json.loads(result.stdout)
+        if not isinstance(verdict, dict) or verdict.get("ok") is not False:
+            return None
+        until = datetime.fromisoformat(str(verdict["resets_at"]))
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        return None
+    delay = int((until - datetime.now(UTC)).total_seconds()) + 60
+    if delay <= 60:
+        return None
+    return {
+        "reason": str(verdict.get("reason") or "subscription usage above threshold")[
+            :240
+        ],
+        "until": until.astimezone(UTC).isoformat(timespec="seconds"),
+        "delay_seconds": delay,
+    }
 
 
 # The harness variables that name the agent session a job was started from.
@@ -523,12 +648,15 @@ def start_operation(
     idempotency_key: str | None = None,
     fresh: bool = False,
     priority: int = 0,
+    discretionary: bool = False,
 ) -> dict[str, Any]:
     """Launch an operation; an idempotency key makes a repeated launch return the same job.
 
     `fresh` runs a cached operation even when a matching job exists; its
     receipts still serve later requests. `priority` is this job's pueue
-    priority: within its pool a higher one starts first.
+    priority: within its pool a higher one starts first. `discretionary` is
+    the starter saying this job can wait: it is held while the quota check
+    reports the subscription above its threshold. Nothing else is ever held.
     """
     if (pool := default_branch_pool(project, operation.name)) is not None:
         operation = replace(operation, pool=pool)
@@ -542,6 +670,7 @@ def start_operation(
             binding=binding,
             fresh=fresh,
             priority=priority,
+            discretionary=discretionary,
         )
     job_id = _idempotent_job_id(idempotency_key)
     config.inputs_dir.mkdir(parents=True, exist_ok=True)
@@ -588,6 +717,7 @@ def start_operation(
             idempotency_key=idempotency_key,
             request_digest=fingerprint,
             priority=priority,
+            discretionary=discretionary,
         )
 
 
@@ -626,6 +756,7 @@ def _start_operation(
     request_digest: str | None = None,
     fresh: bool = False,
     priority: int = 0,
+    discretionary: bool = False,
 ) -> dict[str, Any]:
     working_directory = (workspace or project.root).resolve()
     if operation.arguments == "required" and not any(
@@ -705,6 +836,8 @@ def _start_operation(
         request_digest=request_digest,
         tree_receipt=tree_receipt,
         environment_receipt=environment_receipt,
+        announce=operation.announce,
+        deferred=discretionary_deferral(config) if discretionary else None,
     )
     if tree_receipt is not None:
         started["tree_receipt"] = tree_receipt
