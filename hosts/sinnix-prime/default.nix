@@ -136,6 +136,9 @@
       # ("coverage entries must be unique within a root") and the refusal
       # also stops the index build; off until the fix is deployed.
       readSources = false;
+      # The first index build of Polylogue master outgrew the host's memory
+      # beside other work; it resumes by hand with lower-memory settings.
+      startDaemon = false;
       retainedArchives = [
         "/realm/state/polylogue-live/data/polylogue"
       ];

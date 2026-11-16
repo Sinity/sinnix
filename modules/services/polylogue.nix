@@ -88,6 +88,16 @@ mkServiceModule {
       '';
     };
 
+    startDaemon = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Whether polylogue-live is wanted by the user session, so that login
+        and every switch start it. Off, the unit stays installed but only a
+        manual `systemctl --user start polylogue-live` runs it.
+      '';
+    };
+
     retainedArchives = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
@@ -245,7 +255,7 @@ mkServiceModule {
               # default.
               TimeoutStopSec = "15min";
             };
-            Install.WantedBy = [ "default.target" ];
+            Install.WantedBy = lib.optional cfg.startDaemon "default.target";
           };
         };
 
