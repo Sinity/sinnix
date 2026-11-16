@@ -1,11 +1,16 @@
 # Provably fails when: the recorder stops stripping inherited SINNIX_CAPTURE_*
 # state before launching the shell (verified by deleting that loop from
 # scripts/sinnix-captured-shell), writes its session outside the
-# year/month/day layout (verified by flattening session_dir), or stops
-# propagating the recorder's exit code (the -failure variant).
+# year/month/day layout (verified by flattening session_dir), stops
+# propagating the recorder's exit code (the -failure variant), reorders or
+# loses shell events (the -interactive variant), or makes the shell wait for
+# the capture directory again (the -stalled-disk variant, verified by having
+# the hooks append to events.jsonl themselves).
 #
 # Kitty/PTY terminal-capture recorder runtime checks (asciinema wrapper +
-# session/event JSON shape, including a forced-nonzero-exit variant).
+# session/event JSON shape, including a forced-nonzero-exit variant, a real
+# interactive shell, a capture side that cannot write, and the fallback when
+# no session writer is reading).
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;
@@ -15,6 +20,103 @@ in
     { system, ... }:
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
+
+      captureTools = [
+        pkgs.python3
+        pkgs.asciinema
+        pkgs.coreutils
+        pkgs.findutils
+        pkgs.gnugrep
+        pkgs.jq
+        pkgs.util-linux
+        pkgs.zsh
+      ];
+
+      # session.json and events.jsonl are finished by the session writer,
+      # which outlives the launcher: wait for it instead of assuming order.
+      awaitSession = ''
+        session_finalized() {
+          local file
+          file="$(find "$TMPDIR/captures" -type f -name session.json | sed -n '1p')"
+          test -n "$file" && jq -e '.finished_at_ms != null and .recorder_exit_code != null' "$file" >/dev/null 2>&1
+        }
+        await_session() {
+          local deadline=$((SECONDS + 60))
+          until session_finalized; do
+            if ((SECONDS >= deadline)); then
+              echo "session.json was not finalized" >&2
+              find "$TMPDIR/captures" -type f -exec cat {} + >&2 || true
+              exit 1
+            fi
+            sleep 0.1
+          done
+        }
+      '';
+
+      # A real interactive zsh with the hooks loaded. The commands are typed
+      # once the first prompt is up; the recorder discards earlier input.
+      interactiveSession = ''
+        export HOME="$TMPDIR/home"
+        mkdir -p "$HOME/.config/sinnix" "$TMPDIR/zdotdir" "$TMPDIR/bin" "$TMPDIR/start"
+        printf '%s\n' "$TMPDIR/captures" > "$HOME/.config/sinnix/terminal-capture-root"
+        cat > "$TMPDIR/zdotdir/.zshrc" <<EOF
+        unsetopt zle
+        source ${../../scripts/sinnix-terminal-capture-hooks.zsh}
+        _test_ready() { : > "$TMPDIR/shell-ready" }
+        add-zsh-hook precmd _test_ready
+        EOF
+        ${awaitSession}
+        # run_session <typed input>: the launcher's exit status is returned.
+        run_session() {
+          (
+            until test -e "$TMPDIR/shell-ready"; do sleep 0.05; done
+            printf '%s' "$1"
+          ) | (
+            cd "$TMPDIR/start"
+            timeout 120 script -qfec "stty rows 24 cols 80; exec env \
+              HOME='$HOME' \
+              HOSTNAME='terminal-capture-test' \
+              KITTY_PID='4242' \
+              SHELL='${pkgs.zsh}/bin/zsh' \
+              ZDOTDIR='$TMPDIR/zdotdir' \
+              TERM='xterm-kitty' \
+              USER=\"\$CAPTURE_USER\" \
+              ${pkgs.bash}/bin/bash ${../../scripts}/sinnix-captured-shell" "$TMPDIR/typescript"
+          )
+        }
+        export CAPTURE_USER=tester
+        export PATH="$TMPDIR/bin:${lib.makeBinPath captureTools}:$PATH"
+        typed=$'true\nfalse\nexit 0\n'
+        expected_events='
+          [.[].type] == ["session_start", "command_start", "command_end", "command_start", "command_end", "command_start", "session_end"] and
+          [.[] | select(.type == "command_start") | .command] == ["true", "false", "exit 0"] and
+          [.[] | select(.type == "command_end") | .exit_code] == [0, 1] and
+          ([.[].ts_ms] | . == sort) and
+          .[0].terminal == "kitty" and
+          .[-1].exit_code == 0 and
+          .[-1].exit_reason == "shell_exit"
+        '
+        expected_session='
+          .schema == "terminal-session-v1" and
+          .user == $capture_user and
+          .command_count == 3 and
+          .event_count == 7 and
+          .exit_code == 0 and
+          .exit_reason == "shell_exit" and
+          .recorder_exit_code == 0 and
+          .cleanup_escalated == false and
+          (.duration_ms | type) == "number" and
+          .final_cwd == $start
+        '
+      '';
+
+      mkInteractiveCheck =
+        name: body:
+        pkgs.runCommand name { nativeBuildInputs = captureTools; } ''
+          ${interactiveSession}
+          ${body}
+          touch "$out"
+        '';
 
       terminalCaptureRuntime =
         pkgs.runCommand "sinnix-terminal-capture-runtime-check"
@@ -55,12 +157,7 @@ in
             cat > "$TMPDIR/fake-shell.zsh" <<'EOF'
             #!${pkgs.zsh}/bin/zsh
             set -eu
-            jq -e --arg capture_user "$USER" '.user == $capture_user' "$SINNIX_CAPTURE_SESSION_FILE" >/dev/null
             source ${../../scripts/sinnix-terminal-capture-hooks.zsh}
-            original_events_file=$SINNIX_CAPTURE_EVENTS_FILE
-            SINNIX_CAPTURE_EVENTS_FILE="$TMPDIR/fresh-events.jsonl"
-            _sinnix_capture_append_session_start
-            SINNIX_CAPTURE_EVENTS_FILE=$original_events_file
             [[ $(umask) == *000 ]]
             touch "$TMPDIR/user-created-file"
             print -r -- "terminal-capture-ready"
@@ -95,6 +192,8 @@ in
             grep -q "terminal-capture-ready" "$transcript"
             grep -q "inherited-capture-marker: stripped" "$transcript"
 
+            ${awaitSession}
+            await_session
             session_json="$(find "$TMPDIR/captures" -type f -name session.json | sed -n '1p')"
             events_json="$(find "$TMPDIR/captures" -type f -name events.jsonl | sed -n '1p')"
             cast_file="$(find "$TMPDIR/captures" -type f -name session.cast | sed -n '1p')"
@@ -107,7 +206,6 @@ in
               any(.[1:][]; .[1] == "o" and (.[2] | contains("terminal-capture-ready")))
             ' "$cast_file" >/dev/null
             test "$(stat -c %a "$TMPDIR/user-created-file")" = 666
-            test "$(stat -c %a "$TMPDIR/fresh-events.jsonl")" = 600
             test "$(stat -c %a "$TMPDIR/captures")" = 700
             test -z "$(find "$TMPDIR/captures" -type f ! -perm 0600 -print -quit)"
 
@@ -264,6 +362,8 @@ in
             test "$status" -eq 42
             grep -q "terminal-capture-ready" "$transcript"
 
+            ${awaitSession}
+            await_session
             session_json="$(find "$TMPDIR/captures" -type f -name session.json | sed -n '1p')"
             events_json="$(find "$TMPDIR/captures" -type f -name events.jsonl | sed -n '1p')"
             cast_file="$(find "$TMPDIR/captures" -type f -name session.cast | sed -n '1p')"
@@ -314,6 +414,69 @@ in
               touch "$out"
             '';
         terminal-capture-runtime = terminalCaptureRuntime;
+        # Events arrive in the order the shell produced them, and all of
+        # them, the session end included, are on disk after the terminal
+        # has closed.
+        terminal-capture-interactive = mkInteractiveCheck "sinnix-terminal-capture-interactive-check" ''
+          run_session "$typed"
+          await_session
+          session_dir="$(dirname "$(find "$TMPDIR/captures" -type f -name session.json)")"
+          jq -s -e "$expected_events" "$session_dir/events.jsonl" >/dev/null
+          jq -e --arg capture_user "$CAPTURE_USER" --arg start "$TMPDIR/start" "$expected_session" \
+            "$session_dir/session.json" >/dev/null
+          test "$(find "$TMPDIR/captures" -type f | sort | sed 's|.*/||' | tr '\n' ' ')" = "events.jsonl session.cast session.json "
+          test -z "$(find "$TMPDIR/captures" -type f ! -perm 0600 -print -quit)"
+        '';
+        # The capture side cannot write: its first repository query turns
+        # events.jsonl into a FIFO nobody reads, so the session writer
+        # blocks opening it. The shell must still start, run its commands
+        # and exit, and everything must arrive once the FIFO is read.
+        terminal-capture-stalled-disk = mkInteractiveCheck "sinnix-terminal-capture-stalled-disk-check" ''
+          mkdir "$TMPDIR/start/.git"
+          cat > "$TMPDIR/bin/git" <<EOF
+          #!${pkgs.bash}/bin/bash
+          session_json="\$(find "$TMPDIR/captures" -type f -name session.json | sed -n '1p')"
+          events="\$(dirname "\$session_json")/events.jsonl"
+          test -p "\$events" || mkfifo "\$events"
+          exit 1
+          EOF
+          chmod +x "$TMPDIR/bin/git"
+
+          started=$SECONDS
+          run_session "$typed"
+          elapsed=$((SECONDS - started))
+          echo "shell started, ran its commands and exited in about $elapsed s while the capture side was blocked"
+          test "$elapsed" -le 20
+
+          session_json="$(find "$TMPDIR/captures" -type f -name session.json)"
+          events_fifo="$(dirname "$session_json")/events.jsonl"
+          blocked='.exit_reason == "recorder_starting" and .event_count == 0 and .finished_at_ms == null'
+          test -p "$events_fifo"
+          jq -e "$blocked" "$session_json" >/dev/null
+          sleep 2
+          jq -e "$blocked" "$session_json" >/dev/null
+
+          timeout 60 cat "$events_fifo" > "$TMPDIR/released-events.jsonl"
+          await_session
+          jq -s -e "$expected_events" "$TMPDIR/released-events.jsonl" >/dev/null
+          jq -e --arg capture_user "$CAPTURE_USER" --arg start "$TMPDIR/start" "$expected_session" \
+            "$session_json" >/dev/null
+          echo "all 7 events and the final session.json arrived after the block was released"
+        '';
+        # No session writer is reading (it cannot start): the shell and the
+        # launcher write the files themselves, as before the pipe existed.
+        terminal-capture-fallback = mkInteractiveCheck "sinnix-terminal-capture-fallback-check" ''
+          printf '#!${pkgs.bash}/bin/bash\nexit 1\n' > "$TMPDIR/bin/setsid"
+          chmod +x "$TMPDIR/bin/setsid"
+          export CAPTURE_USER=$'tester\001\037"\\'
+          run_session "$typed"
+          session_dir="$(dirname "$(find "$TMPDIR/captures" -type f -name session.json)")"
+          jq -s -e "$expected_events" "$session_dir/events.jsonl" >/dev/null
+          jq -e --arg capture_user "$CAPTURE_USER" --arg start "$TMPDIR/start" "$expected_session" \
+            "$session_dir/session.json" >/dev/null
+          test "$(stat -c %a "$TMPDIR/captures")" = 700
+          test -z "$(find "$TMPDIR/captures" -type f ! -perm 0600 -print -quit)"
+        '';
         terminal-capture-runtime-failure = terminalCaptureRuntimeFailure;
       };
     };

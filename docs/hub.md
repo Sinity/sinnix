@@ -33,10 +33,19 @@ input and output through an anonymous pipe to a separate writer with a bounded
 closing the window does not cut it off mid-drain. Disk stalls do not
 backpressure the recorder until the queue fills; exhaustion logs a warning and
 blocks without dropping bytes. Session exit waits for the queue to drain, and
-writer failures propagate as a nonzero launcher status. The cast format and
-metadata environment are unchanged. The queue is volatile: a machine crash or
-forced writer kill can lose queued bytes, as with unflushed filesystem buffers.
-It opens no browser stream or listening port.
+writer failures propagate as a nonzero launcher status. The queue is volatile:
+a machine crash or forced writer kill can lose queued bytes, as with unflushed
+filesystem buffers. It opens no browser stream or listening port.
+
+The shell and the launcher never write under the capture root or run git, so
+a stalled disk delays neither a new prompt nor a command. The shell hooks
+print each event line into a second pipe; one session writer per terminal, in
+its own session, creates the directory, appends the lines to `events.jsonl` in
+order, queries the repository state at the start and the end, and is the only
+writer of `session.json` (format `terminal-session-v1`) while it lives. The
+launcher sends it the recorder's exit status over the same pipe and does not
+wait for it. If no session writer is reading, the pipe write fails and the
+shell and launcher write those files themselves.
 
 ## Actions
 

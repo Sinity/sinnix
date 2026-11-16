@@ -1,21 +1,34 @@
 #!/usr/bin/env python3
 # @sinnix-package: skip
-"""Bounded, lossless asciicast transport and recorder supervision."""
+"""Bounded, lossless asciicast transport, session files and recorder supervision.
 
+The terminal side only ever writes into pipes. `write` moves the cast to disk
+and `session` owns `events.jsonl` and `session.json`; both keep reading their
+pipe into memory while the disk or git makes them wait.
+"""
+
+import json
 import os
 from pathlib import Path
 from collections import deque
 import signal
 import subprocess
 import sys
+import syslog
 import threading
 
 CHUNK = 64 * 1024
 BUFFER = 256 * 1024 * 1024
+GIT_TIMEOUT_SECONDS = 30
+REPO_FIELDS = ("repo_branch", "repo_commit", "repo_dirty")
 
 
-def write_capture(destination):
-    # The consumer may block even opening a FIFO. Keep reading independently.
+def buffered_input():
+    """Start reading stdin into memory now; return an iterator over its chunks.
+
+    The consumer may block for minutes on one chunk. Reading continues
+    independently until BUFFER bytes are waiting, then blocks without dropping.
+    """
     pending = deque()
     capacity = threading.Condition()
     buffered = 0
@@ -26,7 +39,7 @@ def write_capture(destination):
             while chunk := os.read(0, CHUNK):
                 with capacity:
                     if buffered + len(chunk) > BUFFER:
-                        print("terminal capture: 256 MiB buffer exhausted; blocking without dropping data",
+                        print(f"terminal capture: {BUFFER >> 20} MiB buffer exhausted; blocking without dropping data",
                               file=sys.stderr, flush=True)
                     capacity.wait_for(lambda: buffered + len(chunk) <= BUFFER)
                     buffered += len(chunk)
@@ -39,27 +52,230 @@ def write_capture(destination):
             print(f"terminal capture reader failed: {error}", file=sys.stderr, flush=True)
             os._exit(1)
 
+    def chunks():
+        nonlocal buffered
+        while True:
+            with capacity:
+                capacity.wait_for(lambda: bool(pending))
+                chunk = pending.popleft()
+            if chunk is None:
+                return
+            yield chunk
+            with capacity:
+                buffered -= len(chunk)
+                capacity.notify_all()
+
     threading.Thread(target=receive, daemon=True).start()
+    return chunks()
+
+
+def write_all(output, data):
+    view = memoryview(data)
+    while view:
+        written = output.write(view)
+        if not written:
+            raise OSError("capture write made no progress")
+        view = view[written:]
+
+
+def write_capture(destination):
+    # The consumer may block even creating the directory or opening a FIFO.
+    chunks = buffered_input()
     try:
+        os.makedirs(os.path.dirname(destination) or ".", exist_ok=True)
         fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "wb", buffering=0) as output:
-            while True:
-                with capacity:
-                    capacity.wait_for(lambda: bool(pending))
-                    chunk = pending.popleft()
-                if chunk is None:
-                    break
-                view = memoryview(chunk)
-                while view:
-                    written = output.write(view)
-                    if not written:
-                        raise OSError("capture write made no progress")
-                    view = view[written:]
-                with capacity:
-                    buffered -= len(chunk)
-                    capacity.notify_all()
+            for chunk in chunks:
+                write_all(output, chunk)
     except BaseException as error:
         print(f"terminal capture writer failed: {error}", file=sys.stderr, flush=True)
+        return 1
+    return 0
+
+
+def repo_state(repo_root):
+    """Branch, commit and dirty flag; each is None when git gives no answer in time."""
+
+    def git(*arguments):
+        try:
+            result = subprocess.run(
+                ["git", "-C", repo_root, *arguments],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                timeout=GIT_TIMEOUT_SECONDS,
+                # These queries run beside the operator's own git commands and
+                # must not take the index lock to refresh it.
+                env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if result.returncode != 0:
+            return None
+        return result.stdout.decode("utf-8", "surrogateescape").strip()
+
+    if not repo_root:
+        return dict.fromkeys(REPO_FIELDS)
+    status = git("status", "--porcelain", "--ignore-submodules=dirty")
+    return {
+        "repo_branch": git("symbolic-ref", "--quiet", "--short", "HEAD") or git("rev-parse", "--short", "HEAD") or None,
+        "repo_commit": git("rev-parse", "HEAD") or None,
+        "repo_dirty": None if status is None else ("true" if status else "false"),
+    }
+
+
+def parse_event(line):
+    try:
+        event = json.loads(line.decode("utf-8", "surrogateescape"))
+    except ValueError:
+        return None
+    return event if isinstance(event, dict) else None
+
+
+def record_session(capture_root):
+    """Own one session's `events.jsonl` and `session.json` until the pipe closes.
+
+    Stdin carries the shell's event lines and, last, one `supervisor_exit`
+    line from the launcher, which is recorded in `session.json` and not in
+    the events. The repository fields the shell leaves null are filled in
+    here, where waiting on git delays nobody.
+    """
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    chunks = buffered_input()
+    env = {name: os.environ.get(f"SINNIX_CAPTURE_{name}") or None for name in (
+        "SESSION_ID", "SESSION_DIR", "SESSION_FILE", "CAST_FILE", "EVENTS_FILE", "HOST", "USER", "TTY",
+        "TERMINAL", "SHELL", "TERM_TYPE", "START_CWD", "START_REPO_ROOT", "PROJECT_ROOT", "STARTED_AT_MS",
+    )}
+    started_at_ms = int(env["STARTED_AT_MS"]) if env["STARTED_AT_MS"] else None
+    session = {
+        "schema": "terminal-session-v1",
+        "schema_generation": "terminal-session-v1",
+        "session_id": env["SESSION_ID"],
+        "cast_path": env["CAST_FILE"],
+        "events_path": env["EVENTS_FILE"],
+        "host": env["HOST"],
+        "user": env["USER"],
+        "tty": env["TTY"],
+        "terminal": env["TERMINAL"],
+        "shell": env["SHELL"],
+        "term_type": env["TERM_TYPE"],
+        "start_cwd": env["START_CWD"],
+        "final_cwd": None,
+        "project_root": env["PROJECT_ROOT"] or env["START_REPO_ROOT"],
+        "final_project_root": None,
+        "repo_root": env["START_REPO_ROOT"],
+        "final_repo_root": None,
+        "repo_branch": None,
+        "final_repo_branch": None,
+        "repo_commit": None,
+        "final_repo_commit": None,
+        "repo_dirty": None,
+        "final_repo_dirty": None,
+        "started_at_ms": started_at_ms,
+        "finished_at_ms": None,
+        "duration_ms": None,
+        "active_ms": 0,
+        "idle_ms": 0,
+        "command_count": 0,
+        "event_count": 0,
+        "exit_code": None,
+        "exit_reason": "recorder_starting",
+        "recorder_exit_code": None,
+        "cleanup_escalated": False,
+    }
+
+    def finish(at_ms, exit_reason, exit_code):
+        session["finished_at_ms"] = at_ms
+        if isinstance(at_ms, int) and started_at_ms is not None:
+            session["duration_ms"] = at_ms - started_at_ms
+        session["exit_reason"] = exit_reason
+        session["exit_code"] = exit_code
+
+    def write_session():
+        text = json.dumps(session, indent=2, ensure_ascii=False) + "\n"
+        temporary = env["SESSION_FILE"] + ".tmp"
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb", buffering=0) as output:
+            write_all(output, text.encode("utf-8", "surrogateescape"))
+        os.replace(temporary, env["SESSION_FILE"])
+
+    def fill_repo_fields(line, state):
+        event = parse_event(line)
+        if event is None:
+            return line, None
+        for name in REPO_FIELDS:
+            if event.get(name) is None:
+                event[name] = state[name]
+        text = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
+        return text.encode("utf-8", "surrogateescape"), event
+
+    ended_by_shell = False
+
+    def take(line):
+        """Apply one input line to the session; return the event line to append, if any."""
+        nonlocal ended_by_shell
+        if line.startswith(b'{"type":"supervisor_exit"'):
+            report = parse_event(line) or {}
+            session["recorder_exit_code"] = report.get("recorder_exit_code")
+            session["cleanup_escalated"] = bool(report.get("cleanup_escalated"))
+            if not ended_by_shell and report.get("exit_reason"):
+                finish(report.get("ts_ms"), report["exit_reason"], report.get("exit_code"))
+            return None
+        if line.startswith(b'{"type":"session_start"'):
+            line, _ = fill_repo_fields(line, start_state)
+            if session["exit_reason"] == "recorder_starting":
+                session["exit_reason"] = "running"
+        elif line.startswith(b'{"type":"command_start"'):
+            session["command_count"] += 1
+        elif line.startswith(b'{"type":"session_end"'):
+            final_root = (parse_event(line) or {}).get("repo_root")
+            line, event = fill_repo_fields(line, repo_state(final_root))
+            if event is not None:
+                ended_by_shell = True
+                session["final_cwd"] = event.get("cwd")
+                session["final_project_root"] = event.get("project_root")
+                session["final_repo_root"] = final_root
+                for name in REPO_FIELDS:
+                    session[f"final_{name}"] = event[name]
+                session["active_ms"] = event.get("active_ms")
+                session["idle_ms"] = event.get("idle_ms")
+                finish(event.get("ts_ms"), event.get("exit_reason"), event.get("exit_code"))
+        session["event_count"] += 1
+        return line
+
+    try:
+        os.makedirs(env["SESSION_DIR"], exist_ok=True)
+        os.chmod(capture_root, 0o700)
+        os.chmod(env["SESSION_DIR"], 0o700)
+        write_session()
+        start_state = repo_state(env["START_REPO_ROOT"])
+        session.update(start_state)
+        write_session()
+        events = None
+        rest = b""
+
+        def store(lines):
+            nonlocal events
+            written = session.copy()
+            kept = [line for line in map(take, lines) if line is not None]
+            if kept:
+                if events is None:
+                    fd = os.open(env["EVENTS_FILE"], os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+                    events = os.fdopen(fd, "wb", buffering=0)
+                write_all(events, b"\n".join(kept) + b"\n")
+            if session != written:
+                write_session()
+
+        for chunk in chunks:
+            *lines, rest = (rest + chunk).split(b"\n")
+            store(lines)
+        if rest:
+            store([rest])
+        if events is not None:
+            events.close()
+    except BaseException as error:
+        syslog.syslog(syslog.LOG_ERR, f"terminal capture session writer failed for {env['SESSION_ID']}: {error}")
         return 1
     return 0
 
@@ -104,4 +320,6 @@ def record(destination, command):
 if __name__ == "__main__":
     if sys.argv[1] == "write":
         sys.exit(write_capture(sys.argv[2]))
+    if sys.argv[1] == "session":
+        sys.exit(record_session(sys.argv[2]))
     sys.exit(record(sys.argv[2], sys.argv[3:]))

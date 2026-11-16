@@ -15,41 +15,6 @@ else
 fi
 capture_disabled="${SINNIX_CAPTURE_DISABLE:-}"
 
-json_escape() {
-  local value="${1:-}"
-  value="${value//\\/\\\\}"
-  value="${value//\"/\\\"}"
-  # JSON requires every non-NUL ASCII control byte to be escaped. Shell
-  # arguments cannot contain NUL; decoding preserves these control values.
-  local code hex control
-  for code in {1..31}; do
-    printf -v hex '%02x' "$code"
-    printf -v control '%b' "\\x$hex"
-    value=${value//"$control"/"\\u00$hex"}
-  done
-  printf '%s' "$value"
-}
-
-json_string() {
-  printf '"%s"' "$(json_escape "${1:-}")"
-}
-
-json_nullable_string() {
-  if [[ -n "${1:-}" ]]; then
-    json_string "$1"
-  else
-    printf 'null'
-  fi
-}
-
-json_nullable_int() {
-  if [[ -n "${1:-}" ]]; then
-    printf '%s' "$1"
-  else
-    printf 'null'
-  fi
-}
-
 now_ms() {
   local raw="${EPOCHREALTIME:-}"
 
@@ -101,36 +66,6 @@ find_repo_root() {
   return 1
 }
 
-repo_branch() {
-  local repo_root="$1"
-  if [[ -z "$repo_root" ]] || ! command -v git >/dev/null 2>&1; then
-    return 0
-  fi
-  git -C "$repo_root" symbolic-ref --quiet --short HEAD 2>/dev/null \
-    || git -C "$repo_root" rev-parse --short HEAD 2>/dev/null \
-    || true
-}
-
-repo_commit() {
-  local repo_root="$1"
-  if [[ -z "$repo_root" ]] || ! command -v git >/dev/null 2>&1; then
-    return 0
-  fi
-  git -C "$repo_root" rev-parse HEAD 2>/dev/null || true
-}
-
-repo_dirty() {
-  local repo_root="$1"
-  if [[ -z "$repo_root" ]] || ! command -v git >/dev/null 2>&1; then
-    return 0
-  fi
-  if [[ -n "$(git -C "$repo_root" status --porcelain --ignore-submodules=dirty 2>/dev/null)" ]]; then
-    printf 'true'
-  else
-    printf 'false'
-  fi
-}
-
 while IFS='=' read -r name _; do
   case "$name" in
     SINNIX_CAPTURE_*)
@@ -176,12 +111,7 @@ cast_path="${session_dir}/session.cast"
 start_cwd="$(pwd -P)"
 start_repo_root="$(find_repo_root "$start_cwd" || true)"
 start_project_root="$(guess_project_root "$start_cwd")"
-start_repo_branch="$(repo_branch "$start_repo_root")"
-start_repo_commit="$(repo_commit "$start_repo_root")"
-start_repo_dirty="$(repo_dirty "$start_repo_root")"
-
-mkdir -p "$session_dir"
-chmod 700 "$capture_root" "$session_dir"
+writer="$(dirname "$(readlink -f "$0")")/sinnix-terminal-capture-writer"
 
 export SINNIX_CAPTURE_ACTIVE=1
 export SINNIX_CAPTURE_CAST_FILE="$cast_path"
@@ -198,49 +128,20 @@ export SINNIX_CAPTURE_SHELL="$shell_bin"
 export SINNIX_CAPTURE_TERM_TYPE="${TERM:-}"
 export SINNIX_CAPTURE_START_CWD="$start_cwd"
 export SINNIX_CAPTURE_START_REPO_ROOT="$start_repo_root"
-export SINNIX_CAPTURE_START_REPO_BRANCH="$start_repo_branch"
-export SINNIX_CAPTURE_START_REPO_COMMIT="$start_repo_commit"
-export SINNIX_CAPTURE_START_REPO_DIRTY="$start_repo_dirty"
 export SINNIX_CAPTURE_PROJECT_ROOT="$start_project_root"
 
-{
-  printf '{\n'
-  printf '  "schema": %s,\n' "$(json_string "terminal-session-v1")"
-  printf '  "schema_generation": %s,\n' "$(json_string "terminal-session-v1")"
-  printf '  "session_id": %s,\n' "$(json_nullable_string "$session_id")"
-  printf '  "cast_path": %s,\n' "$(json_nullable_string "$cast_path")"
-  printf '  "events_path": %s,\n' "$(json_nullable_string "${session_dir}/events.jsonl")"
-  printf '  "host": %s,\n' "$(json_nullable_string "$host_name")"
-  printf '  "user": %s,\n' "$(json_nullable_string "${USER:-}")"
-  printf '  "tty": %s,\n' "$(json_nullable_string "$tty_path")"
-  printf '  "terminal": %s,\n' "$(json_string "kitty")"
-  printf '  "shell": %s,\n' "$(json_nullable_string "$shell_bin")"
-  printf '  "term_type": %s,\n' "$(json_nullable_string "${TERM:-}")"
-  printf '  "start_cwd": %s,\n' "$(json_nullable_string "$start_cwd")"
-  printf '  "final_cwd": null,\n'
-  printf '  "project_root": %s,\n' "$(json_nullable_string "$start_project_root")"
-  printf '  "final_project_root": null,\n'
-  printf '  "repo_root": %s,\n' "$(json_nullable_string "$start_repo_root")"
-  printf '  "final_repo_root": null,\n'
-  printf '  "repo_branch": %s,\n' "$(json_nullable_string "$start_repo_branch")"
-  printf '  "final_repo_branch": null,\n'
-  printf '  "repo_commit": %s,\n' "$(json_nullable_string "$start_repo_commit")"
-  printf '  "final_repo_commit": null,\n'
-  printf '  "repo_dirty": %s,\n' "$(json_nullable_string "$start_repo_dirty")"
-  printf '  "final_repo_dirty": null,\n'
-  printf '  "started_at_ms": %s,\n' "$(json_nullable_int "$started_at_ms")"
-  printf '  "finished_at_ms": null,\n'
-  printf '  "duration_ms": null,\n'
-  printf '  "active_ms": 0,\n'
-  printf '  "idle_ms": 0,\n'
-  printf '  "command_count": 0,\n'
-  printf '  "event_count": 0,\n'
-  printf '  "exit_code": null,\n'
-  printf '  "exit_reason": %s,\n' "$(json_string "recorder_starting")"
-  printf '  "recorder_exit_code": null,\n'
-  printf '  "cleanup_escalated": false\n'
-  printf '}\n'
-} > "${session_dir}/session.json"
+# Nothing here or in the shell touches the capture directory or runs git: a
+# stalled disk must not delay the prompt. The session writer creates the
+# directory, queries the repository and owns events.jsonl and session.json.
+# It reads this pipe in its own session, so closing the terminal does not cut
+# it off; it ends when the shell and this launcher have closed their ends.
+events_fd=""
+if exec {events_fd}> >(exec setsid python3 "$writer" session "$capture_root" >/dev/null 2>&1); then
+  # The shell opens its own close-on-exec end through this path.
+  export SINNIX_CAPTURE_EVENTS_PIPE="/proc/$$/fd/$events_fd"
+else
+  events_fd=""
+fi
 
 cleanup_escalated=false
 recorder_pid=""
@@ -364,12 +265,47 @@ update_session_file() {
   mv "$tmp_file" "$session_file"
 }
 
+# The session writer is the only writer of session.json while it lives. The
+# launcher sends it the recorder's outcome; that write fails only when no
+# reader holds the pipe, and only then does the launcher edit the file itself.
+report_recorder_end() {
+  local exit_reason="$1"
+  local exit_code="${2:-}"
+  local recorder_exit_code="${3:-}"
+
+  if [[ -n "$events_fd" ]]; then
+    local fd="$events_fd" reported=false reason_json=null
+    events_fd=""
+    if [[ -n "$exit_reason" ]]; then
+      reason_json="\"$exit_reason\""
+    fi
+    trap '' PIPE
+    if printf '{"type":"supervisor_exit","ts_ms":%s,"exit_reason":%s,"exit_code":%s,"recorder_exit_code":%s,"cleanup_escalated":%s}\n' \
+      "$(now_ms)" \
+      "$reason_json" \
+      "${exit_code:-null}" \
+      "${recorder_exit_code:-null}" \
+      "$cleanup_escalated" 1>&"$fd" 2>/dev/null; then
+      reported=true
+    fi
+    exec {fd}>&-
+    if [[ "$reported" == true ]]; then
+      return 0
+    fi
+  fi
+
+  if [[ -n "$exit_reason" ]]; then
+    finalize_session_file_if_running "$exit_reason" "$exit_code" "$recorder_exit_code"
+  fi
+  update_session_file "${recorder_exit_code:-null}"
+}
+
 cleanup_recorder_subtree() {
   local exit_reason="$1"
   local exit_code="${2:-}"
 
   if [[ -z "$recorder_pid" ]]; then
-    finalize_session_file_if_running "$exit_reason" "$exit_code" "$recorder_status"
+    report_recorder_end "$exit_reason" "$exit_code" "$recorder_status"
     return 0
   fi
 
@@ -388,7 +324,7 @@ cleanup_recorder_subtree() {
   fi
 
   wait_for_recorder
-  finalize_session_file_if_running "$exit_reason" "$exit_code" "$recorder_status"
+  report_recorder_end "$exit_reason" "$exit_code" "$recorder_status"
 }
 
 handle_supervisor_signal() {
@@ -416,16 +352,25 @@ trap 'handle_supervisor_signal "launcher_terminated" 143' TERM
 trap 'handle_supervisor_exit "$?"' EXIT
 
 # The transport owns a pipe and drains its independent writer before exit.
-python3 "$(dirname "$(readlink -f "$0")")/sinnix-terminal-capture-writer" record "$cast_path" asciinema rec \
-  --stdin \
-  --quiet \
-  --return \
-  --output-format asciicast-v3 \
-  --capture-env SHELL,TERM,SINNIX_CAPTURE_SESSION_ID,SINNIX_CAPTURE_HOST,SINNIX_CAPTURE_USER,SINNIX_CAPTURE_TTY,SINNIX_CAPTURE_TERMINAL,SINNIX_CAPTURE_START_CWD,SINNIX_CAPTURE_START_REPO_ROOT,SINNIX_CAPTURE_START_REPO_BRANCH,SINNIX_CAPTURE_START_REPO_COMMIT,SINNIX_CAPTURE_START_REPO_DIRTY,SINNIX_CAPTURE_PROJECT_ROOT \
-  --command "umask $shell_umask; exec \"\$SINNIX_CAPTURE_SHELL\"" &
+run_recorder() {
+  exec python3 "$writer" record "$cast_path" asciinema rec \
+    --stdin \
+    --quiet \
+    --return \
+    --output-format asciicast-v3 \
+    --capture-env SHELL,TERM,SINNIX_CAPTURE_SESSION_ID,SINNIX_CAPTURE_HOST,SINNIX_CAPTURE_USER,SINNIX_CAPTURE_TTY,SINNIX_CAPTURE_TERMINAL,SINNIX_CAPTURE_START_CWD,SINNIX_CAPTURE_START_REPO_ROOT,SINNIX_CAPTURE_PROJECT_ROOT \
+    --command "umask $shell_umask; exec \"\$SINNIX_CAPTURE_SHELL\""
+}
+
+# The recorder must not hold the events pipe open past the launcher.
+if [[ -n "$events_fd" ]]; then
+  run_recorder {events_fd}>&- &
+else
+  run_recorder &
+fi
 recorder_pid=$!
 
 wait_for_recorder
-update_session_file "$recorder_status"
+report_recorder_end "" "" "$recorder_status"
 supervisor_done=true
 exit "$recorder_status"
