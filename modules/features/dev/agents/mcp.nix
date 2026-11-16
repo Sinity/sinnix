@@ -83,49 +83,6 @@ mkFeatureModule {
         inherit pkgs;
         inherit dotsRoot;
       };
-      codexMigrationPython = pkgs.python3.withPackages (ps: [ ps.tomlkit ]);
-      # This is the old copied-to-private baseline, not the live system
-      # default. Keep it immutable so a later dots edit cannot alter the
-      # one-time three-way migration, and so activation does not depend on a
-      # checkout being mounted (as in the hermetic runtime fixture).
-      codexSystemDefaultsBaseline = pkgs.writeText "sinnix-codex-system-defaults-v1.toml" (
-        builtins.readFile "${inputs.self}/dots/codex/config.toml"
-      );
-      codexSystemDefaultsMigration = pkgs.writeText "sinnix-codex-system-defaults-migration.py" ''
-        import os
-        import sys
-        from pathlib import Path
-
-        import tomlkit
-
-        baseline_path, user_path = map(Path, sys.argv[1:])
-        baseline = tomlkit.parse(baseline_path.read_text())
-        user = tomlkit.parse(user_path.read_text())
-
-        def values_match(left, right):
-            unwrap_left = left.unwrap() if hasattr(left, "unwrap") else left
-            unwrap_right = right.unwrap() if hasattr(right, "unwrap") else right
-            return unwrap_left == unwrap_right
-
-        def retain_user_overlay(old, current):
-            for key in list(current):
-                if key not in old:
-                    continue
-                old_value = old[key]
-                current_value = current[key]
-                if hasattr(old_value, "items") and hasattr(current_value, "items"):
-                    retain_user_overlay(old_value, current_value)
-                    if not list(current_value):
-                        del current[key]
-                elif values_match(old_value, current_value):
-                    del current[key]
-
-        retain_user_overlay(baseline, user)
-        temporary = user_path.with_name(user_path.name + ".sinnix-migration.tmp")
-        temporary.write_text(tomlkit.dumps(user))
-        os.chmod(temporary, 0o600)
-        os.replace(temporary, user_path)
-      '';
       inherit (mcpTools)
         mcpFirecrawlBin
         mcpLynchpinText
@@ -176,167 +133,41 @@ mkFeatureModule {
                     fi
                   ''
                 );
-                # Prior generations copied managed values into the private
-                # config. Remove only values unchanged from that old baseline;
-                # retain user changes and unknown keys as the private overlay.
-                codexSystemDefaultsMigration = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-                  codex_home="$HOME/.codex"
-                  codex_config="$codex_home/config.toml"
-                  codex_marker="$codex_home/.sinnix-system-defaults-v1"
-                  codex_pending="$codex_marker.pending"
-                  codex_baseline=${lib.escapeShellArg (toString codexSystemDefaultsBaseline)}
-                  run mkdir -p "$codex_home"
-                  if [ ! -e "$codex_marker" ]; then
-                    if [ -e "$codex_pending" ]; then
-                      echo "codex: system-default migration is pending; preserving private config for review" >&2
-                    elif [ -f "$codex_config" ]; then
-                      if [ ! -e "$codex_config.sinnix-before-system-defaults-v1.bak" ]; then
-                        run cp -p "$codex_config" "$codex_config.sinnix-before-system-defaults-v1.bak"
-                        run chmod 600 "$codex_config.sinnix-before-system-defaults-v1.bak"
-                      fi
-                      run touch "$codex_pending"
-                      if run ${codexMigrationPython}/bin/python ${codexSystemDefaultsMigration} "$codex_baseline" "$codex_config"; then
-                        run mv "$codex_pending" "$codex_marker"
-                      else
-                        run rm "$codex_pending"
-                        echo "codex: retained an unreadable private config; migration will retry after it is repaired" >&2
-                      fi
-                    else
-                      run touch "$codex_marker"
-                    fi
-                  fi
-                '';
-                # hooks.json is still a Home Manager link. Preserve a
-                # differing legacy copy before linkGeneration replaces it.
-                codexHooksBackup = lib.hm.dag.entryBefore [ "linkGeneration" ] ''
-                  codex_home="$HOME/.codex"
-                  codex_backup="$codex_home/.sinnix-before-native-layers-v1"
-                  codex_marker="$codex_backup/.complete"
-                  if [ ! -e "$codex_marker" ]; then
-                    run mkdir -p "$codex_backup"
-                    codex_source=${lib.escapeShellArg (toString codexHooksFile)}
-                    codex_destination="$codex_home/hooks.json"
-                    if [ -f "$codex_destination" ] || [ -L "$codex_destination" ]; then
-                      if ! cmp -s "$codex_destination" "$codex_source" && [ ! -e "$codex_backup/hooks.json" ] && [ ! -L "$codex_backup/hooks.json" ]; then
-                        run cp -a "$codex_destination" "$codex_backup/hooks.json"
-                      fi
-                    fi
-                    run touch "$codex_marker"
-                  fi
-                '';
-                codexRetireOldProfiles = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
-                  codex_home="$HOME/.codex"
-                  retired="$codex_home/.sinnix-retired-profiles-v1"
-                  if [ ! -e "$retired/.complete" ]; then
-                    retirement_complete=1
-                    for name in default lean evidence full browser; do
-                      current="$codex_home/$name.config.toml"
-                      saved="$retired/$name.config.toml"
-                      if [ ! -e "$current" ] && [ ! -L "$current" ]; then
-                        continue
-                      fi
-                      if [ -e "$saved" ] || [ -L "$saved" ]; then
-                        echo "codex: preserved existing $current because $saved already exists" >&2
-                        retirement_complete=0
-                        continue
-                      fi
-                      run mkdir -p "$retired"
-                      if [ -L "$current" ] && [ -f "$current" ]; then
-                        run cp -L -p "$current" "$saved"
-                        run rm "$current"
-                      else
-                        run mv "$current" "$saved"
-                      fi
-                    done
-                    if [ "$retirement_complete" = 1 ]; then
-                      run mkdir -p "$retired"
-                      run touch "$retired/.complete"
-                    fi
-                  fi
-                '';
-                # ~/.codex/skills can contain app-installed skills and Codex's
-                # .system directory. Expand only a recognisable old Sinnix
-                # farm. An unknown directory symlink is ambiguous user state
-                # and is deliberately left untouched.
+                # ~/.codex/skills also holds app-installed skills and Codex's
+                # .system directory, so each declared skill gets its own link.
+                # A ~/.codex/skills that is itself a symlink is private state
+                # and is left untouched.
                 codexSkills = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
                   codex_skills="$HOME/.codex/skills"
                   declared_skills="${dotsRoot}/_ai/skills"
-                  codex_manage_skills=1
                   if [ -L "$codex_skills" ]; then
-                    codex_link="$(readlink "$codex_skills" || true)"
-                    codex_old="$(readlink -f "$codex_skills" || true)"
-                    codex_owned_farm=1
-                    codex_system_link=""
-                    # Only the old Home Manager output that wrapped our named
-                    # codex farm is safe to replace. A custom or empty link is
-                    # still private state, even if it happens to look sparse.
-                    case "$codex_link:$codex_old" in
-                      /nix/store/*-home-manager-files/.codex/skills:/nix/store/*-sinnix-codex-agent-skills) ;;
-                      *) codex_owned_farm=0 ;;
-                    esac
-                    if [ -z "$codex_old" ] || [ ! -d "$codex_old" ] || [ ! -L "$codex_old/.system" ]; then
-                      codex_owned_farm=0
-                    else
-                      for codex_entry in "$codex_old"/* "$codex_old"/.[!.]*; do
-                        [ -e "$codex_entry" ] || [ -L "$codex_entry" ] || continue
-                        codex_name="$(basename "$codex_entry")"
-                        if [ "$codex_name" = .system ]; then
-                          codex_system_link="$(readlink "$codex_entry" || true)"
-                          continue
-                        fi
-                        codex_target="$(readlink -f "$codex_entry" || true)"
-                        codex_raw_target="$(readlink "$codex_entry" || true)"
-                        if [ "$codex_target" != "${dotsRoot}/_ai/skills/$codex_name" ] && [ "$codex_raw_target" != "${dotsRoot}/codex/skills/$codex_name" ]; then
-                          codex_owned_farm=0
-                          break
-                        fi
-                      done
-                    fi
-                    if [ "$codex_owned_farm" -eq 1 ]; then
-                      run rm "$codex_skills"
-                      run mkdir -p "$codex_skills"
-                      if [ -n "$codex_system_link" ]; then
-                        run ln -s "$codex_system_link" "$codex_skills/.system"
-                      fi
-                    else
-                      echo "codex: preserving an unrecognised ~/.codex/skills link" >&2
-                      codex_manage_skills=0
-                    fi
+                    echo "codex: preserving an unrecognised ~/.codex/skills link" >&2
                   else
                     run mkdir -p "$codex_skills"
-                  fi
-                  if [ "$codex_manage_skills" -eq 1 ]; then
-                  for codex_entry in "$codex_skills"/* "$codex_skills"/.[!.]*; do
-                    [ -L "$codex_entry" ] || continue
-                    codex_name="$(basename "$codex_entry")"
-                    codex_target="$(readlink -f "$codex_entry" || true)"
-                    codex_raw_target="$(readlink "$codex_entry" || true)"
-                    # Remove only broken links from the former Sinnix skill
-                    # tree. A broken user-owned link is still private state.
-                    if [ "$codex_raw_target" = "${dotsRoot}/codex/skills/$codex_name" ] && [ ! -e "$codex_entry" ]; then
-                      run rm "$codex_entry"
-                      continue
-                    fi
-                    # A declared entry without SKILL.md (a retired skill, the
-                    # harness-owned synced/ and .trash/ trees) is not a skill.
-                    if [ "$codex_target" = "${dotsRoot}/_ai/skills/$codex_name" ] && [ ! -e "$declared_skills/$codex_name/SKILL.md" ]; then
-                      run rm "$codex_entry"
-                    fi
-                  done
-                  for codex_source in "$declared_skills"/*; do
-                    [ -e "$codex_source/SKILL.md" ] || continue
-                    codex_name="$(basename "$codex_source")"
-                    codex_destination="$codex_skills/$codex_name"
-                    if [ -e "$codex_destination" ] || [ -L "$codex_destination" ]; then
-                      codex_target="$(readlink -f "$codex_destination" || true)"
-                      if [ "$codex_target" != "$(readlink -f "$codex_source")" ]; then
-                        echo "codex: preserving existing skill $codex_name" >&2
-                        continue
+                    for codex_entry in "$codex_skills"/* "$codex_skills"/.[!.]*; do
+                      [ -L "$codex_entry" ] || continue
+                      codex_name="$(basename "$codex_entry")"
+                      codex_target="$(readlink -m "$codex_entry" || true)"
+                      # A declared entry without SKILL.md (a retired skill, the
+                      # harness-owned synced/ and .trash/ trees) is not a skill.
+                      if [ "$codex_target" = "$declared_skills/$codex_name" ] && [ ! -e "$declared_skills/$codex_name/SKILL.md" ]; then
+                        run rm "$codex_entry"
                       fi
-                      run rm "$codex_destination"
-                    fi
-                    run ln -s "$codex_source" "$codex_destination"
-                  done
+                    done
+                    for codex_source in "$declared_skills"/*; do
+                      [ -e "$codex_source/SKILL.md" ] || continue
+                      codex_name="$(basename "$codex_source")"
+                      codex_destination="$codex_skills/$codex_name"
+                      if [ -e "$codex_destination" ] || [ -L "$codex_destination" ]; then
+                        codex_target="$(readlink -f "$codex_destination" || true)"
+                        if [ "$codex_target" != "$(readlink -f "$codex_source")" ]; then
+                          echo "codex: preserving existing skill $codex_name" >&2
+                          continue
+                        fi
+                        run rm "$codex_destination"
+                      fi
+                      run ln -s "$codex_source" "$codex_destination"
+                    done
                   fi
                 '';
                 directMutableAgentLinks = lib.hm.dag.entryAfter [ "linkGeneration" ] ''

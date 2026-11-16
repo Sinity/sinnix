@@ -123,8 +123,6 @@ in
           config:
           let
             hm = config.home-manager.users.${config.sinnix.user.name};
-            activationText = hm.home.activation.claudeSymlink.data or "";
-            codexMigrationText = hm.home.activation.codexSystemDefaultsMigration.data or "";
             codexWrapperText = hm.home.file.".local/bin/codex".text or "";
           in
           [
@@ -140,21 +138,6 @@ in
             {
               assertion = !(hm.xdg.configFile ? "claude/settings.json");
               message = "Claude settings.json must not be managed through Home Manager xdg.configFile.";
-            }
-            {
-              assertion = lib.hasInfix "${config.sinnix.paths.dotsRoot}/claude/settings-seed.json" activationText;
-              message = "Claude settings.json must be seeded copy-if-absent from dots so the harness can persist UI state into a plain writable file.";
-            }
-            {
-              assertion =
-                let
-                  source = builtins.unsafeDiscardStringContext (
-                    toString config.environment.etc."claude-code/managed-settings.json".source
-                  );
-                in
-                lib.hasPrefix "${builtins.storeDir}/" source
-                && lib.hasInfix (lib.escapeShellArg source) activationText;
-              message = "Claude /etc policy and state activation must use the same generation-bound managed settings.";
             }
             {
               assertion = lib.hasInfix "export PATH=\"$HOME/.local/bin:" codexWrapperText;
@@ -197,10 +180,6 @@ in
               message = "Native Codex skill discovery must link ~/.agents/skills to the live shared root.";
             }
             {
-              assertion = !(hm.home.file ? ".codex/lean.config.toml");
-              message = "Codex profiles must be private writable files, not Home Manager links into the store.";
-            }
-            {
               assertion =
                 let
                   skillsActivation = hm.home.activation.codexSkills.data or "";
@@ -209,14 +188,7 @@ in
                 && lib.hasInfix "run mkdir" skillsActivation
                 && lib.hasInfix "run ln" skillsActivation
                 && !(lib.hasInfix "\n                      rm " skillsActivation);
-              message = "Codex skill migration must route every mutation through Home Manager's dry-run-aware run helper.";
-            }
-            {
-              assertion =
-                lib.hasInfix "codex_pending=\"$codex_marker.pending\"" codexMigrationText
-                && lib.hasInfix "run touch \"$codex_pending\"" codexMigrationText
-                && lib.hasInfix "run mv \"$codex_pending\" \"$codex_marker\"" codexMigrationText;
-              message = "Codex defaults migration must leave a pending marker before rewriting private state, and never retry a pending rewrite automatically.";
+              message = "Codex skill linking must route every mutation through Home Manager's dry-run-aware run helper.";
             }
             {
               assertion = builtins.all (path: builtins.hasAttr path hm.home.file) [
@@ -317,11 +289,8 @@ in
       agentToolsCodexSkillsActivation = pkgs.writeText "codex-skills-activation.sh" (
         agentToolsRuntimeConfig.home-manager.users.${agentToolsRuntimeConfig.sinnix.user.name}.home.activation.codexSkills.data
       );
-      agentToolsCodexMigrationActivation = pkgs.writeText "codex-system-defaults-migration.sh" (
-        agentToolsRuntimeConfig.home-manager.users.${agentToolsRuntimeConfig.sinnix.user.name}.home.activation.codexSystemDefaultsMigration.data
-      );
-      agentToolsCodexRetirementActivation = pkgs.writeText "codex-retire-profiles.sh" (
-        agentToolsRuntimeConfig.home-manager.users.${agentToolsRuntimeConfig.sinnix.user.name}.home.activation.codexRetireOldProfiles.data
+      agentToolsClaudeStateActivation = pkgs.writeText "claude-state-activation.sh" (
+        agentToolsRuntimeConfig.home-manager.users.${agentToolsRuntimeConfig.sinnix.user.name}.home.activation.claudeSymlink.data
       );
 
       # Provably fails when: a generic runtime, browser, shell or agent binary
@@ -644,9 +613,6 @@ in
           name = "dev-agent-tools-runtime-check";
           nativeBuildInputs = builtins.filter (pkg: pkg != pkgs.expect) agentToolsFixture.nativeBuildInputs;
           setup = agentToolsFixture.setup + ''
-            mkdir -p "$HOME/.codex"
-            printf '[private]\nkeep = true\n\n[features]\nmulti_agent_v2 = true\n' > "$HOME/.codex/config.toml"
-            printf '[hooks.state]\nprivate = "keep"\n' > "$HOME/.codex/lean.config.toml"
             mkdir -p "$HOME/.hermes"
             cp ${agentToolsHermesConfigSource} "$HOME/.hermes/config.yaml"
             chmod 600 "$HOME/.hermes/config.yaml"
@@ -671,35 +637,30 @@ in
           '';
           script = ''
             trap 'echo "dev-agent-tools-runtime failed at line $LINENO" >&2' ERR
-            ${pkgs.python3}/bin/python ${./claude-state.py} ${../../modules/features/dev/agents/claude-state.py}
-
             # mkHmRuntimeCheck renders declared files but deliberately does
-            # not execute Home Manager activation. Exercise the private
-            # migration here with the same `run` contract used by activation.
-            run() { "$@"; }
-            source ${agentToolsCodexMigrationActivation}
-            source ${agentToolsCodexRetirementActivation}
-            unset -f run
+            # not execute Home Manager activation. Exercise the Claude state
+            # step here with the same `run` contract used by activation:
+            # settings.json is seeded once as a private file and ~/.claude
+            # points at the config directory.
+            claude_home="$TMPDIR/claude-state"
+            mkdir -p "$claude_home"
+            (
+              export HOME="$claude_home"
+              run() { "$@"; }
+              source ${agentToolsClaudeStateActivation}
+            )
+            cmp "$claude_home/.config/claude/settings.json" ${../../dots/claude/settings-seed.json}
+            test "$(stat -c '%a' "$claude_home/.config/claude/settings.json")" = 600
+            test "$(readlink "$claude_home/.claude")" = .config/claude
+            printf '{"model": "kept"}\n' > "$claude_home/.config/claude/settings.json"
+            (
+              export HOME="$claude_home"
+              run() { "$@"; }
+              source ${agentToolsClaudeStateActivation}
+            )
+            grep -Fq '"kept"' "$claude_home/.config/claude/settings.json"
 
-            test -f "$HOME/.codex/config.toml"
-            test ! -L "$HOME/.codex/config.toml"
-            grep -Fq 'keep = true' "$HOME/.codex/config.toml"
-            # An inherited default is removed from the private overlay, while
-            # the unknown user section survives and the original is backed up.
-            ! grep -Fq 'multi_agent_v2 = true' "$HOME/.codex/config.toml"
-            test -f "$HOME/.codex/config.toml.sinnix-before-system-defaults-v1.bak"
-            test "$(stat -c '%a' "$HOME/.codex/config.toml.sinnix-before-system-defaults-v1.bak")" = 600
-            test -f "$HOME/.codex/.sinnix-system-defaults-v1"
-            test ! -e "$HOME/.codex/.sinnix-system-defaults-v1.pending"
             test -L "$HOME/.codex/hooks.json"
-            test ! -e "$HOME/.codex/lean.config.toml"
-            grep -Fq 'private = "keep"' "$HOME/.codex/.sinnix-retired-profiles-v1/lean.config.toml"
-            test -e "$HOME/.codex/.sinnix-retired-profiles-v1/.complete"
-            printf 'new private profile\n' > "$HOME/.codex/lean.config.toml"
-            run() { "$@"; }
-            source ${agentToolsCodexRetirementActivation}
-            unset -f run
-            grep -Fq 'new private profile' "$HOME/.codex/lean.config.toml"
             test -L "$HOME/.agents/skills"
             # The live checkout is intentionally absent from the Nix sandbox;
             # resolve the declared link without requiring its target to exist.
@@ -707,13 +668,13 @@ in
             test -L "$HOME/.config/claude/skills"
             test "$(readlink -m "$HOME/.config/claude/skills")" = ${agentToolsRuntimeConfig.sinnix.paths.dotsRoot}/_ai/skills
             # Home Manager's dry-run helper must be the sole mutation path for
-            # the skills migration. It must neither replace existing app state
-            # nor create its declared links in a synthetic home.
+            # the skill links. It must neither replace existing app state nor
+            # create its declared links in a synthetic home.
             dry_home="$TMPDIR/codex-skills-dry-run"
             mkdir -p "$dry_home/.codex/skills"
             touch "$dry_home/.codex/skills/app-installed-skill"
-            # An explicitly owned link from the retired skill tree.
-            ln -s /realm/project/sinnix/repo/dots/codex/skills/agent-runtime "$dry_home/.codex/skills/agent-runtime"
+            # A link to a declared skill that no longer exists.
+            ln -s ${agentToolsRuntimeConfig.sinnix.paths.dotsRoot}/_ai/skills/retired-skill "$dry_home/.codex/skills/retired-skill"
             ln -s /private/owner/skill "$dry_home/.codex/skills/private-skill"
             (
               export HOME="$dry_home"
@@ -721,41 +682,15 @@ in
               source ${agentToolsCodexSkillsActivation}
             )
             test -f "$dry_home/.codex/skills/app-installed-skill"
-            test ! -e "$dry_home/.codex/skills/agent-runtime"
-            test -L "$dry_home/.codex/skills/agent-runtime"
+            test -L "$dry_home/.codex/skills/retired-skill"
             (
               export HOME="$dry_home"
               run() { "$@"; }
               source ${agentToolsCodexSkillsActivation}
             )
-            test ! -L "$dry_home/.codex/skills/agent-runtime"
+            test ! -L "$dry_home/.codex/skills/retired-skill"
             test -L "$dry_home/.codex/skills/private-skill"
             test -f "$dry_home/.codex/skills/app-installed-skill"
-            # A pending migration means the previous rewrite may have reached
-            # disk without recording completion. It is intentionally a hard
-            # preservation state, not an invitation to strip matching values
-            # again on a later activation.
-            pending_home="$TMPDIR/codex-pending-migration"
-            mkdir -p "$pending_home/.codex"
-            printf '[features]\nmulti_agent_v2 = true\n[user]\nchoice = "keep"\n' > "$pending_home/.codex/config.toml"
-            cp "$pending_home/.codex/config.toml" "$pending_home/expected.toml"
-            touch "$pending_home/.codex/.sinnix-system-defaults-v1.pending"
-            (
-              export HOME="$pending_home"
-              run() { "$@"; }
-              source ${agentToolsCodexMigrationActivation}
-            )
-            cmp -s "$pending_home/expected.toml" "$pending_home/.codex/config.toml"
-            test -e "$pending_home/.codex/.sinnix-system-defaults-v1.pending"
-            test ! -e "$pending_home/.codex/.sinnix-system-defaults-v1"
-            # Dry-run mode must not create even the migration marker.
-            migration_dry_home="$TMPDIR/codex-migration-dry-run"
-            (
-              export HOME="$migration_dry_home"
-              run() { :; }
-              source ${agentToolsCodexMigrationActivation}
-            )
-            test ! -e "$migration_dry_home/.codex"
             test -L "$HOME/.config/claude/mcp.json"
             test -L "$HOME/.config/hermes/skills"
             python3 - "$HOME/.hermes/config.yaml" <<'PYCODE'
@@ -831,9 +766,6 @@ in
             python3 - <<'PYCODE'
             import pathlib, tomllib
 
-            private_config = tomllib.loads(pathlib.Path.home().joinpath('.codex/config.toml').read_text())
-            assert 'mcp_servers' not in private_config
-            assert private_config['private']['keep'] is True
             system_config = tomllib.loads(pathlib.Path('${agentToolsCodexConfigSource}').read_text())
             assert system_config['features']['hooks'] is True
             assert system_config['log_dir'] == '/realm/state/codex/logs'

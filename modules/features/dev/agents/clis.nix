@@ -67,6 +67,12 @@ mkFeatureModule {
         builtins.readFile ../../../../dots/claude/managed-settings.json
       );
 
+      # Claude Code persists UI state into settings.json, so it is a private
+      # writable file seeded once from this copy, never a link.
+      claudeSettingsSeed = pkgs.writeText "claude-settings-seed.json" (
+        builtins.readFile ../../../../dots/claude/settings-seed.json
+      );
+
       jsonFormat = pkgs.formats.json { };
       yamlFormat = pkgs.formats.yaml { };
       inherit (helpers.data) mcpRegistry agentProfiles runtimeDefaults;
@@ -350,17 +356,15 @@ mkFeatureModule {
             };
 
             home.activation.claudeSymlink = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
-              run ${pkgs.python3}/bin/python ${./claude-state.py} \
-                "$HOME" \
-                ${lib.escapeShellArg (toString claudeManagedSettings)} \
-                ${lib.escapeShellArg "${sinnixCfg.paths.dotsRoot}/claude/settings-seed.json"} \
-                ${lib.escapeShellArg "${sinnixCfg.paths.dotsRoot}/claude/hooks/sessionstart-beads-prime.sh"} \
-                ${
-                  if sinnixCfg.persistence.enable then
-                    lib.escapeShellArg "/persist${config.home.homeDirectory}/.claude.json"
-                  else
-                    ''"$HOME/.claude.json"''
-                }
+              claude_config="$HOME/.config/claude"
+              run mkdir -p "$claude_config"
+              run chmod 700 "$claude_config"
+              if [ ! -e "$claude_config/settings.json" ] && [ ! -L "$claude_config/settings.json" ]; then
+                run ${pkgs.coreutils}/bin/install -m 0600 ${claudeSettingsSeed} "$claude_config/settings.json"
+              fi
+              if [ ! -e "$HOME/.claude" ] && [ ! -L "$HOME/.claude" ]; then
+                run ln -s .config/claude "$HOME/.claude"
+              fi
             '';
             home.activation.hermesConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
               mkdir -p "$HOME/.hermes"
