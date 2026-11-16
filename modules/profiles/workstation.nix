@@ -212,6 +212,15 @@ in
 
         systemd.settings.Manager.StatusUnitFormat = "name";
 
+        # Thrash breaker. When the pages used in the last second cannot be
+        # kept in memory, the kernel invokes its OOM killer instead of
+        # evicting and re-reading them forever. Without it (the default, 0)
+        # a host with full RAM and little page cache stays stalled for as
+        # long as the load lasts: the stall is charged as I/O, so pressure
+        # based killers do not see it. Job units run at OOMScoreAdjust 900
+        # and agent CLIs at 300, so a build is the victim.
+        systemd.tmpfiles.rules = [ "w /sys/kernel/mm/lru_gen/min_ttl_ms - - - - 1000" ];
+
         # No polkit password dialogs for wheel on unit management and power
         # actions: wheel already has NOPASSWD sudo, so the prompt is friction with
         # no security boundary behind it. Deliberately scoped to systemd1 and

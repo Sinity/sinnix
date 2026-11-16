@@ -385,7 +385,8 @@ in
             # hard guarantee in the host's 31 GiB. The guarantee, not the
             # budget, protects the desktop; the budget's ceiling leaves the
             # kernel and system services the remainder, and agents throttle at
-            # MemoryHigh 3G before it (lowered after the 2026-11-02 global OOMs).
+            # MemoryHigh 2G before it (lowered after the 2026-11-02 global OOMs and
+            # again on 2026-11-16 for the huge-page reservation).
             lib.all (name: userSlices ? ${name}) [
               "agent-cli"
               "agent-tool"

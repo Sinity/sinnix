@@ -361,9 +361,25 @@ rec {
         # agent work is throttled or killed inside this slice first. Swap
         # stays small: agents are reclaimed or killed, never paged to the QLC
         # NVMe.
-        MemoryHigh = "16G";
-        MemoryMax = "19G";
-        MemorySwapMax = "2G";
+        #
+        # 19G was sized against 31 GiB. Since 2026-11-09 PostgreSQL's shared
+        # buffers hold 4.5 GiB of that as huge pages, which no cgroup is
+        # charged for and reclaim cannot touch. On 2026-11-16 the budget
+        # stood at 12.3G anonymous plus its 2G of swap, far below 16G, while
+        # the host had 17.4G anonymous, 9.5G in zram and 2.2G of page cache
+        # in total: this slice kept 0.6G of page cache and spent 98% of the
+        # time stalled re-reading its own binaries, at under 1% memory
+        # pressure, so neither oomd nor earlyoom acted for half an hour.
+        # What the host can give agents beside huge pages (4.5G), kernel
+        # slab and page tables (2.6G), the zram store (3-4G when full), the
+        # desktop and the live services is about 12.5G, page cache included.
+        # The ceiling sits below that so agents meet their own limit, where
+        # the stall counts as this budget's memory pressure and the job
+        # plane's oomd policy ends it. More swap lets idle sessions compress
+        # (about 3:1) instead of pinning RAM.
+        MemoryHigh = "10G";
+        MemoryMax = "12G";
+        MemorySwapMax = "4G";
         TasksMax = 16384;
       };
       # Interactive agent CLIs and their in-process subagents. Claude's Bash
@@ -381,17 +397,22 @@ rec {
         IOWeight = 100;
         # The agent processes themselves stay resident while tools and jobs
         # fill the budget (~0.6 GB for a coordinator with twenty forks; all
-        # sessions together 1.9 GB on 2026-10-27).
-        MemoryLow = "2G";
+        # sessions together 1.9 GB on 2026-10-27; fourteen sessions held
+        # 5.1G resident and 1.5G swapped on 2026-11-16). The protection
+        # covers the sessions in use, so reclaim at the budget's MemoryHigh
+        # lands on jobs and tools first.
+        MemoryLow = "5G";
         # Throttle, never kill: every in-process subagent shell is a child of
         # the coordinator's Claude process in the same scope, so an oomd
         # policy here would take the session down with its runaway child.
-        MemoryHigh = "6G";
+        # At 6G, fourteen sessions sat on the limit with 0.16G of page cache
+        # between them and every keystroke re-read the CLI from disk.
+        MemoryHigh = "8G";
         # Hard backstop only if throttling cannot hold: the kernel's
         # cgroup-local OOM then picks the largest single process, which for
         # a runaway build is the build, not a ~1 GB agent process.
-        MemoryMax = "8G";
-        MemorySwapMax = "2G";
+        MemoryMax = "10G";
+        MemorySwapMax = "4G";
         TasksMax = 8192;
       };
       # What interactive agents run: Bash tool commands, stdio MCP servers
@@ -506,11 +527,13 @@ rec {
         # Builds, up to four by pool width (normal 1, bulk 1, compile 2).
         # Peak memory per job since 2026-11-01, page cache included: Polylogue
         # focused p50 3.6G p90 5.5G, Sinex focused/exec p90 6.8-6.9G, compile
-        # and Clippy p90 2.0-3.4G, so four typical builds would sum to ~13G. The plane
-        # sits 3G below the agent budget, leaving the agent CLIs and their
-        # tools room before the budget's own ceiling.
-        MemoryHigh = "14G";
-        MemoryMax = "16G";
+        # and Clippy p90 2.0-3.4G, so four typical builds would sum to ~13G,
+        # which the host does not have beside the sessions: the plane holds
+        # two typical builds or one large one, and a third is throttled and
+        # then ended by the oomd policy below instead of stalling the host.
+        # The plane sits 2G below the agent budget.
+        MemoryHigh = "8G";
+        MemoryMax = "10G";
         # Bounded swap for the plane as a whole. With none, a job at its
         # ceiling could only drop page cache (6 TiB of re-reads over one
         # 11-day uptime). A job's own cold pages are the cheaper thing to
