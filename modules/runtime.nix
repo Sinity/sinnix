@@ -372,24 +372,6 @@ in
   };
 
   config = lib.mkMerge [
-    (lib.sinnix.mkScheduledJob
-      {
-        inherit config;
-        unitName = "sinnix-user-manager-watchdog";
-        description = "Re-execute the operator's user manager when its job queue wedges";
-        surface = config.sinnix.runtime.units.user-manager-watchdog;
-      }
-      {
-        # System manager on purpose: a wedged user manager never dispatches
-        # its own timers' start jobs.
-        execStart = "${scriptPkgs.sinnix-user-manager-watchdog}/bin/sinnix-user-manager-watchdog ${cfg.user.name}";
-        serviceConfig.TimeoutStartSec = "120s";
-        timer = {
-          onBootSec = "10min";
-          intervalSec = 300;
-        };
-      }
-    )
     {
       assertions =
         let
@@ -474,16 +456,7 @@ in
           }
         ];
 
-      sinnix.runtime.units = runtimeDefaults.baseSurfaces // {
-        # Critical, not background: its probes have 30 s timeouts, and in the
-        # background class one run took 97 s of wall time for 33 ms of CPU,
-        # long enough to misjudge a healthy manager as wedged.
-        user-manager-watchdog = {
-          unit = "sinnix-user-manager-watchdog.service";
-          resourceClass = "critical";
-          notifyOnFailure = true;
-        };
-      };
+      sinnix.runtime.units = runtimeDefaults.baseSurfaces;
 
       environment.etc."sinnix/runtime-inventory.json" = {
         text = builtins.toJSON config.sinnix.runtime.inventory;

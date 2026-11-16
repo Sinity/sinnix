@@ -196,8 +196,6 @@ mkServiceModule {
             TemporaryFileSystem = [ "/realm:ro" ];
             BindPaths = [ modelsDir ];
             IOWeight = 10;
-            IOReadBandwidthMax = [ "${modelsDir} 40M" ];
-            IOWriteBandwidthMax = [ "${modelsDir} 20M" ];
           };
           # Conflicts= against every other GPU-inference backend is computed
           # centrally in ai-control.nix's gpuInferenceConflicts.

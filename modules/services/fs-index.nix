@@ -57,11 +57,6 @@ mkServiceModule {
         MemoryHigh = "infinity";
         MemoryMax = "3G";
         MemorySwapMax = 0;
-        IOReadBandwidthMax = [
-          "${config.sinnix.paths.realmRoot} 40M"
-          "/nix 20M"
-          "${config.sinnix.paths.outerRealm} 20M"
-        ];
       };
       timer = {
         onCalendar = cfg.schedule;

@@ -67,10 +67,6 @@ mkAiService {
             # the pass: under the default OOMPolicy=stop the kill stopped the
             # whole unit, so every recording queued behind it waited forever.
             OOMPolicy = "continue";
-            IOReadBandwidthMax = [
-              "/realm 20M"
-              "/nix 20M"
-            ];
           };
           environment = {
             SINNIX_STT_MODEL_ROOT = modelDir;
