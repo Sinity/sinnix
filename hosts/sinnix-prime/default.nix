@@ -135,6 +135,10 @@
     polylogue = {
       enable = true;
       dataHome = "/realm/state/polylogue-live/data-20261111";
+      # Polylogue 18af817ebd refuses every source scan on this home
+      # ("coverage entries must be unique within a root") and the refusal
+      # also stops the index build; off until the fix is deployed.
+      readSources = false;
       retainedArchives = [
         "/realm/state/polylogue-live/data/polylogue"
       ];
