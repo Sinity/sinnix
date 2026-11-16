@@ -1522,17 +1522,17 @@
       },
       "locked": {
         "exportIgnore": true,
-        "lastModified": 1794817200,
-        "narHash": "sha256-KC2x1Txr3SCdq1q7Qfig+7quIB9pMCPjwM1wjUmRKWw=",
-        "ref": "master",
-        "rev": "a2e21e7dca2460b87e91e0853ec4cc607367f26e",
+        "lastModified": 1794771034,
+        "narHash": "sha256-EniJpPw2DrD4oJfU9hSWk1GNxJgeUDL2XYWxrwujo5I=",
+        "ref": "deploy/daemon-memory-on-51c5e9aa9",
+        "rev": "c40083caac603a67a5b07c5da260d34596717997",
         "shallow": true,
         "type": "git",
         "url": "https://github.com/Sinity/sinex"
       },
       "original": {
         "exportIgnore": true,
-        "ref": "master",
+        "ref": "deploy/daemon-memory-on-51c5e9aa9",
         "shallow": true,
         "type": "git",
         "url": "https://github.com/Sinity/sinex"
