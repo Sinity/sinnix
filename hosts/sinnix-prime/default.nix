@@ -199,6 +199,10 @@
       # data in its stored text and the text is indexed for search. The
       # recordings stay on disk, and reading resumes from its saved positions
       # when this line goes.
+      # Document text is off: since 2026-11-16 17:53 one of its batches holds a
+      # character PostgreSQL refuses (22P05), and that refusal stops the whole
+      # daemon about every half hour. It comes back with the fix (sxnext-nsus).
+      derivations."document.text".enable = false;
       exclude."terminal.asciinema".reason =
         "Paused until the recording parser stops storing image data and its raw output leaves the text index; recordings remain under /realm/activity/terminal/asciinema";
       nats.producers.${config.services.sinex.session.producer} = {
