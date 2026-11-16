@@ -169,6 +169,9 @@ assert lib.assertMsg (
               # of the packaged scripts it runs.
               assertion =
                 let
+                  # builtins.match (behind lib.hasInfix) overflows the stack on
+                  # text this long; a literal split does not.
+                  contains = needle: text: builtins.length (builtins.split (lib.escapeRegex needle) text) > 1;
                   backupText = config.environment.etc."sinnix/backup.json".text;
                   packagedScriptNames = builtins.attrNames (
                     lib.filterAttrs (_: type: type == "regular") (builtins.readDir ../../scripts)
@@ -177,11 +180,11 @@ assert lib.assertMsg (
                     name:
                     let
                       execStart = services.${name}.serviceConfig.ExecStart or "";
-                      runsBackup = lib.hasInfix "/bin/sinnix-backup " execStart;
+                      runsBackup = contains "/bin/sinnix-backup " execStart;
                       invoked = lib.filter (
                         scriptName:
-                        lib.hasInfix "/bin/${scriptName}" execStart
-                        || (runsBackup && lib.hasInfix "\"${scriptName}\"" packageText)
+                        contains "/bin/${scriptName}" execStart
+                        || (runsBackup && contains "\"${scriptName}\"" packageText)
                       ) packagedScriptNames;
                     in
                     backupText
@@ -196,10 +199,10 @@ assert lib.assertMsg (
                     in
                     dirOf path == backup.state_directory
                     && (
-                      lib.hasInfix base packageText
+                      contains base packageText
                       || (
-                        (backup.sources ? ${stem} || lib.hasInfix "\"${stem}\"" packageText)
-                        && lib.hasInfix kind packageText
+                        (backup.sources ? ${stem} || contains "\"${stem}\"" packageText)
+                        && contains kind packageText
                       )
                     );
                   jobs = lib.filterAttrs (
@@ -210,7 +213,7 @@ assert lib.assertMsg (
                 && lib.all (
                   name:
                   lib.all (
-                    lane: lib.hasInfix lane.path (writerText name) || stateMarker lane.path
+                    lane: contains lane.path (writerText name) || stateMarker lane.path
                   ) jobs.${name}.captures
                 ) (lib.attrNames jobs);
               message = "Every Borg job's capture lane must point at a path its unit -- or a packaged script that unit runs -- actually writes";

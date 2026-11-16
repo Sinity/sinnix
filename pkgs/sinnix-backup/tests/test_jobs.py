@@ -116,6 +116,7 @@ def test_hourly_live_fails_on_any_other_status(fixture_config, host, backup_root
 
 
 def hourly_persist_setup(config, host):
+    config.repository("persist").path.parent.mkdir(parents=True, exist_ok=True)
     host.borg("init", "--encryption=none", config.repository("persist").url)
     # The cut lives under /persist/.btrfs; a real snapshot omits it, so the
     # fixture source starts without that directory.

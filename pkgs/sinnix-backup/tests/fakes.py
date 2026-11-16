@@ -250,5 +250,8 @@ class FakeHost:
 
     def borg(self, *args: str, **kwargs) -> subprocess.CompletedProcess[str]:
         """Run the real Borg directly (not logged), for test setup and inspection."""
-        env = {**os.environ, **self.env}
-        return subprocess.run([self.real_borg, *args], env=env, text=True, capture_output=True, check=True, **kwargs)
+        # Repositories the jobs create use the fixture passphrase (conftest).
+        env = {**os.environ, **self.env, "BORG_PASSPHRASE": "synthetic fixture passphrase"}
+        result = subprocess.run([self.real_borg, *args], env=env, text=True, capture_output=True, **kwargs)
+        assert result.returncode == 0, (args, result.stderr)
+        return result
