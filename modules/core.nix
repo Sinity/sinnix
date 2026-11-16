@@ -7,11 +7,39 @@
   inputs,
   lib,
   config,
+  pkgs,
   ...
 }:
 let
   username = config.sinnix.user.name;
   inherit (config.sinnix) paths;
+
+  # The managed TMPDIR has /tmp semantics: a temporary file belongs to the
+  # process that made it, and a boot ends every process. Before any user
+  # session starts, every top-level entry moves aside, except claude-<uid>,
+  # whose session trees sinnix-tmp-sweep retires by session (docs/scratch.md).
+  # Renaming within one filesystem is instant, so login does not wait for
+  # deletion; the set-aside directory is deleted afterwards at idle I/O.
+  userUid =
+    let
+      uid = config.users.users.${username}.uid or null;
+    in
+    if uid != null then toString uid else "1000";
+  scratchRoot = "/realm/tmp/work";
+  previousBoot = "/realm/tmp/previous-boot";
+  scratchReset = pkgs.writeShellScript "sinnix-scratch-reset" ''
+    set -euo pipefail
+    shopt -s dotglob nullglob
+    ${pkgs.coreutils}/bin/mkdir -p -m 0700 ${previousBoot}
+    for entry in ${scratchRoot}/*; do
+      name="''${entry##*/}"
+      [[ "$name" =~ ^claude-[0-9]+$ ]] && [ -d "$entry" ] && [ ! -L "$entry" ] && continue
+      target="${previousBoot}/$name"
+      # An interrupted earlier purge can leave the same name behind.
+      [ -e "$target" ] || [ -L "$target" ] && target="$(${pkgs.coreutils}/bin/mktemp -u "$target.XXXXXX")"
+      ${pkgs.coreutils}/bin/mv -T -- "$entry" "$target"
+    done
+  '';
 in
 {
   config = {
@@ -67,6 +95,50 @@ in
         unitConfig.DefaultDependencies = false;
       };
 
+      services.sinnix-scratch-reset = {
+        description = "Set aside the previous boot's managed scratch";
+        wantedBy = [ "multi-user.target" ];
+        before = [
+          "systemd-user-sessions.service"
+          "user-runtime-dir@${userUid}.service"
+          "user@${userUid}.service"
+        ];
+        after = [ "systemd-tmpfiles-setup.service" ];
+        unitConfig = {
+          RequiresMountsFor = [ scratchRoot ];
+          # Only a boot, before the owner has any session, qualifies; an
+          # activation on the running system starts this unit and skips it.
+          ConditionPathExists = "!/run/user/${userUid}";
+        };
+        restartIfChanged = false;
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStart = scratchReset;
+          # A root-run tool that removes files keeps a narrowed write scope.
+          ProtectSystem = "strict";
+          ReadWritePaths = [ "/realm/tmp" ];
+        };
+      };
+
+      services.sinnix-scratch-purge = {
+        description = "Delete the previous boot's managed scratch";
+        wantedBy = [ "sinnix-background.target" ];
+        after = [ "sinnix-scratch-reset.service" ];
+        unitConfig = {
+          RequiresMountsFor = [ "/realm/tmp" ];
+          ConditionPathExists = previousBoot;
+        };
+        restartIfChanged = false;
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStart = "${pkgs.coreutils}/bin/rm -rf --one-file-system -- ${previousBoot}";
+          IOSchedulingClass = "idle";
+          Nice = 19;
+          ProtectSystem = "strict";
+          ReadWritePaths = [ "/realm/tmp" ];
+        };
+      };
+
       tmpfiles.rules = lib.mkAfter [
         "d ${paths.outerRealm} 0755 root root -"
         "d ${paths.outerRealm}/inbox 0755 ${username} users -"
@@ -112,7 +184,8 @@ in
         "v /realm/state/cache 0755 ${username} users -"
         "d /realm/state/cursors 0755 ${username} users -"
         "d /realm/state/db-dumps 0755 ${username} users -"
-        # Scratch owners decide removal; age alone does not establish disposability.
+        # Scratch owners decide removal; age alone does not establish
+        # disposability. A boot ends every owner (sinnix-scratch-reset above).
         "v /realm/tmp - ${username} - -"
         "d /realm/tmp/work 0700 ${username} users -"
         # Worktrunk can create checkouts before AgentCTL; enforce their shared

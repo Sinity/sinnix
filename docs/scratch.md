@@ -1,6 +1,13 @@
 # Managed scratch
 
 Interactive sessions and the user manager use `/realm/tmp/work` as TMPDIR.
+It has `/tmp` semantics: it does not survive a reboot. A temporary file
+belongs to the process that made it, and a boot ends every process. At boot,
+before the owner has any session, `sinnix-scratch-reset` renames every
+top-level entry except `claude-<uid>` into `/realm/tmp/previous-boot`, and
+`sinnix-scratch-purge` deletes that directory in the background at idle I/O.
+The reset's condition (no `/run/user/<uid>` yet) makes an activation on the
+running system skip it.
 Declared AgentCTL operations with `scratch = "nvme"` create a private job
 subdirectory and remove it on completion. Producers must honor inherited
 TMPDIR and keep retained output outside it.
