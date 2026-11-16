@@ -201,8 +201,8 @@ in
         # (runtime-defaults.nix, docs/resource-control.md). The resident limit
         # holds it to that line whatever the pages compress to; 9 GiB of swap
         # space fits it at the measured 3:1, so the space and the limit run
-        # out together and oomd's swap threshold sees a full store. Disksize
-        # changes apply to /dev/zram0 only on reboot, not on a live switch.
+        # out together. Disksize changes apply to /dev/zram0 only on reboot,
+        # not on a live switch.
         zramSwap = {
           enable = true;
           algorithm = "zstd";
@@ -365,9 +365,12 @@ in
         # earlyoom covers global near-full swap with actual memory stalls.
         systemd.oomd = {
           enable = true;
-          # At 80% of the 9 GiB device the zram store is near its resident
-          # limit; oomd then kills the job or tool command using the most swap.
-          settings.OOM.SwapUsedLimit = "80%";
+          # oomd's swap rule acts when both memory and swap are more than this
+          # full. Swap holds cold pages long after the pressure that wrote
+          # them, so the memory side decides: at 90% about 3.3 GiB stays
+          # available, just above the budget's kernel reserve. At 80% the
+          # rule killed ordinary builds on a host with 6.6 GiB available.
+          settings.OOM.SwapUsedLimit = "90%";
         };
         # oomd reads its configuration only at start.
         systemd.services.systemd-oomd.restartTriggers = [

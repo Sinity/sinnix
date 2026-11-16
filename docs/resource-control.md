@@ -94,7 +94,8 @@ systemd-oomd ends sustained thrash before the kernel has to: it kills the job
 with the most reclaim when the job plane's memory pressure stays above 40% for
 15 s (pytest and bulk pools: 50% for 30 s), the tool command with the most
 reclaim when `agent-tool.slice` stays above 50% for 20 s, and the job or tool
-command using the most swap when swap is 80% used. pueued, whose children
+command using the most swap when memory and swap are both more than 90%
+used (about 3.3 GiB still available). pueued, whose children
 are every running job's wrapper, is omitted from oomd's choices
 (`ManagedOOMPreference=omit`). No oomd policy covers a slice that holds an
 agent CLI, the desktop or a service.
@@ -109,8 +110,7 @@ high.
 
 zram is the only swap. Its store is part of the budget: the resident limit
 holds it to 3 GiB of RAM whatever the pages compress to, and the 9 GiB device
-fills at the measured 3:1 ratio together with that limit, so oomd's swap
-threshold sees a full store. A page that would push the store past its limit
+fills at the measured 3:1 ratio together with that limit. A page that would push the store past its limit
 is not swapped and stays in its cgroup. Agent work may swap 4 GiB (about 1.3
 GiB of the store), sinexd 2 GiB, the Polylogue daemon 1 GiB.
 
