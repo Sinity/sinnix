@@ -140,7 +140,6 @@
       # /realm, so sources stay off until that catch-up ends.
       readSources = false;
       retainedArchives = [
-        "/realm/state/polylogue-live/data-20261109/polylogue"
         "/realm/state/polylogue-live/data/polylogue"
       ];
       # The Python archive lives on the realm NVMe volume, not in the
