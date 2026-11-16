@@ -320,7 +320,9 @@ def test_nested_prefix_ledger_completes_with_a_bounded_buffer(tmp_path, monkeypa
         "".join(json.dumps(j) + "\n" for j in judgments)
     )
     monkeypatch.setattr(
-        fs, "DUCKDB_SETTINGS", fs.DUCKDB_SETTINGS.replace("512MiB", "256MiB")
+        fs,
+        "DUCKDB_SETTINGS",
+        fs.DUCKDB_SETTINGS.replace(fs.DUCKDB_MEMORY_LIMIT, "256MiB"),
     )
     assert fs.ledger_run(tmp_path) == 0
     assert sql(db, "SELECT count(*) AS n FROM inherited_judgments") == [{"n": 360000}]
@@ -631,11 +633,73 @@ def test_all_internal_duckdb_sessions_have_bounded_buffers_and_workers(tmp_path)
     assert writer.returncode == 0, writer.stderr
     reader = fs.duckdb_query(db, query)
     assert reader.returncode == 0, reader.stderr
-    assert reader.stdout.strip() == "512.0 MiB|2"
+    assert reader.stdout.strip() == "2.0 GiB|2"
     # The write/materialization route must apply the same policy as readers.
     stored = fs.duckdb_query(db, "SELECT * FROM proof")
     assert stored.returncode == 0, stored.stderr
     assert stored.stdout.strip() == reader.stdout.strip()
+
+
+def test_writers_spill_to_a_scratch_directory_removed_afterwards(tmp_path, monkeypatch):
+    """Fails if a writer spills beside its database or leaves its scratch."""
+    fs = load()
+    scratch_root = tmp_path / "scratch"
+    scratch_root.mkdir()
+    monkeypatch.setattr(fs, "DUCKDB_SCRATCH_ROOT", scratch_root)
+    db = tmp_path / "generation" / "spill.duckdb"
+    writer = fs.run_duckdb_file(
+        db,
+        "CREATE TABLE proof AS SELECT current_setting('temp_directory') AS spill",
+        "spill",
+    )
+    assert writer.returncode == 0, writer.stderr
+    spill = Path(fs.duckdb_query(db, "SELECT spill FROM proof").stdout.strip())
+    assert spill.parent == scratch_root
+    assert spill.name.startswith("sinnix-fs-duckdb-")
+    assert list(scratch_root.iterdir()) == []
+    # Without the scratch volume a writer still gets a private spill directory.
+    monkeypatch.setattr(fs, "DUCKDB_SCRATCH_ROOT", tmp_path / "absent")
+    fallback = fs.run_duckdb_file(
+        db,
+        "CREATE OR REPLACE TABLE proof AS "
+        "SELECT current_setting('temp_directory') AS spill",
+        "spill",
+    )
+    assert fallback.returncode == 0, fallback.stderr
+    spill = Path(fs.duckdb_query(db, "SELECT spill FROM proof").stdout.strip())
+    assert spill.parent == db.parent
+    assert sorted(path.name for path in db.parent.iterdir()) == ["spill.duckdb"]
+
+
+def test_a_memory_failure_names_the_limit_and_where_it_is_set(tmp_path, monkeypatch):
+    """Fails if DuckDB running out of memory reads as an unexplained failure."""
+    fs = load()
+    monkeypatch.setattr(fs, "DUCKDB_SCRATCH_ROOT", tmp_path / "absent")
+    monkeypatch.setattr(fs, "DUCKDB_MEMORY_LIMIT", "16MiB")
+    monkeypatch.setattr(
+        fs, "DUCKDB_SETTINGS", "SET memory_limit='16MiB'; SET threads=1;"
+    )
+    db = tmp_path / "small.duckdb"
+    # One list holding every row cannot be spilled.
+    exhausted = fs.run_duckdb_file(
+        db,
+        "CREATE TABLE big AS SELECT list(i::VARCHAR || repeat('x', 64)) AS rows "
+        "FROM range(2000000) r(i)",
+        "exhaust",
+    )
+    assert exhausted.returncode != 0
+    assert exhausted.stderr.startswith(
+        "DuckDB exceeded its memory limit of 16MiB (DUCKDB_MEMORY_LIMIT in "
+    )
+    assert "Out of Memory Error" in exhausted.stderr
+
+    killed = fs.name_memory_limit(subprocess.CompletedProcess(["duckdb"], -9, "", ""))
+    assert killed.stderr.startswith("DuckDB was killed (SIGKILL)")
+    assert "16MiB" in killed.stderr
+    unrelated = fs.name_memory_limit(
+        subprocess.CompletedProcess(["duckdb"], 1, "", "Parser Error: syntax")
+    )
+    assert unrelated.stderr == "Parser Error: syntax"
 
 
 @pytest.mark.parametrize("stage", ["classification", "stat"])

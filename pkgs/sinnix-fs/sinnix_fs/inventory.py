@@ -66,11 +66,36 @@ def safe(value):
 
 
 # DuckDB otherwise sizes buffers and workers from the whole host, even inside
-# the scheduled service's memory boundary. Leave room for Python, native
-# allocations and file metadata; spill beside the database on /realm.
-DUCKDB_SETTINGS = (
-    "SET memory_limit='512MiB'; SET threads=2; SET preserve_insertion_order=false;"
-)
+# the scheduled service's memory boundary. That boundary is 3G with no swap
+# (MemoryMax in modules/services/fs-index.nix); the buffer manager gets two
+# thirds of it, which leaves the rest for DuckDB's allocations outside the
+# buffer manager, the scanning Python process and file metadata. 512MiB was
+# too little to materialize a full scan: not all of its working set spills.
+DUCKDB_MEMORY_LIMIT = "2GiB"
+DUCKDB_SETTINGS = f"SET memory_limit='{DUCKDB_MEMORY_LIMIT}'; SET threads=2; SET preserve_insertion_order=false;"
+# Writers spill here, on the scratch volume, not beside a generation's
+# database. Where the directory is absent they spill beside the database.
+DUCKDB_SCRATCH_ROOT = Path("/realm/tmp/work")
+
+
+def name_memory_limit(
+    result: subprocess.CompletedProcess,
+) -> subprocess.CompletedProcess:
+    """Make a memory failure say which limit was hit and where it is set."""
+    if result.returncode == -9:
+        reason = (
+            "DuckDB was killed (SIGKILL), most likely by the memory limit of the "
+            f"unit running it; its own limit is {DUCKDB_MEMORY_LIMIT}"
+        )
+    elif result.returncode and "Out of Memory Error" in (result.stderr or ""):
+        reason = f"DuckDB exceeded its memory limit of {DUCKDB_MEMORY_LIMIT}"
+    else:
+        return result
+    result.stderr = (
+        f"{reason} (DUCKDB_MEMORY_LIMIT in sinnix_fs/inventory.py, sized to the "
+        f"MemoryMax of sinnix-fs-index.service).\n{result.stderr or ''}"
+    )
+    return result
 
 
 def run_duckdb_file(
@@ -87,11 +112,19 @@ def run_duckdb_file(
         delete=False,
     ) as handle:
         script = Path(handle.name)
-        handle.write(DUCKDB_SETTINGS + "\n" + sql)
+        scratch_root = (
+            DUCKDB_SCRATCH_ROOT if DUCKDB_SCRATCH_ROOT.is_dir() else db.parent
+        )
+        scratch = Path(tempfile.mkdtemp(prefix="sinnix-fs-duckdb-", dir=scratch_root))
+        handle.write(
+            f"{DUCKDB_SETTINGS} SET temp_directory={sql_string(scratch)};\n{sql}"
+        )
     try:
         command = ["duckdb", "-bail", "-no-init", str(db), "-f", str(script)]
         if producer is None:
-            return subprocess.run(command, text=True, capture_output=True, check=False)
+            return name_memory_limit(
+                subprocess.run(command, text=True, capture_output=True, check=False)
+            )
         # SQL comes from -f; inherited pipe descriptors carry the scan rows.
         # Keep diagnostics in memory, never a second copy of the scan on disk.
         with subprocess.Popen(
@@ -114,28 +147,31 @@ def run_duckdb_file(
                 process.kill()
                 process.communicate()
                 raise
-            return subprocess.CompletedProcess(
-                command, process.returncode, stdout, stderr
+            return name_memory_limit(
+                subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
             )
     finally:
         script.unlink(missing_ok=True)
+        shutil.rmtree(scratch, ignore_errors=True)
 
 
 def duckdb_query(db: Path, sql: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [
-            "duckdb",
-            "-readonly",
-            "-no-init",
-            str(db),
-            "-noheader",
-            "-list",
-            "-c",
-            DUCKDB_SETTINGS + "\n" + sql,
-        ],
-        text=True,
-        capture_output=True,
-        check=False,
+    return name_memory_limit(
+        subprocess.run(
+            [
+                "duckdb",
+                "-readonly",
+                "-no-init",
+                str(db),
+                "-noheader",
+                "-list",
+                "-c",
+                DUCKDB_SETTINGS + "\n" + sql,
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
     )
 
 

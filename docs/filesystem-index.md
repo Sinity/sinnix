@@ -58,9 +58,11 @@ This is a local regression check; the scheduled service's systemd accounting
 on a full scan remains the operational acceptance check (target <=1.5 times
 the resulting generation size).
 
-DuckDB sessions use a 512 MiB buffer and two workers and spill to disk beside
-the database. Read-only queries run in DuckDB's safe mode and cannot write
-files.
+DuckDB sessions use a 2 GiB buffer and two workers, sized to the scheduled
+unit's 3G memory bound. Writers spill to a private directory under
+`/realm/tmp/work` that is removed when the statement ends. A failure for lack
+of memory names that limit and where it is set. Read-only queries run in
+DuckDB's safe mode and cannot write files.
 
 ## Content fingerprints
 
