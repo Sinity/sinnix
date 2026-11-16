@@ -97,7 +97,7 @@ class FakePueue:
             dependencies=tuple(after),
             command=" ".join(command),
             priority=priority or 0,
-            enqueued_at="2026-09-03T08:00:00+00:00",
+            enqueued_at=None if status == "Stashed" else "2026-09-03T08:00:00+00:00",
             started_at="2026-09-03T08:00:01+00:00" if status == "Running" else None,
         )
         self.added.append(

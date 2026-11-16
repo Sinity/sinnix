@@ -150,6 +150,7 @@ def test_only_a_job_marked_discretionary_is_held_until_the_reset(
         held["task_id"]
     ]
     assert row["deferred"]["until"] == held["deferred"]["until"]
+    assert row["enqueued_at"]
 
 
 @pytest.mark.parametrize(

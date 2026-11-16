@@ -539,6 +539,9 @@ def _snapshot_row(task: Task, config: Config | None = None) -> dict[str, Any]:
                     row["revision"] = document["revision"]
             if task.status == "Stashed" and isinstance(document.get("deferred"), dict):
                 row["deferred"] = document["deferred"]
+            if not row.get("enqueued_at") and document.get("enqueued_at"):
+                # pueue reports no enqueue time for a held task.
+                row["enqueued_at"] = document["enqueued_at"]
             if isinstance(document.get("working_directory"), str):
                 row["working_directory"] = document["working_directory"][
                     :MAX_SNAPSHOT_TEXT
