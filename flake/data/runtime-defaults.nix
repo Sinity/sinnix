@@ -77,9 +77,12 @@ let
     cliMax = 7168;
     toolHigh = 4608;
     toolMax = 5120;
-    # The job plane: what the sessions leave of the ceiling.
-    planeHigh = 6144;
-    planeMax = 7168;
+    # The job plane: room for the largest single job (a Sinnix check peaks
+    # at 6.1-6.4G, a Sinex focused build at 6.9G) under a narrow throttling
+    # band; the sessions' protection, not this ceiling, keeps them resident
+    # when the plane and the sessions together reach the agent ceiling.
+    planeHigh = 7680;
+    planeMax = 8192;
   };
   mib = value: "${toString value}M";
 
@@ -474,8 +477,9 @@ rec {
       # The agentctl job plane: pueued (agent-ctl-work.slice) and every pool
       # slice below it, in what the sessions leave of the agent budget.
       # Peak memory per job, page cache included: Polylogue focused p50 3.6G
-      # p90 5.5G, Sinex focused p90 6.9G, compile and Clippy 2.0-3.4G. The
-      # plane holds one test build beside one check; more running jobs are
+      # p90 5.5G, Sinex focused p90 6.9G, Sinnix check 6.1-6.4G, compile and
+      # Clippy 2.0-3.4G. The plane holds one large job, or one test build
+      # beside one type check; more running jobs are
       # throttled at MemoryHigh and then ended by the kernel or oomd, and the
       # owner sees "out of memory" (docs/agentctl.md).
       agent-ctl = {
