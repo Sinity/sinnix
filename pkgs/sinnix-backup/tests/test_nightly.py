@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import os
 import sys
 import time
 
+import pytest
 from fakes import FakeHost
 from sinnix_backup import cli, markers, nightly
 
@@ -17,6 +20,7 @@ COORDINATOR_STEPS = [
     "borgbackup-job-realm.service",
     "borgbackup-job-genome.service",
     "borgbackup-job-persist.service",
+    "sinex-backup.service",
     "borgbackup-root-snapshots.service",
     "borgbackup-maintenance.service",
     "borgbackup-coverage-audit-realm.service",
@@ -146,3 +150,52 @@ def test_daily_marker_skips_only_with_current_policy(
     code, captured, calls = fixture.run()
     assert code == 0, captured.out + captured.err
     assert ["start", unit] in calls
+
+
+@pytest.mark.parametrize(
+    "condition",
+    [
+        "fresh",
+        "missing",
+        "stale",
+        "future",
+        "partial",
+        "other-hold",
+        "bad-id",
+        "invalid",
+    ],
+)
+def test_sinex_boot_retry_uses_completed_pair(
+    backup_root, fixture_config, monkeypatch, capfd, condition
+):
+    fixture = Fixture(backup_root, fixture_config, monkeypatch, capfd)
+    receipt = fixture.config.nightly.sinex_completion
+    assert receipt is not None
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    hold = "00000000-0000-0000-0000-000000000001"
+    pair = {
+        "hold": hold,
+        "producers_complete": True,
+        "main": {"name": f"sinex-core-{hold}", "id": "1" * 64},
+        "keys": {"name": f"sinex-core-{hold}", "id": "2" * 64},
+    }
+    if condition == "partial":
+        pair["producers_complete"] = False
+    elif condition == "other-hold":
+        pair["keys"]["name"] = "sinex-core-00000000-0000-0000-0000-000000000002"
+    elif condition == "bad-id":
+        pair["main"]["id"] = ""
+    receipt.write_text("{" if condition == "invalid" else json.dumps(pair))
+    now = int(time.time())
+    completed = now - markers.DAILY_MARKER_SECONDS if condition == "stale" else now - 60
+    if condition == "future":
+        completed = now + 1
+    os.utime(receipt, (completed, completed))
+    if condition == "missing":
+        receipt.unlink()
+    monkeypatch.setattr(nightly, "_now", lambda: now)
+    code, captured, calls = fixture.run()
+    assert code == 0, captured.out + captured.err
+    assert (["start", "sinex-backup.service"] not in calls) == (condition == "fresh")
+    # No success marker replaces the native paired-archive receipt.
+    assert not (fixture.config.state_directory / "sinex-backup.last-success").exists()

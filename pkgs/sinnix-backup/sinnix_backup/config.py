@@ -61,6 +61,8 @@ class Nightly:
     acquisition_policy: str
     # unit -> (marker path, policy hash); a fresh matching marker skips the unit.
     daily_markers: dict[str, tuple[Path, str]] = field(default_factory=dict)
+    # Native successful paired-archive receipt; no separate coordinator marker.
+    sinex_completion: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -129,6 +131,9 @@ def parse_config(raw: dict[str, Any]) -> BackupConfig:
             drain_sources=tuple(nightly["drain_sources"]),
             verify_unit=nightly["verify_unit"],
             acquisition_policy=nightly["acquisition_policy"],
+            sinex_completion=Path(nightly["sinex_completion"])
+            if nightly.get("sinex_completion")
+            else None,
             daily_markers={
                 unit: (Path(marker), policy)
                 for unit, (marker, policy) in nightly["daily_markers"].items()

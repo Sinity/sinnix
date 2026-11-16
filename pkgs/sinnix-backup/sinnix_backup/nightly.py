@@ -6,9 +6,14 @@ lock itself, and waiting for a child while holding its lock would deadlock.
 
 from __future__ import annotations
 
+import json
+import os
+import re
 import subprocess
 import sys
 import time
+import uuid
+from pathlib import Path
 
 from . import markers, snapshots
 from .config import BackupConfig
@@ -45,6 +50,29 @@ def _drain_has_work(config: BackupConfig) -> bool:
             _print("Queue unavailable; requesting native drain validation", error=True)
             return True
     return False
+
+
+def _sinex_backup_fresh(path: Path | None, now: int) -> bool:
+    """Reuse Sinex's completed pair on boot catch-up, for the daily window."""
+    if path is None:
+        return False
+    try:
+        with path.open() as receipt:
+            completed = os.fstat(receipt.fileno()).st_mtime
+            pair = json.load(receipt)
+        hold = str(uuid.UUID(pair["hold"]))
+        if pair["hold"] != hold or pair["producers_complete"] is not True:
+            return False
+        for part in ("main", "keys"):
+            archive = pair[part]
+            if (
+                archive["name"] != f"sinex-core-{hold}"
+                or re.fullmatch(r"[0-9a-f]{64}", archive["id"]) is None
+            ):
+                return False
+        return 0 <= now - completed < markers.DAILY_MARKER_SECONDS
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return False
 
 
 def run_nightly(config: BackupConfig) -> int:
@@ -103,6 +131,13 @@ def run_nightly(config: BackupConfig) -> int:
         subprocess.run(["systemctl", "stop", nightly.verify_unit])
 
     for unit in (*nightly.archive_units, *nightly.final_units):
+        if unit == "sinex-backup.service" and _sinex_backup_fresh(
+            nightly.sinex_completion, _now()
+        ):
+            _print(
+                f"backup_phase=coordinator unit={unit} status=skipped reason=already-fresh"
+            )
+            continue
         daily = nightly.daily_markers.get(unit)
         if daily is not None and markers.daily_marker_fresh(daily[0], daily[1], _now()):
             _print(

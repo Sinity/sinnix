@@ -313,6 +313,7 @@ let
       "borgbackup-job-realm"
       "borgbackup-job-genome"
       "borgbackup-job-persist"
+      "sinex-backup"
       "borgbackup-root-snapshots"
     ]
   );
@@ -424,6 +425,8 @@ let
       ++ lib.optional (backupCfg.genomeRoot != null) "genome";
       verify_unit = "borgbackup-verify.service";
       acquisition_policy = acquisitionPolicy;
+      sinex_completion =
+        if sinexEnabled then "${config.services.sinex.backup.artifactDir}/latest-complete.json" else null;
       daily_markers = {
         "borgbackup-job-polylogue-state.service" = dailyMarker "polylogue-state" "polylogue";
         "borgbackup-job-sinex-blobs.service" = dailyMarker "sinex-blobs" "sinex";
