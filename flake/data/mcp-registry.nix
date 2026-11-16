@@ -44,7 +44,6 @@ let
       clients = [
         "claude"
         "codex"
-        "antigravity"
         "hermes"
       ];
       codex.bearer_token_env_var = "CONTEXT7_API_KEY";
@@ -62,7 +61,6 @@ let
       clients = [
         "claude"
         "codex"
-        "antigravity"
         "hermes"
       ];
     };
@@ -119,7 +117,6 @@ let
       clients = [
         "codex"
         "claude"
-        "antigravity"
         "hermes"
       ];
     };
@@ -135,13 +132,11 @@ let
         full = { };
         evidence = { };
         browser = { };
-        antigravity = { };
         default = { };
       };
       clients = [
         "codex"
         "claude"
-        "antigravity"
         "hermes"
       ];
     };
@@ -154,7 +149,6 @@ let
       clients = [
         "codex"
         "claude"
-        "antigravity"
         "hermes"
       ];
     };
@@ -193,13 +187,6 @@ let
       "recall"
       "deep-evidence"
       "browser-mcp"
-    ];
-    # Antigravity blocks print-mode startup while any MCP remains pending.
-    # Keep the ordinary coding surface, but leave slow deep-evidence servers
-    # to clients with bounded MCP startup handling.
-    antigravity = [
-      "remote-core"
-      "recall"
     ];
   };
 
@@ -289,30 +276,6 @@ let
         }
     );
 
-  # Antigravity CLI: stdio servers by command, remote endpoints as
-  # `serverUrl`, in ~/.gemini/config/mcp_config.json.
-  renderAntigravityServer =
-    _name: server:
-    pruneAttrs (
-      if server.transport == "http" then
-        let
-          antigravity = server.antigravity or { };
-        in
-        {
-          serverUrl = server.url;
-          headers = antigravity.headers or server.headers or { };
-        }
-      else
-        let
-          antigravity = server.antigravity or { };
-        in
-        {
-          inherit (server) command;
-          args = antigravity.args or server.args or [ ];
-          env = antigravity.env or server.env or { };
-        }
-    );
-
   # Hermes mcp_servers entry.  Its YAML format accepts the native stdio and
   # streamable-HTTP shapes, including config-level ${VAR} substitution.
   renderHermesServer =
@@ -347,7 +310,6 @@ in
     selectClientServersForProfile
     renderClaudeServer
     renderCodexServer
-    renderAntigravityServer
     renderHermesServer
     ;
 }

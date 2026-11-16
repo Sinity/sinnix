@@ -419,22 +419,6 @@ let
     executable = true;
     force = true;
   };
-  mkAntigravityWrapper = {
-    text = ''
-      #!/usr/bin/env bash
-      set -euo pipefail
-
-      ${agentScopePrelude}
-
-      if [ ! -x "$HOME/.local/bin/agy" ]; then
-        echo "agy-sinnix: install the official Antigravity CLI first: curl -fsSL https://antigravity.google/cli/install.sh | bash" >&2
-        exit 1
-      fi
-      exec "$HOME/.local/bin/agy" "$@"
-    '';
-    executable = true;
-    force = true;
-  };
   # Env-only prelude for Hermes wrappers. PATH/HERMES_HOME/HERMES_INSTALL_DIR
   # must be exported here rather than in a subprocess: the final `exec` of the
   # hermes binary inherits them, and scripts/sinnix-ensure-hermes (which does
@@ -508,7 +492,6 @@ in
     mkCodexWrapper
     mkPiWrapper
     mkGrokWrapper
-    mkAntigravityWrapper
     hermesBootstrap
     ensureHermes
     mkHermesWrapper

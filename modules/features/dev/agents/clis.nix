@@ -1,4 +1,4 @@
-# AI agent CLI wrappers (claude/codex/pi/grok/agy/hermes), shared skills, and
+# AI agent CLI wrappers (claude/codex/pi/grok/hermes), shared skills, and
 # per-agent runtime state. Wrapper-builder machinery lives in backends.nix.
 {
   mkFeatureModule,
@@ -258,7 +258,6 @@ mkFeatureModule {
         mkCodexWrapper
         mkPiWrapper
         mkGrokWrapper
-        mkAntigravityWrapper
         agentScopePrelude
         hermesBootstrap
         ensureHermes
@@ -464,7 +463,6 @@ mkFeatureModule {
                 # binaries untouched and route use through distinct Nix-managed
                 # wrappers so launches share agent-cli.slice containment.
                 ".local/bin/grok-sinnix" = mkGrokWrapper;
-                ".local/bin/agy-sinnix" = mkAntigravityWrapper;
 
                 ".config/hermes/skills" = {
                   source = mkDotsFile "/_ai/skills";

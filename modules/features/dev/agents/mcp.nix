@@ -1,10 +1,9 @@
 # Model Context Protocol (MCP) servers and AI-integrated tool settings: server
-# wrappers, default Claude/Codex integration, alternate Codex backends, and
-# the Antigravity CLI MCP configuration.
+# wrappers, default Claude/Codex integration, and alternate Codex backends.
 #
 # Domain pieces live in sibling plain-nix helpers, imported below:
 # mcp-tools.nix (generic MCP wrappers), client-profiles.nix
-# (registry-driven Codex/Antigravity config), browser.nix, hooks.nix.
+# (registry-driven Codex config), browser.nix, hooks.nix.
 {
   mkFeatureModule,
   lib,
@@ -40,11 +39,6 @@ mkFeatureModule {
       internal = true;
       description = "Path to the generated Codex hooks derivation (for tests)";
     };
-    antigravityMcpConfigSource = lib.mkOption {
-      type = lib.types.path;
-      internal = true;
-      description = "Path to the generated Antigravity MCP configuration (for tests)";
-    };
   };
   meta.dotfiles = {
     configFile = {
@@ -65,7 +59,6 @@ mkFeatureModule {
     }:
     let
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-      jsonFormat = pkgs.formats.json { };
       tomlFormat = pkgs.formats.toml { };
       # The Home Manager user function below also calls its argument `config`.
       # Keep the NixOS-level live dots root in this lexical binding so nested
@@ -98,7 +91,6 @@ mkFeatureModule {
           mcpRegistry
           agentProfiles
           tomlFormat
-          jsonFormat
           ;
         inherit dotsRoot;
       };
@@ -275,7 +267,6 @@ mkFeatureModule {
       inherit (clientProfiles)
         codexSystemConfigFile
         codexEndpointFiles
-        antigravityMcpConfigFile
         ;
       codexConfigFiles = codexEndpointFiles;
       codexDeepseekConfigFile = codexEndpointFiles.deepseek;
@@ -290,7 +281,6 @@ mkFeatureModule {
         sinnix.features.dev.mcp-servers.codexDeepseekConfigSource = codexDeepseekConfigFile;
         sinnix.features.dev.mcp-servers.codexLocalConfigSource = codexLocalConfigFile;
         sinnix.features.dev.mcp-servers.codexHooksSource = codexHooksFile;
-        sinnix.features.dev.mcp-servers.antigravityMcpConfigSource = antigravityMcpConfigFile;
 
         home-manager.users.${user} =
           {
@@ -521,8 +511,6 @@ mkFeatureModule {
                   direct_link "$HOME/.config/claude/skills" "${dotsRoot}/_ai/skills"
                   direct_link "$HOME/.agents/skills" "${dotsRoot}/_ai/skills"
                   direct_link "$HOME/.codex/agents/explorer.toml" "${dotsRoot}/codex/agents/explorer.toml"
-                  direct_link "$HOME/.gemini/config/skills" "${dotsRoot}/_ai/skills"
-                  direct_link "$HOME/.gemini/config/AGENTS.md" "${dotsRoot}/_ai/AGENTS.md"
                 '';
               };
             };
@@ -544,15 +532,6 @@ mkFeatureModule {
                 source = codexHooksFile;
                 force = true;
               };
-              ".gemini/config/mcp_config.json" = {
-                source = antigravityMcpConfigFile;
-                force = true;
-              };
-              ".gemini/config/skills" = {
-                source = mkDotsFile "/_ai/skills";
-                force = true;
-              };
-              ".gemini/config/AGENTS.md".source = mkDotsFile "/_ai/AGENTS.md";
               ".local/bin/mcp-github" = {
                 source = "${scriptPkgs.mcp-github}/bin/mcp-github";
                 force = true;

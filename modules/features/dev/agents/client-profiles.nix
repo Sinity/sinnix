@@ -1,12 +1,11 @@
-# Registry-driven MCP config generation for the default Codex configuration,
-# its alternate backends, and Antigravity. Imported by mcp.nix.
+# Registry-driven MCP config generation for the default Codex configuration
+# and its alternate backends. Imported by mcp.nix.
 {
   lib,
   pkgs,
   inputs,
   mcpRegistry,
   tomlFormat,
-  jsonFormat,
   dotsRoot,
   agentProfiles,
 }:
@@ -14,7 +13,6 @@ let
   inherit (mcpRegistry)
     selectClientServersForProfile
     renderCodexServer
-    renderAntigravityServer
     ;
   codexSystemConfigFile = tomlFormat.generate "codex-system-config.toml" (
     builtins.fromTOML (builtins.readFile (inputs.self + "/dots/codex/config.toml"))
@@ -42,16 +40,10 @@ let
   codexEndpointFiles = lib.genAttrs codexEndpointProfileNames (
     name: mkCodexBackendProfileFile name mcpRegistry.codexEndpoints.${name}
   );
-  antigravityMcpConfigFile = jsonFormat.generate "antigravity-mcp-config.json" {
-    mcpServers = lib.mapAttrs renderAntigravityServer (
-      selectClientServersForProfile "antigravity" "antigravity"
-    );
-  };
 in
 {
   inherit
     codexSystemConfigFile
     codexEndpointFiles
-    antigravityMcpConfigFile
     ;
 }

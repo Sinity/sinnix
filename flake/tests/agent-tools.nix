@@ -122,9 +122,6 @@ in
       expectedClaudeProfileServersJson = expectedProfileServers "claude" [
         "default"
       ];
-      expectedAntigravityProfileServersJson = expectedProfileServers "antigravity" [
-        "antigravity"
-      ];
       expectedCodexProfileServersJson = expectedProfileServers "codex" [
         "default"
       ];
@@ -268,11 +265,7 @@ in
           pkgs.zsh
         ];
         homeFiles = laneWrapperFiles ++ [
-          ".gemini/config/mcp_config.json"
-          ".gemini/config/skills"
-          ".gemini/config/AGENTS.md"
           ".local/bin/grok-sinnix"
-          ".local/bin/agy-sinnix"
           ".local/bin/hermes"
           ".local/bin/mcp-firecrawl"
           ".local/bin/mcp-chrome-devtools"
@@ -342,8 +335,6 @@ in
       agentToolsRuntimeConfig = agentToolsRuntimeEvaluated.config;
       agentToolsCodexConfigSource =
         agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexConfigSource;
-      agentToolsAntigravityMcpConfigSource =
-        agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.antigravityMcpConfigSource;
       agentToolsHermesConfigSource =
         agentToolsRuntimeConfig.sinnix.features.dev.agentTools.hermesConfigSource;
       agentToolsHermesProfileConfigSources =
@@ -699,7 +690,6 @@ in
             trusted_hash = "sha256:test-private-trust"
             EOF_CODEX_LOCAL_BACKUP
             printf '[hooks.state]\nprivate = "keep"\n' > "$HOME/.codex/lean.config.toml"
-            test "$(readlink -f "$HOME/.gemini/config/mcp_config.json")" = ${agentToolsAntigravityMcpConfigSource}
             mkdir -p "$HOME/.hermes"
             cp ${agentToolsHermesConfigSource} "$HOME/.hermes/config.yaml"
             chmod 600 "$HOME/.hermes/config.yaml"
@@ -835,9 +825,6 @@ in
               source ${agentToolsCodexMigrationActivation}
             )
             test ! -e "$migration_dry_home/.codex"
-            test -f "$HOME/.gemini/config/mcp_config.json"
-            test -L "$HOME/.gemini/config/skills"
-            test -L "$HOME/.gemini/config/AGENTS.md"
             test -L "$HOME/.config/claude/mcp.json"
             test -L "$HOME/.config/hermes/skills"
             python3 - "$HOME/.hermes/config.yaml" <<'PYCODE'
@@ -876,7 +863,6 @@ in
               ${lib.concatMapStringsSep " \\\n              " (f: ''"$HOME/${f}"'') laneWrapperFiles} \
               "$HOME/.local/bin/pi" \
               "$HOME/.local/bin/grok-sinnix" \
-              "$HOME/.local/bin/agy-sinnix" \
               "$HOME/.local/bin/hermes"; do
               test -x "$wrapper"
               bash -n "$wrapper"
@@ -953,22 +939,6 @@ in
             assert local['hooks']['state']['test-hook']['trusted_hash'] == 'sha256:test-private-trust'
             assert 'unmanaged' not in local['mcp_servers']
             PYCODE
-
-            # Same registry-derived contract as the claude configs above:
-            # the rendered Antigravity server set must equal the registry selection.
-            for pair in \
-              ".gemini/config/mcp_config.json antigravity"; do
-              file="''${pair%% *}"; profile="''${pair##* }"
-              rendered="$(jq -r '.mcpServers | keys | sort | join(",")' "$HOME/$file")"
-              expected="$(jq -r --arg p "$profile" '.[$p] | sort | join(",")' <<'EOF_EXPECTED_ANTIGRAVITY'
-            ${expectedAntigravityProfileServersJson}
-            EOF_EXPECTED_ANTIGRAVITY
-            )"
-              if [ "$rendered" != "$expected" ]; then
-                echo "antigravity $file servers ($rendered) != registry selection ($expected)" >&2
-                exit 1
-              fi
-            done
 
             jq -e '
               [.hooks.Stop[].hooks[].command]
