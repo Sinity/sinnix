@@ -1,10 +1,10 @@
 # Model Context Protocol (MCP) servers and AI-integrated tool settings: server
 # wrappers, default Claude/Codex integration, alternate Codex backends, and
-# Gemini dotfile integration.
+# the Antigravity CLI MCP configuration.
 #
 # Domain pieces live in sibling plain-nix helpers, imported below:
 # mcp-tools.nix (generic MCP wrappers), client-profiles.nix
-# (registry-driven Codex/Gemini config), browser.nix, hooks.nix.
+# (registry-driven Codex/Antigravity config), browser.nix, hooks.nix.
 {
   mkFeatureModule,
   lib,
@@ -275,7 +275,6 @@ mkFeatureModule {
       inherit (clientProfiles)
         codexSystemConfigFile
         codexEndpointFiles
-        geminiSettingsFile
         antigravityMcpConfigFile
         ;
       codexConfigFiles = codexEndpointFiles;
@@ -522,7 +521,6 @@ mkFeatureModule {
                   direct_link "$HOME/.config/claude/skills" "${dotsRoot}/_ai/skills"
                   direct_link "$HOME/.agents/skills" "${dotsRoot}/_ai/skills"
                   direct_link "$HOME/.codex/agents/explorer.toml" "${dotsRoot}/codex/agents/explorer.toml"
-                  direct_link "$HOME/.gemini/skills" "${dotsRoot}/_ai/skills"
                   direct_link "$HOME/.gemini/config/skills" "${dotsRoot}/_ai/skills"
                   direct_link "$HOME/.gemini/config/AGENTS.md" "${dotsRoot}/_ai/AGENTS.md"
                 '';
@@ -544,14 +542,6 @@ mkFeatureModule {
               };
               ".codex/hooks.json" = {
                 source = codexHooksFile;
-                force = true;
-              };
-              ".gemini/settings.json" = {
-                source = geminiSettingsFile;
-                force = true;
-              };
-              ".gemini/skills" = {
-                source = mkDotsFile "/_ai/skills";
                 force = true;
               };
               ".gemini/config/mcp_config.json" = {

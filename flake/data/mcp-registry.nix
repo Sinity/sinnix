@@ -32,7 +32,6 @@ let
       clients = [
         "claude"
         "codex"
-        "gemini"
         "hermes"
       ];
       codex.startup_timeout_sec = 30;
@@ -45,7 +44,6 @@ let
       clients = [
         "claude"
         "codex"
-        "gemini"
         "antigravity"
         "hermes"
       ];
@@ -64,7 +62,6 @@ let
       clients = [
         "claude"
         "codex"
-        "gemini"
         "antigravity"
         "hermes"
       ];
@@ -122,7 +119,6 @@ let
       clients = [
         "codex"
         "claude"
-        "gemini"
         "antigravity"
         "hermes"
       ];
@@ -145,7 +141,6 @@ let
       clients = [
         "codex"
         "claude"
-        "gemini"
         "antigravity"
         "hermes"
       ];
@@ -159,7 +154,6 @@ let
       clients = [
         "codex"
         "claude"
-        "gemini"
         "antigravity"
         "hermes"
       ];
@@ -173,7 +167,6 @@ let
       clients = [
         "claude"
         "codex"
-        "gemini"
       ];
     };
 
@@ -296,31 +289,8 @@ let
         }
     );
 
-  # Gemini settings.json mcpServers entry.
-  renderGeminiServer =
-    _name: server:
-    pruneAttrs (
-      if server.transport == "http" then
-        let
-          gemini = server.gemini or { };
-        in
-        {
-          httpUrl = server.url;
-          headers = gemini.headers or server.headers or { };
-        }
-      else
-        let
-          gemini = server.gemini or { };
-        in
-        {
-          inherit (server) command;
-          args = gemini.args or server.args or [ ];
-          env = gemini.env or server.env or { };
-        }
-    );
-
-  # Antigravity CLI uses the same stdio shape as Gemini, but names remote
-  # endpoints `serverUrl` in ~/.gemini/config/mcp_config.json.
+  # Antigravity CLI: stdio servers by command, remote endpoints as
+  # `serverUrl`, in ~/.gemini/config/mcp_config.json.
   renderAntigravityServer =
     _name: server:
     pruneAttrs (
@@ -377,7 +347,6 @@ in
     selectClientServersForProfile
     renderClaudeServer
     renderCodexServer
-    renderGeminiServer
     renderAntigravityServer
     renderHermesServer
     ;

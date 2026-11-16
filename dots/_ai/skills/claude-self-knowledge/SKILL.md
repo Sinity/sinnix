@@ -28,7 +28,7 @@ between releases. Establish them from the installed harness, not memory. Use
 ## Local layout
 
 Sinnix owns the sources: global instructions at `dots/_ai/AGENTS.md` (linked as
-`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, and `~/.gemini/GEMINI.md`),
+`~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`),
 agent definitions and hooks under `dots/claude/`, shared skills under
 `dots/_ai/skills/`, rendering under `modules/features/dev/agents/`, and
 launcher profiles in `flake/data/agent-profiles.nix`. Instructions and skills are

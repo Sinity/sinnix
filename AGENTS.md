@@ -88,9 +88,10 @@ dots/         managed user configuration; dots/_ai/ holds the global agent
 
 ## Agent configuration
 
-`dots/_ai/AGENTS.md` supplies global instructions through the Claude, Codex,
-and Gemini home links. `dots/_ai/skills/` supplies shared procedures;
-`dots/claude/` holds agent definitions, settings, and hooks. Capture hooks,
+`dots/_ai/AGENTS.md` supplies global instructions through the Claude and Codex
+home links (and `~/.gemini/GEMINI.md`, which the Antigravity editor reads).
+`dots/_ai/skills/` supplies shared procedures; `dots/claude/` holds agent
+definitions, settings, and hooks. Capture hooks,
 the destructive-command guard, and agentctl own their respective behavior.
 Instruction and skill text is live through symlinks; Codex's per-skill links
 change at activation when a skill is added, renamed, or removed.

@@ -134,7 +134,7 @@ def npm_boundary():
         result = subprocess.run(
             [
                 "bash",
-                sys.argv[7],
+                sys.argv[5],
                 case,
                 package["name"],
                 "fixture",
@@ -272,7 +272,7 @@ def alias_and_failure_boundary():
             )
         command = [
             "bash",
-            sys.argv[7],
+            sys.argv[5],
             case,
             package["name"],
             "fixture",
@@ -409,7 +409,7 @@ def optional_hook_boundary():
     result = subprocess.run(
         [
             "bash",
-            sys.argv[7],
+            sys.argv[5],
             "optional",
             package["name"],
             "fixture",
@@ -438,7 +438,6 @@ def optional_hook_boundary():
 
 compare(sys.argv[1], sys.argv[2], 8)
 compare(sys.argv[3], sys.argv[4], 6)
-compare(sys.argv[5], sys.argv[6], 11)
 npm_boundary()
 alias_and_failure_boundary()
 optional_hook_boundary()

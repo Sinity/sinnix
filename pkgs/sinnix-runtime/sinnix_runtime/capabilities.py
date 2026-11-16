@@ -21,7 +21,7 @@ KINDS: tuple[tuple[str, str, str], ...] = (
     ("ai-backend", "AI backends", "model endpoints, socket-activated"),
     ("capture-lane", "Capture lanes", "what this machine records about itself"),
     ("feature", "Features", "capabilities the host turns on or off wholesale"),
-    ("skill", "Agent skills", "loadable procedure for Claude/Codex/Gemini"),
+    ("skill", "Agent skills", "loadable procedure for Claude/Codex"),
     ("mcp-server", "MCP servers", "tools agents can reach, by profile tier"),
     ("agent-cli", "Agent CLIs", "which client, which MCP profile, which backend"),
 )

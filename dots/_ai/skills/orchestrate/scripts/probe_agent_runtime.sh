@@ -49,7 +49,7 @@ kitty_version=""
 resolve_agent_bin() {
   case "${agent}" in
   claude) command -v claude 2>/dev/null ;;
-  codex | gemini) command -v "${agent}" 2>/dev/null ;;
+  codex) command -v codex 2>/dev/null ;;
   grok) command -v grok-sinnix 2>/dev/null || command -v grok 2>/dev/null ;;
   antigravity) command -v agy-sinnix 2>/dev/null || command -v agy 2>/dev/null ;;
   *) return 1 ;;
@@ -123,7 +123,7 @@ if [[ ${probe_model} -eq 1 ]]; then
       fi
       rm -f "${tmp_msg}" "${tmp_log}"
     else
-      # Claude and Gemini do not have one stable cross-version probe contract.
+      # Claude has no stable cross-version probe contract.
       model_probe_message="version check passed for ${agent}"
       model_probe_ok=1
     fi

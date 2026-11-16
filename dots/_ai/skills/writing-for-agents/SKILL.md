@@ -13,7 +13,7 @@ reading cost. `skill-authoring` owns skill packaging and validation.
 - Global instructions (`/realm/project/sinnix/repo/dots/_ai/AGENTS.md`, linked
   into each agent's home) hold cross-project rules. A repository's `AGENTS.md`
   is its only project instruction file and holds its stable semantics; Claude
-  Code, Codex, and Gemini all read it, so no `CLAUDE.md` accompanies it.
+  Code and Codex both read it, so no `CLAUDE.md` accompanies it.
   Skills hold procedures only some sessions need.
   Beads hold tasks, decisions, and their evidence. Memory holds stable facts
   and pointers nothing else records.

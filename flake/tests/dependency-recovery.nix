@@ -7,7 +7,6 @@
       sources = import ../data/agent-cli-sources.nix { inherit pkgs; };
       claude = sources."@anthropic-ai/claude-code";
       codex = sources."@openai/codex";
-      gemini = sources."@google/gemini-cli";
       nativeInputs = pkgs.writeText "agent-recovery-inputs.json" (
         builtins.toJSON {
           helper = "${../../scripts/sinnix-agent-npm-bootstrap}";
@@ -31,7 +30,7 @@
           }
           ''
             RECOVERY_INPUTS=${nativeInputs} RECOVERY_BOOTSTRAP=${../../scripts/sinnix-agent-npm-bootstrap} RECOVERY_VERIFIER=${../../scripts/tests/verify_agent_recovery.py} python3 ${../../scripts/tests/test_agent_recovery_verification.py}
-            python3 ${./dependency-recovery.py} ${claude.original} ${claude} ${codex.original} ${codex} ${gemini.original} ${gemini} ${../../scripts/sinnix-agent-npm-bootstrap}
+            python3 ${./dependency-recovery.py} ${claude.original} ${claude} ${codex.original} ${codex} ${../../scripts/sinnix-agent-npm-bootstrap}
             mkdir "$out"
             cp ${nativeInputs} "$out/native-inputs.json"
           '';

@@ -30,12 +30,4 @@
       hash = "sha512-m8ArJUtVcQMSe1lLE/Ei7vX/JV7O39sWmWBsXV2NOU70F0qCp8GubA24pT3LnwTmM6LL2xV80/h6sQg85n69ew==";
     };
   };
-  "@google/gemini-cli" = import ../../pkgs/agent-cli-sources/dependency-source.nix {
-    inherit pkgs;
-    name = "@google/gemini-cli";
-    src = pkgs.fetchurl {
-      url = "https://registry.npmjs.org/@google/gemini-cli/-/gemini-cli-0.45.2.tgz";
-      hash = "sha512-Gm9UrodMu8Tw0hk2ncz1b8po5zhjA8tyED6SpDbkuJ91NjwzoYJ0s7sHlnJ1RpFUYuK6I+zMQMgtRqCcd+FbnA==";
-    };
-  };
 }

@@ -1,5 +1,5 @@
 # Registry-driven MCP config generation for the default Codex configuration,
-# its alternate backends, and Gemini/Antigravity. Imported by mcp.nix.
+# its alternate backends, and Antigravity. Imported by mcp.nix.
 {
   lib,
   pkgs,
@@ -14,7 +14,6 @@ let
   inherit (mcpRegistry)
     selectClientServersForProfile
     renderCodexServer
-    renderGeminiServer
     renderAntigravityServer
     ;
   codexSystemConfigFile = tomlFormat.generate "codex-system-config.toml" (
@@ -43,15 +42,6 @@ let
   codexEndpointFiles = lib.genAttrs codexEndpointProfileNames (
     name: mkCodexBackendProfileFile name mcpRegistry.codexEndpoints.${name}
   );
-  geminiSettingsBase = removeAttrs (builtins.fromJSON (
-    builtins.readFile (inputs.self + "/dots/gemini/settings.json")
-  )) [ "mcpServers" ];
-  geminiSettingsFile = jsonFormat.generate "gemini-settings.json" (
-    geminiSettingsBase
-    // {
-      mcpServers = lib.mapAttrs renderGeminiServer (selectClientServersForProfile "full" "gemini");
-    }
-  );
   antigravityMcpConfigFile = jsonFormat.generate "antigravity-mcp-config.json" {
     mcpServers = lib.mapAttrs renderAntigravityServer (
       selectClientServersForProfile "antigravity" "antigravity"
@@ -62,7 +52,6 @@ in
   inherit
     codexSystemConfigFile
     codexEndpointFiles
-    geminiSettingsFile
     antigravityMcpConfigFile
     ;
 }

@@ -1,4 +1,4 @@
-# Agent CLI wrapper / MCP profile runtime checks (Claude, Codex, Gemini).
+# Agent CLI wrapper / MCP profile runtime checks (Claude, Codex, Pi, Hermes).
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;
@@ -122,8 +122,7 @@ in
       expectedClaudeProfileServersJson = expectedProfileServers "claude" [
         "default"
       ];
-      expectedGeminiProfileServersJson = expectedProfileServers "gemini" [
-        "full"
+      expectedAntigravityProfileServersJson = expectedProfileServers "antigravity" [
         "antigravity"
       ];
       expectedCodexProfileServersJson = expectedProfileServers "codex" [
@@ -269,11 +268,9 @@ in
           pkgs.zsh
         ];
         homeFiles = laneWrapperFiles ++ [
-          ".gemini/settings.json"
           ".gemini/config/mcp_config.json"
           ".gemini/config/skills"
           ".gemini/config/AGENTS.md"
-          ".local/bin/gemini"
           ".local/bin/grok-sinnix"
           ".local/bin/agy-sinnix"
           ".local/bin/hermes"
@@ -838,7 +835,6 @@ in
               source ${agentToolsCodexMigrationActivation}
             )
             test ! -e "$migration_dry_home/.codex"
-            test -f "$HOME/.gemini/settings.json"
             test -f "$HOME/.gemini/config/mcp_config.json"
             test -L "$HOME/.gemini/config/skills"
             test -L "$HOME/.gemini/config/AGENTS.md"
@@ -878,7 +874,6 @@ in
 
             for wrapper in \
               ${lib.concatMapStringsSep " \\\n              " (f: ''"$HOME/${f}"'') laneWrapperFiles} \
-              "$HOME/.local/bin/gemini" \
               "$HOME/.local/bin/pi" \
               "$HOME/.local/bin/grok-sinnix" \
               "$HOME/.local/bin/agy-sinnix" \
@@ -960,17 +955,17 @@ in
             PYCODE
 
             # Same registry-derived contract as the claude configs above:
-            # rendered gemini server sets must equal the registry selection.
+            # the rendered Antigravity server set must equal the registry selection.
             for pair in \
-              ".gemini/settings.json full" ".gemini/config/mcp_config.json antigravity"; do
+              ".gemini/config/mcp_config.json antigravity"; do
               file="''${pair%% *}"; profile="''${pair##* }"
               rendered="$(jq -r '.mcpServers | keys | sort | join(",")' "$HOME/$file")"
-              expected="$(jq -r --arg p "$profile" '.[$p] | sort | join(",")' <<'EOF_EXPECTED_GEMINI'
-            ${expectedGeminiProfileServersJson}
-            EOF_EXPECTED_GEMINI
+              expected="$(jq -r --arg p "$profile" '.[$p] | sort | join(",")' <<'EOF_EXPECTED_ANTIGRAVITY'
+            ${expectedAntigravityProfileServersJson}
+            EOF_EXPECTED_ANTIGRAVITY
             )"
               if [ "$rendered" != "$expected" ]; then
-                echo "gemini $file servers ($rendered) != registry selection ($expected)" >&2
+                echo "antigravity $file servers ($rendered) != registry selection ($expected)" >&2
                 exit 1
               fi
             done
@@ -995,7 +990,6 @@ in
             for wrapper in \
               "$HOME/.local/bin/claude" \
               "$HOME/.local/bin/codex" \
-              "$HOME/.local/bin/gemini" \
               "$HOME/.local/bin/pi"; do
               grep -Fq 'npm/bin/' "$wrapper"
               grep -Fq 'exec "$STATE/npm/bin/' "$wrapper"
@@ -1003,11 +997,11 @@ in
               grep -Fq -- '--slice=agent-cli.slice' "$wrapper"
               grep -Fq -- '${runtimeDefaults.agentContainedCasePattern}' "$wrapper"
             done
-            if grep -R 'MemoryHigh\|MemoryMax\|MemorySwapMax' "$HOME/.local/bin/claude" "$HOME/.local/bin/codex" "$HOME/.local/bin/gemini" "$HOME/.local/bin/pi"; then
+            if grep -R 'MemoryHigh\|MemoryMax\|MemorySwapMax' "$HOME/.local/bin/claude" "$HOME/.local/bin/codex" "$HOME/.local/bin/pi"; then
               echo "agent wrappers must not hardcode resource limits" >&2
               exit 1
             fi
-            for wrapper in "$HOME/.local/bin/claude" "$HOME/.local/bin/codex" "$HOME/.local/bin/gemini" "$HOME/.local/bin/pi"; do
+            for wrapper in "$HOME/.local/bin/claude" "$HOME/.local/bin/codex" "$HOME/.local/bin/pi"; do
               grep -Fq 'sinnix-agent-npm-bootstrap' "$wrapper"
               grep -Fq 'export npm_config_prefix="$STATE/npm"' "$wrapper"
               grep -Fq 'export NPM_CONFIG_PREFIX="$STATE/npm"' "$wrapper"
@@ -1015,7 +1009,6 @@ in
             done
             grep -Fq '@anthropic-ai/claude-code' "$HOME/.local/bin/claude"
             grep -Fq '@openai/codex' "$HOME/.local/bin/codex"
-            grep -Fq '@google/gemini-cli' "$HOME/.local/bin/gemini"
             grep -Fq '@earendil-works/pi-coding-agent' "$HOME/.local/bin/pi"
             grep -Fq -- '--provider openai-codex' "$HOME/.local/bin/pi"
             grep -Fq -- '--append-system-prompt "$HOME/.config/claude/CLAUDE.md"' "$HOME/.local/bin/pi"

@@ -1,4 +1,4 @@
-# AI agent CLI wrappers (claude/codex/gemini/grok/agy/hermes), shared skills, and
+# AI agent CLI wrappers (claude/codex/pi/grok/agy/hermes), shared skills, and
 # per-agent runtime state. Wrapper-builder machinery lives in backends.nix.
 {
   mkFeatureModule,
@@ -297,6 +297,8 @@ mkFeatureModule {
               directory = ".config/claude";
               mode = "0700";
             }
+            # The Antigravity editor keeps its state and reads its global
+            # rules (GEMINI.md) here.
             {
               directory = ".gemini";
               mode = "0700";
@@ -313,7 +315,6 @@ mkFeatureModule {
             ".local/state/claude-code"
             ".local/state/codex"
             ".local/state/pi"
-            ".local/state/gemini"
             {
               directory = ".grok";
               mode = "0700";
@@ -383,7 +384,8 @@ mkFeatureModule {
                 chmod 600 "$HOME/.hermes/profiles/${name}/config.yaml"
               '') (lib.attrNames hermesProfileConfigFiles)}
             '';
-            # Codex and Gemini share the live global instruction source.
+            # Codex and the Antigravity editor (~/.gemini/GEMINI.md) share the
+            # live global instruction source.
             home.activation.linkGlobalAgentInstructions = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
               mkdir -p "$HOME/.codex" "$HOME/.gemini"
               ln -sfn "$HOME/.config/claude/CLAUDE.md" "$HOME/.codex/AGENTS.md"
@@ -453,24 +455,6 @@ mkFeatureModule {
                 })
               ) agentProfiles.hermesProfiles)
               // {
-                ".local/bin/gemini" = {
-                  text = ''
-                    #!/usr/bin/env bash
-                    set -euo pipefail
-
-                    ${agentScopePrelude}
-
-                    ${mkNpmBootstrap {
-                      stateDir = "gemini";
-                      npmPackage = "@google/gemini-cli";
-                      binaryName = "gemini";
-                    }}
-
-                    exec "$STATE/npm/bin/gemini" "$@"
-                  '';
-                  executable = true;
-                  force = true;
-                };
 
                 # Pi uses its own ChatGPT Plus/Pro OAuth flow. It is a
                 # context-engineering surface, not a second job scheduler.

@@ -15,7 +15,7 @@ Usage: kitty-remote-control.sh [--to SOCKET] <command> [options]
 Commands:
   list [--json]
   focus --match <expr>
-  launch-agent-here --agent <codex|claude|gemini|hermes>
+  launch-agent-here --agent <codex|claude|hermes>
   send --match <expr> --text <text> [--enter] [--bracketed-paste]
   run --match <expr> --command <command>
   key --match <expr> --keys <key1> [key2 ...]
@@ -227,10 +227,9 @@ launch_agent_here() {
   case "$agent" in
   codex) command_path="$HOME/.local/bin/codex" ;;
   claude) command_path="$HOME/.local/bin/claude" ;;
-  gemini) command_path="$HOME/.local/bin/gemini" ;;
   hermes) command_path="$HOME/.local/bin/hermes" ;;
   *)
-    echo "launch-agent-here: agent must be codex, claude, gemini, or hermes" >&2
+    echo "launch-agent-here: agent must be codex, claude, or hermes" >&2
     exit 2
     ;;
   esac

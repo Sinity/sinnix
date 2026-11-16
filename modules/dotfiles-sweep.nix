@@ -11,7 +11,7 @@
 #     "nvim" = { source = "nvim"; recursive = true; force = true; };
 #   };
 #   meta.dotfiles.dataFile = { "task/hooks/on-add.py" = "taskwarrior/hooks/on-add.py"; };
-#   meta.dotfiles.homeFile = { ".gemini/skills" = "_ai/skills"; };  # arbitrary $HOME path
+#   meta.dotfiles.homeFile = { ".agents/skills" = "_ai/skills"; };  # arbitrary $HOME path
 #
 # String value ⇒ `{ source = <str>; recursive = false; force = false; }` (HM defaults).
 # Attrset value ⇒ merged onto the same defaults; only `source` is required.

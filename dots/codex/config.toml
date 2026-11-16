@@ -29,9 +29,6 @@ HTTPS_PROXY = "exclude"
 [projects."/home/sinity"]
 trust_level = "trusted"
 
-[projects."/home/sinity/.gemini/tmp/polylogue"]
-trust_level = "trusted"
-
 [projects."/realm/project"]
 trust_level = "trusted"
 
