@@ -155,19 +155,15 @@ Open WebUI uses the roster's RAG embedding model directly through Ollama; it is 
 
 ## Driving local models from agents
 
-The local agent profiles use LiteLLM and default to `local-chat`:
+The `hermes-local` profile uses LiteLLM and defaults to `local-chat`:
 
 ```bash
-claude-local
-codex-local
 hermes-local
 ```
 
 Select another advertised model with the client’s normal model option:
 
 ```bash
-claude-local --model local-glimmer
-codex-local --model local-glimmer
 hermes-local --model local-coder
 ```
 

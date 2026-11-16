@@ -66,11 +66,10 @@ in
         ++ [ "pi" ]
       );
       # Each profile's wrapper must honour the registry entry it was rendered
-      # from: the MCP config file its profile selects, the profile marker the
-      # hooks branch on, and (for alternate backends) the endpoint the profile
-      # declares. Derived here so a profile rename or a new backend needs no
-      # edit in this file, and so a wrapper that stops following the registry
-      # fails rather than a literal that only this test and the renderer know.
+      # from: the MCP config file its profile selects and the profile marker
+      # the hooks branch on. Derived here so a profile rename needs no edit in
+      # this file, and so a wrapper that stops following the registry fails
+      # rather than a literal that only this test and the renderer know.
       claudeLaneWrapperChecks = lib.concatStringsSep "\n" (
         lib.mapAttrsToList (
           _: profile:
@@ -83,34 +82,12 @@ in
             grep -Fq 'export SINNIX_CLAUDE_PROFILE=${profile.mcpProfile}' ${wrapper}
             grep -Fq 'export CLAUDE_CONFIG_DIR="''${CLAUDE_CONFIG_DIR:-$HOME/.config/claude}"' ${wrapper}
           ''
-          + lib.optionalString (profile ? env) ''
-            grep -Fq 'ANTHROPIC_BASE_URL="${profile.env.baseUrl}"' ${wrapper}
-            ${pkgs.python3}/bin/python ${./claude-backend-model.py} ${wrapper} ${lib.escapeShellArg profile.model}
-          ''
         ) agentProfiles.claudeProfiles
       );
       codexLaneWrapperChecks = lib.concatStringsSep "\n" (
-        lib.mapAttrsToList (
-          _: profile:
-          let
-            wrapper = ''"$HOME/.local/bin/${profile.binName}"'';
-          in
-          ''
-            ${
-              if profile ? env then
-                ''
-                  grep -Fq 'codex_args=(--profile ${profile.mcpProfile})' ${wrapper}
-                  grep -Fq 'export SINNIX_CODEX_PROFILE=${profile.mcpProfile}' ${wrapper}
-                  grep -Fq 'codex_uses_profile()' ${wrapper}
-                ''
-              else
-                ''
-                  grep -Fq 'exec "$STATE/npm/bin/codex" "$@"' ${wrapper}
-                  ! grep -Fq 'codex_uses_profile()' ${wrapper}
-                ''
-            }
-          ''
-        ) agentProfiles.codexProfiles
+        lib.mapAttrsToList (_: profile: ''
+          grep -Fq 'exec "$STATE/npm/bin/codex" "$@"' "$HOME/.local/bin/${profile.binName}"
+        '') agentProfiles.codexProfiles
       );
       expectedProfileServers =
         client: profiles:
@@ -344,14 +321,9 @@ in
       agentToolsCodexMigrationActivation = pkgs.writeText "codex-system-defaults-migration.sh" (
         agentToolsRuntimeConfig.home-manager.users.${agentToolsRuntimeConfig.sinnix.user.name}.home.activation.codexSystemDefaultsMigration.data
       );
-      agentToolsCodexProfilesActivation = pkgs.writeText "codex-native-profiles.sh" (
-        agentToolsRuntimeConfig.home-manager.users.${agentToolsRuntimeConfig.sinnix.user.name}.home.activation.codexNativeProfiles.data
-      );
       agentToolsCodexRetirementActivation = pkgs.writeText "codex-retire-profiles.sh" (
         agentToolsRuntimeConfig.home-manager.users.${agentToolsRuntimeConfig.sinnix.user.name}.home.activation.codexRetireOldProfiles.data
       );
-      agentToolsCodexLocalConfigSource =
-        agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexLocalConfigSource;
 
       # Provably fails when: a generic runtime, browser, shell or agent binary
       # is added to the earlyoom emergency avoid list (verified by adding
@@ -675,19 +647,6 @@ in
           setup = agentToolsFixture.setup + ''
             mkdir -p "$HOME/.codex"
             printf '[private]\nkeep = true\n\n[features]\nmulti_agent_v2 = true\n' > "$HOME/.codex/config.toml"
-            # An old backend profile may be a store link; its backup carries
-            # private hook state while the generated MCP table is replaced.
-            mkdir -p "$HOME/.codex/.sinnix-before-native-layers-v1"
-            ln -s ${agentToolsCodexLocalConfigSource} "$HOME/.codex/local.config.toml"
-            cat > "$HOME/.codex/.sinnix-before-native-layers-v1/local.config.toml" <<'EOF_CODEX_LOCAL_BACKUP'
-            model = "private-test-model"
-
-            [mcp_servers.unmanaged]
-            command = "must-not-survive"
-
-            [hooks.state."test-hook"]
-            trusted_hash = "sha256:test-private-trust"
-            EOF_CODEX_LOCAL_BACKUP
             printf '[hooks.state]\nprivate = "keep"\n' > "$HOME/.codex/lean.config.toml"
             mkdir -p "$HOME/.hermes"
             cp ${agentToolsHermesConfigSource} "$HOME/.hermes/config.yaml"
@@ -720,7 +679,6 @@ in
             # migration here with the same `run` contract used by activation.
             run() { "$@"; }
             source ${agentToolsCodexMigrationActivation}
-            source ${agentToolsCodexProfilesActivation}
             source ${agentToolsCodexRetirementActivation}
             unset -f run
 
@@ -743,31 +701,6 @@ in
             source ${agentToolsCodexRetirementActivation}
             unset -f run
             grep -Fq 'new private profile' "$HOME/.codex/lean.config.toml"
-            for profile in deepseek local; do
-              test -f "$HOME/.codex/$profile.config.toml"
-              test ! -L "$HOME/.codex/$profile.config.toml"
-              test "$(stat -c '%a' "$HOME/.codex/$profile.config.toml")" = 600
-            done
-            local_inode="$(stat -c '%i' "$HOME/.codex/local.config.toml")"
-            run() { "$@"; }
-            source ${agentToolsCodexProfilesActivation}
-            unset -f run
-            test "$(stat -c '%i' "$HOME/.codex/local.config.toml")" = "$local_inode"
-            # A non-store symlink can be deliberate private state. It must
-            # never be silently replaced as though it were an old HM layer.
-            unknown_link_home="$TMPDIR/codex-unknown-profile-link"
-            mkdir -p "$unknown_link_home/.codex"
-            printf '[hooks.state]\nchoice = "keep"\n' > "$unknown_link_home/private-profile.toml"
-            ln -s "$unknown_link_home/private-profile.toml" "$unknown_link_home/.codex/deepseek.config.toml"
-            if (
-              export HOME="$unknown_link_home"
-              run() { "$@" || exit $?; }
-              source ${agentToolsCodexProfilesActivation}
-            ); then
-              echo "native profile migration replaced an unknown private link" >&2
-              exit 1
-            fi
-            test -L "$unknown_link_home/.codex/deepseek.config.toml"
             test -L "$HOME/.agents/skills"
             # The live checkout is intentionally absent from the Nix sandbox;
             # resolve the declared link without requiring its target to exist.
@@ -899,15 +832,6 @@ in
             python3 - <<'PYCODE'
             import pathlib, tomllib
 
-            def keys(path):
-                return set(tomllib.loads(path.read_text()).get('mcp_servers', {}))
-
-            def assert_has(name, actual, required, forbidden=()):
-                missing = set(required) - actual
-                unexpected = set(forbidden) & actual
-                assert not missing, f"{name} missing {sorted(missing)}"
-                assert not unexpected, f"{name} unexpectedly has {sorted(unexpected)}"
-
             private_config = tomllib.loads(pathlib.Path.home().joinpath('.codex/config.toml').read_text())
             assert 'mcp_servers' not in private_config
             assert private_config['private']['keep'] is True
@@ -920,22 +844,6 @@ in
             import json
             expected = json.loads('${expectedCodexProfileServersJson}')
             assert default == set(expected['default'])
-
-            # Alternate-backend profiles must layer a provider override while
-            # retaining the full MCP surface; model names remain ordinary config.
-            deepseek_path = pathlib.Path.home().joinpath('.codex/deepseek.config.toml')
-            deepseek = tomllib.loads(deepseek_path.read_text())
-            assert deepseek['model_provider'] == 'deepseek'
-            assert deepseek['model_providers']['deepseek']['env_key']
-            assert default <= keys(deepseek_path)
-            local_path = pathlib.Path.home().joinpath('.codex/local.config.toml')
-            local = tomllib.loads(local_path.read_text())
-            assert local['model_provider'] == 'local'
-            assert local['model_providers']['local']['base_url'].startswith('http://127.0.0.1:')
-            assert keys(local_path) == keys(deepseek_path)
-            assert local['model'] == 'private-test-model'
-            assert local['hooks']['state']['test-hook']['trusted_hash'] == 'sha256:test-private-trust'
-            assert 'unmanaged' not in local['mcp_servers']
             PYCODE
 
             jq -e '
@@ -984,32 +892,6 @@ in
             grep -Fq 'unset OPENAI_API_KEY' "$HOME/.local/bin/pi"
             grep -Fq 'npm ci --prefix "$staged" --global=false --omit=dev' '${../../scripts/sinnix-agent-npm-bootstrap}'
             grep -Fq 'export npm_config_prefix="$STATE/npm"' '${../../scripts/sinnix-agent-npm-bootstrap}'
-
-            # Only alternate-backend wrappers select a native profile. Codex
-            # rejects --profile for utility commands such as app-server.
-            awk '
-              /^codex_uses_profile\(\)/ { in_gate = 1 }
-              in_gate { print }
-              in_gate && /^}$/ { exit }
-            ' "$HOME/.local/bin/codex-local" > "$TMPDIR/codex-profile-gate.sh"
-            source "$TMPDIR/codex-profile-gate.sh"
-            codex_uses_profile
-            codex_uses_profile exec
-            codex_uses_profile mcp
-            codex_uses_profile debug prompt-input
-            ! codex_uses_profile app-server
-            ! codex_uses_profile doctor
-            ! codex_uses_profile debug
-            ! codex_uses_profile -C /realm/project/sinnix/repo app-server --stdio
-            ! codex_uses_profile -c features.hooks=true app-server --stdio
-            codex_uses_profile -C /realm/project/sinnix/repo exec
-            codex_uses_profile "app-server please help"
-            ! codex_uses_profile --profile local sandbox bash -c 'exit 0'
-            test "$SINNIX_CODEX_PROFILE" = local
-            ! codex_uses_profile -p deepseek exec
-            test "$SINNIX_CODEX_PROFILE" = deepseek
-            ! codex_uses_profile -C /realm/project/sinnix/repo --profile local exec
-            codex_uses_profile -c 'prompt=--profile' exec
 
             "$HOME/.local/bin/mcp-polylogue" --help > mcp-polylogue-help
             grep -q 'MCP' mcp-polylogue-help

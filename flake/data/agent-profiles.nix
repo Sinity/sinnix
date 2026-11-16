@@ -87,9 +87,8 @@
     };
   };
 
-  # Claude variants. The private npm prefix owns the upstream executable;
-  # the managed `claude` command selects the default MCP set.
-  # `mcpProfile`, `model`, and `env` feed the renderers.
+  # The private npm prefix owns each upstream executable; the managed command
+  # selects the default MCP set.
   claudeProfiles = {
     default = {
       binName = "claude";
@@ -97,28 +96,11 @@
     };
   };
 
-  # The default Codex command reads the generated system config. Only the
-  # local and DeepSeek variants select native backend profiles.
+  # The default Codex command reads the generated system config.
   codexProfiles = {
     default = {
       binName = "codex";
       mcpProfile = "default";
-    };
-    deepseek = {
-      binName = "codex-deepseek";
-      mcpProfile = "deepseek";
-      env = {
-        varName = "DEEPSEEK_API_KEY";
-        secretName = "deepseek-api-key";
-      };
-    };
-    local = {
-      binName = "codex-local";
-      mcpProfile = "local";
-      env = {
-        varName = "LITELLM_LOCAL_KEY";
-        literal = "sk-local";
-      };
     };
   };
 

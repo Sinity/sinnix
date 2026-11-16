@@ -60,12 +60,6 @@ let
         ${lib.escapeShellArg (toString npmRecoverySources.${npmPackage})}
     '';
 
-  # Resolves an agenix secret name to its runtime path, honoring a live
-  # config override under sinnix.secrets.paths.<name>. `sinnixCfg` already IS
-  # `config.sinnix`, hence the attrPath without a leading "sinnix" segment.
-  resolveSecretPath =
-    secretName: lib.attrByPath [ "secrets" "paths" secretName ] "/run/agenix/${secretName}" sinnixCfg;
-
   # Put the outermost interactive agent process in the same cgroup tree as
   # declared agent work. A process already inside one of
   # runtimeDefaults.agentContainedSlices stays there: re-execing out of a
@@ -92,84 +86,6 @@ let
     export UV_CONCURRENT_BUILDS="''${UV_CONCURRENT_BUILDS:-2}"
     export MAX_JOBS="''${MAX_JOBS:-4}"
   '';
-
-  # Backend-switch env builder for the claude-deepseek/claude-local wrappers
-  # (flake/data/agent-profiles.nix claudeProfiles): points Claude Code's native
-  # Anthropic-protocol client at a non-Anthropic endpoint and fans one model
-  # name out across every ANTHROPIC_*MODEL var Claude Code reads. `name` is
-  # the profile name; it names the intermediate shell variable and the error
-  # caller, keeping error text wrapper-specific without extra data fields.
-  mkClaudeBackendEnv =
-    {
-      name,
-      baseUrl,
-      model,
-      # Either { secretName = "<agenix secret>"; } (read at launch, wrapper
-      # exits loudly if unreadable) or { literal = "<static token>"; } (a
-      # loopback gateway that enforces no real auth but still needs a
-      # non-empty token).
-      authToken,
-    }:
-    let
-      modelVar = "${lib.toUpper name}_MODEL";
-      authFragment =
-        if authToken ? secretName then
-          let
-            path = resolveSecretPath authToken.secretName;
-          in
-          ''
-            if [ ! -r ${lib.escapeShellArg path} ]; then
-              echo "claude-${name}: cannot read ${path}" >&2
-              exit 1
-            fi
-            export ANTHROPIC_BASE_URL="${baseUrl}"
-            ANTHROPIC_AUTH_TOKEN="$(<${lib.escapeShellArg path})"
-            export ANTHROPIC_AUTH_TOKEN
-          ''
-        else
-          ''
-            export ANTHROPIC_BASE_URL="${baseUrl}"
-            export ANTHROPIC_AUTH_TOKEN="${authToken.literal}"
-          '';
-    in
-    ''
-      ${authFragment}
-      ${modelVar}=${lib.escapeShellArg model}
-      export ANTHROPIC_MODEL="${"$"}${modelVar}"
-      export ANTHROPIC_DEFAULT_OPUS_MODEL="${"$"}${modelVar}"
-      export ANTHROPIC_DEFAULT_SONNET_MODEL="${"$"}${modelVar}"
-      export ANTHROPIC_DEFAULT_HAIKU_MODEL="${"$"}${modelVar}"
-      export CLAUDE_CODE_SUBAGENT_MODEL="${"$"}${modelVar}"
-    '';
-
-  # Shared backend-switch env builder for the codex-deepseek/codex-local
-  # wrappers (see flake/data/agent-profiles.nix codexProfiles): the layered
-  # `<profile>.config.toml` (mcp.nix's client-profiles.nix) already carries
-  # model + model_provider + the full MCP table, so the wrapper only needs
-  # to export the one env var that provider's `env_key` names.
-  mkCodexBackendEnv =
-    {
-      name,
-      varName,
-      # Either secretName (agenix, read-checked at launch) or literal (a
-      # static loopback dev token) — exactly one is set per profile.
-      secretName ? null,
-      literal ? null,
-    }:
-    if secretName != null then
-      let
-        path = resolveSecretPath secretName;
-      in
-      ''
-        if [ ! -r ${lib.escapeShellArg path} ]; then
-          echo "codex-${name}: cannot read ${path}" >&2
-          exit 1
-        fi
-        ${varName}="$(<${lib.escapeShellArg path})"
-        export ${varName}
-      ''
-    else
-      ''export ${varName}="${literal}"'';
 
   claudeConfigPrelude = ''
     # Keep the atomically replaced global JSON inside the persisted directory.
@@ -222,18 +138,8 @@ let
 
   mkClaudeCodeWrapper =
     {
-      mcpConfigName ? "mcp",
-      profile ?
-        if mcpConfigName == "mcp-lean" then
-          "lean"
-        else if mcpConfigName == "mcp-browser" then
-          "browser"
-        else
-          "full",
-      # Extra shell injected after the npm bootstrap and before launch — used
-      # to point Claude Code at a non-Anthropic backend (DeepSeek, local
-      # gateway) via ANTHROPIC_BASE_URL / ANTHROPIC_MODEL / auth env vars.
-      extraEnv ? "",
+      mcpConfigName,
+      profile,
     }:
     {
       text = ''
@@ -248,8 +154,6 @@ let
           binaryName = "claude";
         }}
 
-        ${extraEnv}
-
         # Claude Code does not use the ordinary TMPDIR for Bash/task output
         # captures. Its supported override is CLAUDE_CODE_TMPDIR; without it,
         # concurrent subagents accumulate under /tmp/claude-$UID and can
@@ -260,99 +164,34 @@ let
       executable = true;
       force = true;
     };
-  mkCodexWrapper =
-    {
-      profile ? null,
-      # Extra shell injected after the npm bootstrap — used to export the
-      # provider API key the layered `<profile>.config.toml` expects.
-      extraEnv ? "",
-    }:
-    {
-      text = ''
-        #!/usr/bin/env bash
-        set -euo pipefail
+  # The default Codex command reads the generated system config and reaches
+  # OpenAI through the host's egress proxy when one is declared.
+  mkCodexWrapper = {
+    text = ''
+      #!/usr/bin/env bash
+      set -euo pipefail
 
-        ${agentScopePrelude}
+      ${agentScopePrelude}
 
-        ${mkNpmBootstrap {
-          stateDir = "codex";
-          npmPackage = "@openai/codex";
-          binaryName = "codex";
-        }}
+      ${mkNpmBootstrap {
+        stateDir = "codex";
+        npmPackage = "@openai/codex";
+        binaryName = "codex";
+      }}
 
-        ${extraEnv}
+      if [ -r /etc/sinnix/openai-proxy-url ]; then
+        read -r proxy_url </etc/sinnix/openai-proxy-url
+        export HTTP_PROXY="$proxy_url" HTTPS_PROXY="$proxy_url"
+        export http_proxy="$proxy_url" https_proxy="$proxy_url"
+        export NO_PROXY="127.0.0.1,localhost,::1"
+        export no_proxy="$NO_PROXY"
+      fi
 
-        ${
-          if profile == null then
-            ''
-              exec "$STATE/npm/bin/codex" "$@"
-            ''
-          else
-            ''
-              export SINNIX_CODEX_PROFILE=${lib.escapeShellArg profile}
-              # Codex rejects --profile for utility commands such as app-server;
-              # its own runtime diagnostic names the supported command family.
-              # Keep ordinary prompts in the profiled runtime path, while utility
-              # commands pass through without an unsupported global option.
-              codex_uses_profile() {
-                # Only consume Codex's known global flags.  An arbitrary first word
-                # remains an interactive prompt, rather than being normalized as a
-                # command by this wrapper.
-                while [ "$#" -gt 0 ]; do
-                  case "$1" in
-                    -p|--profile)
-                      if [ "$#" -ge 2 ]; then
-                        export SINNIX_CODEX_PROFILE="$2"
-                      fi
-                      return 1
-                      ;;
-                    --profile=*)
-                      export SINNIX_CODEX_PROFILE="''${1#--profile=}"
-                      return 1
-                      ;;
-                    -p?*)
-                      export SINNIX_CODEX_PROFILE="''${1#-p}"
-                      return 1
-                      ;;
-                    -c|--config|--enable|--disable|--remote|--remote-auth-token-env|-m|--model|--local-provider|-s|--sandbox|-C|--cd|--add-dir|-a|--ask-for-approval)
-                      [ "$#" -ge 2 ] || return 0
-                      shift 2
-                      ;;
-                    --config=*|--enable=*|--disable=*|--remote=*|--remote-auth-token-env=*|--model=*|--local-provider=*|--sandbox=*|--cd=*|--add-dir=*|--ask-for-approval=*)
-                      shift
-                      ;;
-                    --strict-config|--oss|--approve-for-me|--dangerously-bypass-approvals-and-sandbox|--dangerously-bypass-hook-trust|--worktree|--search|--no-alt-screen)
-                      shift
-                      ;;
-                    *)
-                      break
-                      ;;
-                  esac
-                done
-                case "''${1:-}" in
-                  agents|app-server|apply|cloud|completion|doctor|exec-server|features|help|login|logout|migrate-rollouts|plugin|remote-control|update)
-                    return 1
-                    ;;
-                  debug)
-                    [ "''${2:-}" = prompt-input ]
-                    ;;
-                  *)
-                    return 0
-                    ;;
-                esac
-              }
-              codex_args=()
-              if codex_uses_profile "$@"; then
-                codex_args=(--profile ${lib.escapeShellArg profile})
-              fi
-
-              exec "$STATE/npm/bin/codex" "''${codex_args[@]}" "$@"
-            ''
-        }
-      '';
-      executable = true;
-      force = true;
-    };
+      exec "$STATE/npm/bin/codex" "$@"
+    '';
+    executable = true;
+    force = true;
+  };
   # Pi is an interactive/context-experiment harness using its native ChatGPT
   # OAuth provider. AgentCTL and interactive Pi sessions must consume the
   # operator's Codex subscription, never quietly switch billing surfaces
@@ -467,9 +306,6 @@ in
   inherit
     mkNpmBootstrap
     agentScopePrelude
-    resolveSecretPath
-    mkClaudeBackendEnv
-    mkCodexBackendEnv
     mkClaudeScratchPrelude
     mkClaudeLaunchArgs
     mkClaudeCodeWrapper

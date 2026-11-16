@@ -17,9 +17,9 @@ Consumers:
 - The default subscription-authenticated `codex` wrapper exports HTTP(S)
   proxy variables for its model process. The managed shell-environment policy
   excludes those variables, including lowercase names, from spawned commands
-  so unrelated CLI requests use ordinary egress. `codex-deepseek` and
-  `codex-local` remain direct. A shell command that deliberately calls OpenAI
-  can select `/etc/sinnix/openai-proxy-url` explicitly.
+  so unrelated CLI requests use ordinary egress. A shell command that
+  deliberately calls OpenAI can select `/etc/sinnix/openai-proxy-url`
+  explicitly.
 - Chrome receives an inline data URL rendered from the same script as
   `/etc/sinnix/openai-proxy.pac`; only ChatGPT/OpenAI origins are
   proxied and every other site is `DIRECT`.

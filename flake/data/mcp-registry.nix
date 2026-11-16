@@ -129,7 +129,6 @@ let
       # Let the daemon's default 30s read deadline return its typed refusal.
       callTimeoutSeconds = 35;
       profiles = {
-        full = { };
         evidence = { };
         browser = { };
         default = { };
@@ -176,39 +175,12 @@ let
       "recall"
       "deep-evidence"
     ];
-    full = [
-      "binary-analysis"
-      "remote-core"
-      "recall"
-      "deep-evidence"
-    ];
     browser = [
       "remote-core"
       "recall"
       "deep-evidence"
       "browser-mcp"
     ];
-  };
-
-  codexEndpoints = {
-    deepseek = {
-      model = "deepseek-chat";
-      model_provider = "deepseek";
-      model_providers.deepseek = {
-        name = "DeepSeek";
-        base_url = "https://api.deepseek.com/v1";
-        env_key = "DEEPSEEK_API_KEY";
-      };
-    };
-    local = {
-      model = "local-chat";
-      model_provider = "local";
-      model_providers.local = {
-        name = "Local (LiteLLM)";
-        base_url = "http://127.0.0.1:4000/v1";
-        env_key = "LITELLM_LOCAL_KEY";
-      };
-    };
   };
 
   selectClientServersForProfile =
@@ -229,8 +201,6 @@ let
           _: server: builtins.elem client server.clients && builtins.elem (server.tier or "full") tiers
         ) registry
       );
-
-  selectClientServers = selectClientServersForProfile "full";
 
   # Claude Code mcpServers entry.
   renderClaudeServer =
@@ -305,8 +275,6 @@ in
   inherit
     registry
     profileTiers
-    codexEndpoints
-    selectClientServers
     selectClientServersForProfile
     renderClaudeServer
     renderCodexServer

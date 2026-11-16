@@ -458,22 +458,13 @@ let
 
       # ── agent CLI profiles ──────────────────────────────────────────────────
       # No prose in the registry, and none wanted: what distinguishes a profile IS
-      # its client, MCP profile and backend, so the row renders those.
-      profileBackend =
-        profile:
-        if profile ? model then
-          " on ${profile.model}"
-        else if profile ? env then
-          " on an alternate backend"
-        else
-          "";
-
+      # its client and MCP profile, so the row renders those.
       claudeProfileRows = mapAttrsToList (
         _name: profile:
         mkRow {
           kind = "agent-cli";
           name = profile.binName;
-          description = "Claude Code, ${profile.mcpProfile} MCP profile${profileBackend profile}";
+          description = "Claude Code, ${profile.mcpProfile} MCP profile";
           invoke = profile.binName;
           owner = "flake/data/agent-profiles.nix";
           extra = {
@@ -488,7 +479,7 @@ let
         mkRow {
           kind = "agent-cli";
           name = profile.binName;
-          description = "Codex CLI, ${profile.mcpProfile} profile${profileBackend profile}";
+          description = "Codex CLI, ${profile.mcpProfile} profile";
           invoke = profile.binName;
           owner = "flake/data/agent-profiles.nix";
           extra = {

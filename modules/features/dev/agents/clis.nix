@@ -252,8 +252,6 @@ mkFeatureModule {
       };
       inherit (backends)
         mkNpmBootstrap
-        mkClaudeBackendEnv
-        mkCodexBackendEnv
         mkClaudeCodeWrapper
         mkCodexWrapper
         mkPiWrapper
@@ -396,49 +394,14 @@ mkFeatureModule {
               # The single managed Claude launcher.
               (lib.mapAttrs' (
                 name: profile:
-                lib.nameValuePair ".local/bin/${profile.binName}" (
-                  mkClaudeCodeWrapper (
-                    {
-                      mcpConfigName = "mcp";
-                      profile = name;
-                    }
-                    // lib.optionalAttrs (profile ? env) {
-                      extraEnv = mkClaudeBackendEnv {
-                        inherit name;
-                        inherit (profile) model;
-                        inherit (profile.env) baseUrl authToken;
-                      };
-                    }
-                  )
-                )
+                lib.nameValuePair ".local/bin/${profile.binName}" (mkClaudeCodeWrapper {
+                  mcpConfigName = "mcp";
+                  profile = name;
+                })
               ) agentProfiles.claudeProfiles)
-              # One entry per codexProfiles entry. The layered <profile>.config.toml
-              # (client-profiles.nix) carries model + model_provider + the MCP
-              # table; the wrapper only supplies the provider API key env.
+              # The single managed Codex launcher.
               // (lib.mapAttrs' (
-                name: profile:
-                lib.nameValuePair ".local/bin/${profile.binName}" (
-                  mkCodexWrapper (
-                    (lib.optionalAttrs (profile ? env) {
-                      profile = profile.mcpProfile;
-                    })
-                    // {
-                      extraEnv =
-                        if profile ? env then
-                          mkCodexBackendEnv ({ inherit name; } // profile.env)
-                        else
-                          ''
-                            if [ -r /etc/sinnix/openai-proxy-url ]; then
-                              read -r proxy_url </etc/sinnix/openai-proxy-url
-                              export HTTP_PROXY="$proxy_url" HTTPS_PROXY="$proxy_url"
-                              export http_proxy="$proxy_url" https_proxy="$proxy_url"
-                              export NO_PROXY="127.0.0.1,localhost,::1"
-                              export no_proxy="$NO_PROXY"
-                            fi
-                          '';
-                    }
-                  )
-                )
+                _name: profile: lib.nameValuePair ".local/bin/${profile.binName}" mkCodexWrapper
               ) agentProfiles.codexProfiles)
               # One entry per hermesProfiles entry.
               // (lib.mapAttrs' (

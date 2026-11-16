@@ -4,9 +4,9 @@
 # the local engines (Ollama et al.) speak ONLY the OpenAI API. LiteLLM is the
 # translator that lets the real Claude Code harness drive a local model: it
 # exposes BOTH `/v1/messages` (Anthropic) and `/v1/chat/completions` (OpenAI)
-# on one loopback port and forwards to Ollama. The `claude-local` and
-# `codex-local` wrappers (modules/features/dev/agents/clis.nix) both target it,
-# so local model names live in exactly one place — the `model_list` below.
+# on one loopback port and forwards to Ollama. The `hermes-local` and
+# `hermes-sampler` profiles (flake/data/agent-profiles.nix) target it, so
+# local model names live in exactly one place — the `model_list` below.
 #
 # Stateless gateway: the only on-disk state is the UI scratch dir and the
 # tiktoken cache (seeded from the Nix store, no outbound fetch at boot), both

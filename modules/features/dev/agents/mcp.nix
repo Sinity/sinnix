@@ -1,5 +1,5 @@
 # Model Context Protocol (MCP) servers and AI-integrated tool settings: server
-# wrappers, default Claude/Codex integration, and alternate Codex backends.
+# wrappers and default Claude/Codex integration.
 #
 # Domain pieces live in sibling plain-nix helpers, imported below:
 # mcp-tools.nix (generic MCP wrappers), client-profiles.nix
@@ -23,16 +23,6 @@ mkFeatureModule {
       type = lib.types.path;
       internal = true;
       description = "Path to the generated Codex config derivation (for tests)";
-    };
-    codexDeepseekConfigSource = lib.mkOption {
-      type = lib.types.path;
-      internal = true;
-      description = "Path to the generated Codex deepseek profile derivation (for tests)";
-    };
-    codexLocalConfigSource = lib.mkOption {
-      type = lib.types.path;
-      internal = true;
-      description = "Path to the generated Codex local profile derivation (for tests)";
     };
     codexHooksSource = lib.mkOption {
       type = lib.types.path;
@@ -64,7 +54,7 @@ mkFeatureModule {
       # Keep the NixOS-level live dots root in this lexical binding so nested
       # activation text cannot accidentally resolve the Home Manager config.
       dotsRoot = config.sinnix.paths.dotsRoot;
-      inherit (helpers.data) mcpRegistry agentProfiles;
+      inherit (helpers.data) mcpRegistry;
       browser = import ./browser.nix {
         inherit
           lib
@@ -86,13 +76,10 @@ mkFeatureModule {
       clientProfiles = import ./client-profiles.nix {
         inherit
           lib
-          pkgs
           inputs
           mcpRegistry
-          agentProfiles
           tomlFormat
           ;
-        inherit dotsRoot;
       };
       codexHooksFile = import ./hooks.nix {
         inherit pkgs;
@@ -141,119 +128,6 @@ mkFeatureModule {
         os.chmod(temporary, 0o600)
         os.replace(temporary, user_path)
       '';
-      # Codex persists profile-scoped state, including hook trust, in the
-      # selected <profile>.config.toml.  Profile MCP servers remain declarative,
-      # but the file itself must be a private writable overlay rather than a
-      # Home Manager link into the store.
-      codexNativeProfileMigration = pkgs.writeText "sinnix-codex-native-profile-migration.py" ''
-        import os
-        import stat
-        import sys
-        import tempfile
-        from pathlib import Path
-
-        import tomlkit
-
-        source_path, profile_path, backup_path = map(Path, sys.argv[1:])
-        generated = tomlkit.parse(source_path.read_text())
-
-        def merge_overlay(destination, overlay, root=True):
-            for key, value in overlay.items():
-                # The MCP registry is the sole owner of the profile server
-                # table. All other app-owned settings, especially hooks.state,
-                # remain private and writable.
-                if root and key == "mcp_servers":
-                    continue
-                if (
-                    key in destination
-                    and hasattr(destination[key], "items")
-                    and hasattr(value, "items")
-                ):
-                    merge_overlay(destination[key], value, root=False)
-                else:
-                    destination[key] = value
-
-        def values_match(left, right):
-            unwrap_left = left.unwrap() if hasattr(left, "unwrap") else left
-            unwrap_right = right.unwrap() if hasattr(right, "unwrap") else right
-            return unwrap_left == unwrap_right
-
-        def retain_user_overlay(baseline, overlay):
-            for key in list(overlay):
-                if key not in baseline:
-                    continue
-                old_value = baseline[key]
-                overlay_value = overlay[key]
-                if hasattr(old_value, "items") and hasattr(overlay_value, "items"):
-                    retain_user_overlay(old_value, overlay_value)
-                    if not list(overlay_value):
-                        del overlay[key]
-                elif values_match(old_value, overlay_value):
-                    del overlay[key]
-
-        if profile_path.is_symlink():
-            if not str(profile_path.resolve(strict=False)).startswith("/nix/store/"):
-                raise RuntimeError(
-                    f"refusing to replace an unrecognised Codex profile link: {profile_path}"
-                )
-            # Native layers were previously store links. Their only writable
-            # state was saved beside the migration marker before the link was
-            # installed, so recover that state instead of treating the linked
-            # generated file as a user overlay.
-            overlay_paths = []
-            if backup_path.is_file():
-                legacy_overlay = tomlkit.parse(backup_path.read_text())
-                try:
-                    # The link still names the old generated layer. Compare
-                    # against it so an old generated default is not revived as
-                    # private state when the new layer is rendered.
-                    retain_user_overlay(
-                        tomlkit.parse(profile_path.read_text()),
-                        legacy_overlay,
-                    )
-                except OSError:
-                    print(
-                        f"codex: could not compare legacy profile backup for {profile_path}; preserving its non-MCP settings",
-                        file=sys.stderr,
-                    )
-                overlay_paths = [ legacy_overlay ]
-            current_text = None
-        elif profile_path.is_file():
-            overlay_paths = [ profile_path ]
-            current_text = profile_path.read_text()
-        elif profile_path.exists():
-            raise RuntimeError(f"Codex profile path is not a file: {profile_path}")
-        else:
-            overlay_paths = [ backup_path ] if backup_path.is_file() else []
-            current_text = None
-
-        for overlay in overlay_paths:
-            if isinstance(overlay, Path):
-                overlay = tomlkit.parse(overlay.read_text())
-            merge_overlay(generated, overlay)
-
-        rendered = tomlkit.dumps(generated)
-        mode = (
-            stat.S_IMODE(profile_path.stat().st_mode)
-            if profile_path.is_file() and not profile_path.is_symlink()
-            else None
-        )
-        if current_text == rendered and mode == 0o600:
-            sys.exit(0)
-
-        descriptor, temporary = tempfile.mkstemp(
-            prefix=f".{profile_path.name}.",
-            suffix=".tmp",
-            dir=profile_path.parent,
-        )
-        try:
-            with os.fdopen(descriptor, "w") as temporary_file:
-                temporary_file.write(rendered)
-            os.replace(temporary, profile_path)
-        except BaseException:
-            os.unlink(temporary)
-            raise
-      '';
       inherit (browser)
         mcpChromeDevtoolsBin
         desktopControlScripts
@@ -264,13 +138,7 @@ mkFeatureModule {
         mcpPolylogueText
         mcpSinexText
         ;
-      inherit (clientProfiles)
-        codexSystemConfigFile
-        codexEndpointFiles
-        ;
-      codexConfigFiles = codexEndpointFiles;
-      codexDeepseekConfigFile = codexEndpointFiles.deepseek;
-      codexLocalConfigFile = codexEndpointFiles.local;
+      inherit (clientProfiles) codexSystemConfigFile;
     in
     lib.mkMerge [
       {
@@ -278,8 +146,6 @@ mkFeatureModule {
         environment.etc."codex/config.toml".source = codexSystemConfigFile;
         environment.etc."codex/agents/explorer.toml".source = "${dotsRoot}/codex/agents/explorer.toml";
         sinnix.features.dev.mcp-servers.codexConfigSource = codexSystemConfigFile;
-        sinnix.features.dev.mcp-servers.codexDeepseekConfigSource = codexDeepseekConfigFile;
-        sinnix.features.dev.mcp-servers.codexLocalConfigSource = codexLocalConfigFile;
         sinnix.features.dev.mcp-servers.codexHooksSource = codexHooksFile;
 
         home-manager.users.${user} =
@@ -364,18 +230,7 @@ mkFeatureModule {
                     run touch "$codex_marker"
                   fi
                 '';
-                codexNativeProfiles = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
-                  codex_home="$HOME/.codex"
-                  codex_backup="$codex_home/.sinnix-before-native-layers-v1"
-                  run mkdir -p "$codex_home"
-                  ${lib.concatMapStringsSep "\n" (codex_name: ''
-                    run ${codexMigrationPython}/bin/python ${codexNativeProfileMigration} \
-                      ${lib.escapeShellArg (toString codexConfigFiles.${codex_name})} \
-                      "$codex_home/${codex_name}.config.toml" \
-                      "$codex_backup/${codex_name}.config.toml"
-                  '') (lib.attrNames codexConfigFiles)}
-                '';
-                codexRetireOldProfiles = lib.hm.dag.entryAfter [ "codexNativeProfiles" ] ''
+                codexRetireOldProfiles = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
                   codex_home="$HOME/.codex"
                   retired="$codex_home/.sinnix-retired-profiles-v1"
                   if [ ! -e "$retired/.complete" ]; then
