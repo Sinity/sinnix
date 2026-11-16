@@ -286,6 +286,7 @@ let
 
     chatgpt-app = pkgs.callPackage ../pkgs/chatgpt-app { };
     learnharness = pkgs.callPackage ../pkgs/learnharness { };
+    plannotator = pkgs.callPackage ../pkgs/plannotator { };
 
     machine-telemetry = pkgs.callPackage ../pkgs/machine-telemetry/pkg.nix {
       inherit sinnix-lib;

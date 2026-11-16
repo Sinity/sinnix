@@ -318,6 +318,11 @@ mkFeatureModule {
             ".local/state/codex"
             ".local/state/pi"
             ".hermes"
+            # Plannotator's Inbox threads, plan history and review drafts.
+            {
+              directory = ".local/share/plannotator";
+              mode = "0700";
+            }
           ];
         };
 
@@ -339,6 +344,10 @@ mkFeatureModule {
               scriptPkgs.claude-quota
               scriptPkgs.codex-worker
               scriptPkgs.claude-agents
+              # Review surface the agents open for the operator; its hooks and
+              # Inbox server are declared in managed-settings.json, hooks.nix
+              # and the MCP registry, and the hook commands find it on PATH.
+              scriptPkgs.plannotator
             ];
 
             xdg.configFile = {
