@@ -1,6 +1,6 @@
 ---
 name: agent-runtime
-description: "Run, watch, recover, or clean AgentCTL jobs and retained history: queue state, exact identities, artifacts, pressure pauses, and preservation-aware worktree cleanup."
+description: "Run, watch, recover, or clean AgentCTL jobs and retained history: queue state, exact identities, artifacts, and preservation-aware worktree cleanup."
 ---
 
 # Agent runtime
@@ -40,7 +40,7 @@ and [the command contract](../../../../docs/agentctl.md) for syntax.
 - A queued job is already running work. Wait for its completion event before
   retrying. Diagnose a terminal failure first; an uncertain launch is not a
   reason to submit it again. Cancel by recorded identity, then confirm terminal
-  state before retrying. `pressure tick` reconciles admission holds.
+  state before retrying.
 - Keep a checkout on its commit while a job uses it; the job's result belongs
   to that commit. Once every job and process using it has ended and its
   uncommitted work is preserved, the owner reuses the checkout for a fresh

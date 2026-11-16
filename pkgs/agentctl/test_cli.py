@@ -6,7 +6,6 @@ import json
 import os
 import subprocess
 import sys
-import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -494,12 +493,13 @@ def test_follow_tail_process_rss_stays_bounded_on_large_spool(
             "--lines",
             "1",
         ],
-        stdout=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         env=os.environ.copy(),
     )
     try:
-        time.sleep(0.5)
+        assert child.stdout is not None
+        assert b"fixture:check" in child.stdout.readline()
         assert child.poll() is None, child.stderr.read().decode()
         status = Path(f"/proc/{child.pid}/status").read_text()
         rss = int(status.split("VmRSS:")[1].splitlines()[0].split()[0])
@@ -548,25 +548,6 @@ def test_view_json_is_the_snapshot(
     monkeypatch.chdir(cli_config.project_roots[0])
     assert cli.main(["view"]) == 0
     assert "== fixture at" in capsys.readouterr().out
-
-
-def test_pressure_tick_reports_the_decision(
-    cli_config: Config, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
-) -> None:
-    from agentctl import pressure
-
-    monkeypatch.setattr(
-        pressure,
-        "read_pressure",
-        lambda _root: {"io_full_avg60": 0.0, "memory_full_avg60": 0.0},
-    )
-    monkeypatch.setattr(pressure.pueue, "groups_status", lambda: {"agent": "Running"})
-
-    assert cli.main(["pressure", "tick"]) == 0
-    output = capsys.readouterr()
-    decision = json.loads(output.out)
-    assert decision["action"] == "clear"
-    assert "pressure clear" in output.err
 
 
 def test_job_start_passes_arguments_after_a_bare_double_dash(

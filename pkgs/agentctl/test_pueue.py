@@ -813,21 +813,6 @@ def test_native_fixture_cleans_allocations_when_startup_fails(monkeypatch):
     assert calls[-1] == ["pueue", "shutdown"]
 
 
-def test_call_deadline_bounds_every_call_inside_the_block(monkeypatch):
-    seen: list[float] = []
-
-    def fake_run(arguments, **kwargs):
-        seen.append(kwargs["timeout"])
-        return subprocess.CompletedProcess(arguments, 0, stdout="{}", stderr="")
-
-    monkeypatch.setattr(pueue.subprocess, "run", fake_run)
-    with pueue.call_deadline(8):
-        pueue.groups_status()
-        pueue._run(["status"], timeout=3)
-    pueue.groups_status()
-    assert seen == [8, 3, pueue.CALL_TIMEOUT_SECONDS]
-
-
 def test_add_passes_a_priority_before_the_command(
     stub_pueue: Path, tmp_path: Path
 ) -> None:

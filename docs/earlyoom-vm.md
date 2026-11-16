@@ -55,8 +55,7 @@ result. Logs and raw measurements remain in the requested output directory,
 including after an assertion failure when the guest remains accessible.
 
 This is a headless guest probe, not a Hyprland/Chrome response measurement.
-The guest does not run the host's `agentctl-pressure.service`; its loaded
-30-second completion criterion remains separate. This isolates the earlyoom fallback with a scaled guest-only memory.high
+The guest isolates the earlyoom fallback with a scaled guest-only memory.high
 fixture. After at most 30 seconds of actual memory-full PSI warmup at
 900 MiB, the fixture raises its memory.high to 1000 MiB and records kernel
 readback, timestamp and victim identity. Failure to reach real warmup pressure

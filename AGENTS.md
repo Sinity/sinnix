@@ -75,7 +75,6 @@ dots/         managed user configuration; dots/_ai/ holds the global agent
 - Declared operations choose a pueue group; the groups and their widths are
   `sinnix.services.agentctl.pools` (`modules/services/agentctl.nix`), applied
   with `agentctl pools apply`, never by restarting pueued.
-  `agentctl pressure tick` pauses and reopens groups through pueue.
 - Memory is bounded by the slice hierarchy and the resource classes in
   `flake/data/runtime-defaults.nix`. Hard `MemoryMax` is reserved for explicit
   safety boundaries. The `bulk` group admits

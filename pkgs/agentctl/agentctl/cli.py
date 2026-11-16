@@ -36,7 +36,6 @@ from . import (
     launch,
     operator_view,
     pools,
-    pressure,
     worktree_cleanup,
 )
 from .config import Config, ConfigError, load_config, resolve_project
@@ -261,7 +260,7 @@ def parser() -> argparse.ArgumentParser:
     _output_arguments(view)
 
     events = verbs.add_parser(
-        "events", help="the event log: started and finished tasks, pressure pauses"
+        "events", help="the event log: started and finished tasks"
     )
     events_verbs = events.add_subparsers(dest="events_verb", required=True)
     tail = events_verbs.add_parser("tail")
@@ -276,11 +275,6 @@ def parser() -> argparse.ArgumentParser:
     pool_verbs = pool_commands.add_subparsers(dest="pools_verb", required=True)
     _output_arguments(pool_verbs.add_parser("apply"))
 
-    pause = verbs.add_parser(
-        "pressure", help="pause or reopen job groups against memory pressure"
-    )
-    pause_verbs = pause.add_subparsers(dest="pressure_verb", required=True)
-    _output_arguments(pause_verbs.add_parser("tick"))
     return root
 
 
@@ -497,7 +491,7 @@ def _event_line(event: Mapping[str, Any]) -> str:
         outcome = str(event.get("outcome") or "")
         exit_code = event.get("exit_code")
         return f"{stamp} {label} finished {outcome}{f' exit {exit_code}' if exit_code not in (None, '', '0', 0) else ''}{task}"
-    if kind == pressure.EVENT_KIND:
+    if kind == "pressure":
         return f"{stamp} pressure {event.get('action')} {event.get('group') or ''}".rstrip()
     detail = " ".join(
         f"{key}={value}"
@@ -769,10 +763,6 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
             f"resized {len(applied['resized'])}, "
             f"unchanged {len(applied['unchanged'])}",
         )
-        return EXIT_OK
-    if verb == "pressure":
-        decision = pressure.tick(spool=config.event_spool)
-        out.write(decision, f"pressure {decision.get('action')}")
         return EXIT_OK
     raise AssertionError(verb)
 

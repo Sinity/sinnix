@@ -35,7 +35,6 @@ functions. Waiting never cancels a job; queue cleanup keeps its input and output
 | `view [p]`                                                                                    | queue groups, recent failures, active jobs and ready tasks                                                                                                                                                                                                                                           |
 | `events tail [--lines N] [--follow] [--project p]`                                            | the event log (`/realm/state/agentctl/events.jsonl`)                                                                                                                                                                                                                                                 |
 | `pools apply`                                                                                 | write the declared pool widths into the running pueued                                                                                                                                                                                                                                               |
-| `pressure tick`                                                                               | one pass pausing or reopening groups against memory pressure                                                                                                                                                                                                                                         |
 
 `job start --wait --wait-seconds N` and `job wait --timeout-seconds N` bound
 only the caller's wait; a job's runtime limit is always its operation's
@@ -195,32 +194,15 @@ settings changes widths without restarting the daemon or its running jobs.
 (`normal` 1, `bulk` 1, `compile` 2) bound how many run at once, so a job takes its queue slot only
 when it can run; no job waits inside its slot.
 
-The pressure tick has a 20-second deadline inside the unit's 30-second
-timeout. Pueue calls have an 8-second limit. An exhausted tick reports
-`action: unavailable`; the next timer reads current state again.
+**Pausing work.** `pueue pause --group <pool> --wait` stops new jobs in a
+group while its running jobs finish. `pueue start --group <pool>` resumes it.
 
-**Pressure pauses.** `agentctl-pressure.timer` runs `pressure tick` every
-minute. Each tick reads every group's state from pueue; it keeps no record of
-its own pauses.
-
-- **Closing:** when host memory `full avg60` is at least 25%, the tick pauses
-  one running group (`pueue pause --wait`, so running jobs finish), in the
-  order `pytest-heavy`, `pytest`, `normal`, `bulk`, `pytest-quick`, and
-  reports a `pressure` event `closed` to the event log.
-- **Reopening:** once memory `full avg10` is below 10%, the tick reopens
-  (`pueue start --group`) the first paused group of that order, one group per
-  tick, whoever paused it. Groups outside the order are never paused or
-  resumed.
-- **Pausing work by hand:** a manual `pueue pause` of a group in the close
-  order lasts only until memory pressure is low. To pause a pool's work
-  regardless of pressure, freeze its slice as below.
 - **Freezing running work:** a paused group admits nothing new, but jobs
   already running keep running in their own units. To take the disk or memory
   back now (for example while PostgreSQL finishes a checkpoint), freeze them:
   `systemctl --user freeze agent-ctl.slice`, and `thaw` it afterwards. Each
   unit shows `FreezerState=frozen-by-parent` while frozen.
-- **I/O pressure** is reported, but it neither closes nor delays new jobs.
-  Long copies and offloads belong in the `background` pool, whose slice has
+- **Long copies and offloads** belong in the `background` pool, whose slice has
   the plane's lowest I/O weight. Benchmarks and measurements run in the
   one-slot `measure` pool, and full system builds, including `switch` and
   `boot`, in the one-slot `system-build` pool, so neither occupies a `bulk` slot
@@ -360,7 +342,6 @@ with each pool as `{parallel}`. It installs `agentctl`, `wt`, `pueue` and
 `/realm/state/agentctl` beside the event spool) off the root disk, and
 declares these units:
 
-- `agentctl-pressure` (every minute).
 - `agentctl-clean-queue` (hourly: removes tasks finished over 24 hours ago).
 - `agentctl-pools`, which reapplies pool widths whenever pueued starts or the
   configuration changes.

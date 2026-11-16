@@ -134,32 +134,6 @@ mkServiceModule {
       (lib.sinnix.mkScheduledJob
         {
           inherit config;
-          unitName = "agentctl-pressure";
-          description = "Reconcile queue admission against memory stall";
-        }
-        {
-          manager = "user";
-          # The tick must run during stalls, so it uses the ordinary class.
-          resourceClass = "ordinary";
-          # The pass pauses and resumes pueue groups through the pueue client.
-          path = [ pkgs.pueue ];
-          execStart = "${scriptPkgs.agentctl}/bin/agentctl pressure tick";
-          serviceConfig = {
-            TimeoutStartSec = "30s";
-          };
-          timer = {
-            # Full-stall averages are 60-second means, so sampling faster reads
-            # the same number twice. One group is paused or resumed per tick,
-            # with the signal-specific order defined by `agentctl pressure tick`.
-            intervalSec = 60;
-            onBootSec = 60;
-            description = "Reconcile queue admission against memory stall";
-          };
-        }
-      )
-      (lib.sinnix.mkScheduledJob
-        {
-          inherit config;
           unitName = "agentctl-clean-queue";
           description = "Remove finished queue tasks";
         }
