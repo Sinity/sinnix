@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Provably fails when: a hook fails shellcheck, a guard stops denying what it
-# should deny, or a hook blocks on malformed input.
+# should deny for either harness, a client's hook source stops running the
+# command guard on shell commands, or a hook blocks on malformed input.
 set -euo pipefail
 
 hooks_dir=$1
 settings=$2
+codex_hooks=$3
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
 mkdir -p "$test_root/bin" "$test_root/home"
@@ -20,10 +22,13 @@ for hook in "$hooks_dir"/*.sh; do
   bash -n "$hook"
 done
 
+# The hook is a command line, as in the harness settings: a path and arguments.
 run_hook() {
-  local hook=$1 payload=$2
+  local payload=$2
+  local -a hook
+  read -r -a hook <<<"$1"
   export PATH
-  printf '%s' "$payload" | HOME="$test_root/home" XDG_STATE_HOME="$test_root/state" "$hook"
+  printf '%s' "$payload" | HOME="$test_root/home" XDG_STATE_HOME="$test_root/state" "${hook[@]}"
 }
 
 bash_deny=$(run_hook "$hooks_dir/pretooluse-bash.py" '{"tool_input":{"command":"git push --force origin master"}}')
@@ -95,6 +100,41 @@ for payload in \
   "$(jq -n '{tool_input: {command: "git commit -F - <<EOF\nuntil x; do sleep 30; done\nEOF"}}')"; do
   test -z "$(run_hook "$hooks_dir/pretooluse-bash.py" "$payload")"
 done
+
+# Codex sends the same payload shape for a shell command (`tool_name` Bash,
+# the script in `tool_input.command`, the session directory in `cwd`) and reads
+# the same deny answer. Its hook passes the harness name, which changes only
+# the advice in a denial.
+codex_payload() {
+  jq -cn --arg command "$1" '{
+    session_id: "s", turn_id: "t", tool_use_id: "u", hook_event_name: "PreToolUse",
+    cwd: "/tmp/r", model: "m", permission_mode: "bypassPermissions",
+    tool_name: "Bash", tool_input: {command: $command}
+  }'
+}
+for denied in 'git stash' 'git push --force origin master' 'git commit --no-verify -m x' 'bd update x --notes replace' 'ls /nix/store/*' 'until test -s out; do sleep 30; done'; do
+  run_hook "$hooks_dir/pretooluse-bash.py codex" "$(codex_payload "$denied")" |
+    jq -e '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | length > 0)' >/dev/null
+done
+for allowed in 'git status --short' 'git stash push -m wip -- a.txt' 'git push origin b' $'# poll-ok: socket appears within seconds\nuntil test -S sock; do sleep 1; done'; do
+  test -z "$(run_hook "$hooks_dir/pretooluse-bash.py codex" "$(codex_payload "$allowed")")"
+done
+# Each harness is pointed at tools it has: only Claude Code can background a call.
+poll_payload=$(codex_payload 'until test -s out; do sleep 30; done')
+run_hook "$hooks_dir/pretooluse-bash.py" "$poll_payload" |
+  jq -e '.hookSpecificOutput.permissionDecisionReason | contains("run_in_background")' >/dev/null
+run_hook "$hooks_dir/pretooluse-bash.py codex" "$poll_payload" |
+  jq -e '.hookSpecificOutput.permissionDecisionReason | contains("run_in_background") | not' >/dev/null
+
+# Both clients run the guard on their shell tool, and Codex names itself.
+jq -e '
+  [.hooks.PreToolUse[] | select(.matcher == "Bash") | .hooks[].command]
+  | any(endswith("/pretooluse-bash.py"))
+' "$settings" >/dev/null
+jq -e '
+  [.hooks.PreToolUse[] | select(.matcher == "^Bash$") | .hooks[].command]
+  | any(endswith("/pretooluse-bash.py codex"))
+' "$codex_hooks" >/dev/null
 
 # Without Polylogue, Sinnix or Sinex on PATH the session-start block is empty.
 test -z "$(PATH="$test_root/bin" run_hook "$hooks_dir/sessionstart-context.sh" '{"source":"startup"}')"

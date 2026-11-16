@@ -190,6 +190,13 @@ in
               message = "Every agent role in dots/codex/config.toml must exist and resolve beside the system Codex config and in the Codex home through a live dots link.";
             }
             {
+              assertion =
+                (config.environment.etc."codex/hooks.json".source or null)
+                == config.sinnix.features.dev.mcp-servers.codexHooksSource
+                && !(hm.home.file ? ".codex/hooks.json");
+              message = "Codex hooks must load from the system layer alone: there they are managed policy, and a second copy in the Codex home would run every hook twice once trusted.";
+            }
+            {
               assertion = builtins.hasAttr ".agents/skills" hm.home.file;
               message = "Native Codex skill discovery must link ~/.agents/skills to the live shared root.";
             }
@@ -238,7 +245,6 @@ in
           ".codex/agents/explorer.toml"
           ".codex/agents/implementer.toml"
           ".codex/agents/review.toml"
-          ".codex/hooks.json"
         ];
         fixtureAssets = [
           {
@@ -677,7 +683,6 @@ in
             )
             grep -Fq '"kept"' "$claude_home/.config/claude/settings.json"
 
-            test -L "$HOME/.codex/hooks.json"
             test -L "$HOME/.agents/skills"
             # The live checkout is intentionally absent from the Nix sandbox;
             # resolve the declared link without requiring its target to exist.
@@ -797,10 +802,10 @@ in
             jq -e '
               [.hooks.Stop[].hooks[].command]
               | any(. == "polylogue hook Stop --harness codex")
-            ' "$HOME/.codex/hooks.json" >/dev/null
+            ' ${agentToolsRuntimeEvaluated.config.environment.etc."codex/hooks.json".source} >/dev/null
             jq -e '
               [.hooks.SessionStart[].hooks[].command] | any(contains("sessionstart-context.sh"))
-            ' "$HOME/.codex/hooks.json" >/dev/null
+            ' ${agentToolsRuntimeEvaluated.config.environment.etc."codex/hooks.json".source} >/dev/null
             ${claudeLaneWrapperChecks}
             grep -Fq 'claude_args+=(--add-dir=' "$HOME/.local/bin/claude"
             ${codexLaneWrapperChecks}
@@ -1262,7 +1267,8 @@ in
             cp ${../../dots/claude/managed-settings.json} "$settings"
             chmod +x "$hooks"/*.sh "$hooks"/*.py
             patchShebangs "$hooks"
-            ${pkgs.bash}/bin/bash ${../../flake/tests/hooks-harness.sh} "$hooks" "$settings"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/hooks-harness.sh} "$hooks" "$settings" \
+              ${agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexHooksSource}
             touch "$out"
           '';
       agentDefinitionsFixture =

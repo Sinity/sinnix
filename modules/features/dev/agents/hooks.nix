@@ -1,10 +1,12 @@
 # Codex session-lifecycle hooks: Polylogue's live hooks (`polylogue hook`)
 # record every event; the shared session-start script injects one block
 # (Polylogue's brief first, then acknowledged outages and recent Sinex
-# sources); a pasted session ID brings its takeover context.
-# Plain helper (not a NixOS module) imported directly by mcp.nix's configFn;
-# the generated file is exposed via the mcp-servers.codexHooksSource option
-# for tests.
+# sources); a pasted session ID brings its takeover context. Shell commands
+# pass the destructive-command guard Claude Code runs (Codex reports every
+# shell tool as `Bash`).
+# Plain helper (not a NixOS module) imported directly by mcp.nix's configFn,
+# which installs the file as /etc/codex/hooks.json; it is also exposed via the
+# mcp-servers.codexHooksSource option for tests.
 { pkgs, dotsRoot }:
 let
   jsonFormat = pkgs.formats.json { };
@@ -43,6 +45,16 @@ jsonFormat.generate "codex-hooks.json" {
       }
     ];
     PreToolUse = [
+      {
+        matcher = "^Bash$";
+        hooks = [
+          {
+            type = "command";
+            command = "${dotsRoot}/claude/hooks/pretooluse-bash.py codex";
+            timeout = 3;
+          }
+        ];
+      }
       {
         hooks = [
           {

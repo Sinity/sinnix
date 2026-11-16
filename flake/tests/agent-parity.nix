@@ -8,8 +8,9 @@
 # Provably fails when: a `polylogue hook <Event>` lane present in
 # Claude's settings is dropped from the generated Codex hooks, when a writer
 # bakes a sidecar path, when a hook invocation stops appending a spool line
-# naming its harness, event and session, or when either client loses the
-# pre-compaction handoff or shared hook coverage.
+# naming its harness, event and session, when either client loses the
+# pre-compaction handoff or shared hook coverage, or when either client stops
+# running the destructive-command guard on its shell tool.
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;
@@ -65,6 +66,7 @@ in
               pkgs.gnugrep
               pkgs.jq
               pkgs.ripgrep
+              pkgs.util-linux
             ];
           }
           ''
@@ -196,12 +198,21 @@ in
             # the event and the session.
             smoke_root="$TMPDIR/polylogue-hook-smoke"
             mkdir -p "$smoke_root/home" "$smoke_root/xdg-data" "$smoke_root/xdg-state"
+            # The hook reads the host identity from /etc/machine-id, which
+            # the build sandbox lacks: run it in a mount namespace whose /etc
+            # holds a fixture identity and nothing else.
+            cat > "$smoke_root/with-machine-id" <<'WITH_MACHINE_ID'
+            mount -t tmpfs none /etc
+            echo 00000000000000000000000000000001 > /etc/machine-id
+            exec "$@"
+            WITH_MACHINE_ID
             for call in "UserPromptSubmit codex parity-codex" "Stop claude-code parity-claude"; do
               set -- $call
               printf '{"session_id":"%s","cwd":"/nonexistent","prompt":"hello"}' "$3" \
                 | env HOME="$smoke_root/home" \
                   XDG_DATA_HOME="$smoke_root/xdg-data" \
                   XDG_STATE_HOME="$smoke_root/xdg-state" \
+                  unshare --user --map-root-user --mount sh "$smoke_root/with-machine-id" \
                   "$polylogueHook/bin/polylogue" hook "$1" --harness "$2" > "$smoke_root/$1.out"
               test ! -s "$smoke_root/$1.out" || {
                 echo "the $1 hook answered without a daemon" >&2
@@ -223,6 +234,22 @@ in
             require_line claude-code Stop parity-claude
             test -z "$(find "$smoke_root/home" "$smoke_root/xdg-data" -mindepth 1 -print -quit)" \
               || { echo 'the hook wrote outside its spool' >&2; exit 1; }
+
+            # Both clients run the one destructive-command guard before every
+            # shell command. Each reports its shell tool as `Bash`; the Codex
+            # row names its harness, which selects the wording of a denial.
+            for pair in "$claudeHooks pretooluse-bash.py" "$codexHooks pretooluse-bash.py codex"; do
+              set -- $pair
+              jq -e --arg suffix "/''${*:2}" '
+                [.hooks.PreToolUse[]
+                  | select((.matcher // "") | test("^\\^?Bash\\$?$"))
+                  | .hooks[]?.command]
+                | any(endswith($suffix))
+              ' "$1" >/dev/null || {
+                echo "PreToolUse in $1 does not run the command guard on Bash" >&2
+                exit 1
+              }
+            done
 
             # The shared session-start script (which also carries Polylogue's
             # SessionStart lane) is configured independently for both

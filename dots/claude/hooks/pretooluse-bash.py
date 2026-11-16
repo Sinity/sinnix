@@ -1,8 +1,16 @@
 #!/usr/bin/env -S python3 -I
-"""PreToolUse hook for Bash commands.
+"""PreToolUse hook for shell commands, shared by Claude Code and Codex.
 
 Blocks dangerous patterns only. Build/test/resource placement is provided by
 project dev environments, not by this hook.
+
+Both harnesses send the command as `tool_input.command` with the session `cwd`
+and accept the same deny answer (`hookSpecificOutput.permissionDecision`), so
+one script serves both. The harness name is the first argument (`codex`;
+Claude Code when absent). It selects only wording: the advice in a denial
+names tools the calling harness has. Codex reports the session directory as
+`cwd`, never a per-call working directory, so the worktree rules see only the
+directory the session started in.
 
 One process reads the payload once and applies every guard: this runs before
 every agent Bash command, so interpreter and jq starts are the cost to avoid.
@@ -175,7 +183,13 @@ def git_guard(stripped, **_):
     return None
 
 
-def poll_guard(command, stripped, background, **_):
+POLL_ADVICE = {
+    "claude-code": "Run 'agentctl job wait <task> --job-id <job_id>' (or the command you are waiting on) with run_in_background, or use Monitor, and do other work or end the turn until the notification arrives.",
+    "codex": "Run the blocking command itself, such as 'agentctl job wait <task> --job-id <job_id>': it returns when the work completes, and a command that outlives the tool call stays readable through its exec session.",
+}
+
+
+def poll_guard(command, stripped, background, harness, **_):
     """Foreground polling loops.
 
     A loop that sleeps until a job, file or PR changes holds the agent for up
@@ -185,14 +199,15 @@ def poll_guard(command, stripped, background, **_):
     (`agentctl job wait <task> --job-id <job_id>` with run_in_background, or a
     Monitor). A background loop is allowed, and so is a foreground one that
     carries `# poll-ok: <reason>` for a short, bounded poll with no completion
-    event to wait on.
+    event to wait on. Codex has no background flag, so there the comment is
+    the only exemption.
     """
     if background or any_line(r"#\s*poll-ok:\s*\S", command):
         return None
     # The sleep must sit inside the loop body: between `do` and the next `done`.
     flat = stripped.replace("\n", " ")
     if re.search(r"""(^|[;&|({\s'"])(until|while|for)\s.*?[;\s]do\s(?:(?!\bdone\b).)*\bsleep\s+[0-9]""", flat):
-        return ("Foreground polling loop blocked: every round re-reads the whole context. Run 'agentctl job wait <task> --job-id <job_id>' (or the command you are waiting on) with run_in_background, or use Monitor, and do other work or end the turn until the notification arrives. If a short, bounded foreground poll is genuinely needed, add a comment '# poll-ok: <reason>' to the command.")
+        return ("Foreground polling loop blocked: every round re-reads the whole context. " + POLL_ADVICE[harness] + " If a short, bounded foreground poll is genuinely needed, add a comment '# poll-ok: <reason>' to the command.")
     return None
 
 
@@ -255,6 +270,7 @@ def main():
     cwd = payload.get("cwd") or tool_input.get("cwd") or ""
     background = tool_input.get("run_in_background") in (True, "true")
     context = {
+        "harness": "codex" if sys.argv[1:2] == ["codex"] else "claude-code",
         "command": command,
         "cwd": cwd,
         "stripped": strip_heredoc_bodies(command),

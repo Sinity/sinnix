@@ -106,6 +106,11 @@ mkFeatureModule {
         # Codex reads this live system layer before its private overlay.
         environment.etc = {
           "codex/config.toml".source = codexSystemConfigFile;
+          # Hooks sit beside the system config, not in the Codex home: Codex
+          # runs a system layer's hooks as managed policy, while a hook in
+          # ~/.codex/hooks.json is skipped until the operator trusts its
+          # exact definition in `/hooks`, again after every change.
+          "codex/hooks.json".source = codexHooksFile;
         }
         // lib.genAttrs (map codexAgentRoleFile codexAgentRoles) (file: {
           source = "${dotsRoot}/${file}";
@@ -223,10 +228,6 @@ mkFeatureModule {
                 };
                 ".agents/skills" = {
                   source = mkDotsFile "/_ai/skills";
-                  force = true;
-                };
-                ".codex/hooks.json" = {
-                  source = codexHooksFile;
                   force = true;
                 };
                 ".local/bin/mcp-github" = {
