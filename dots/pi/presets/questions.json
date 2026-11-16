@@ -1,0 +1,5 @@
+{
+  "description": "Structured questions and answers; reads files, changes nothing",
+  "instructions": "questions.md",
+  "tools": ["read", "grep", "find", "ls", "ask_operator", "rank_options"]
+}

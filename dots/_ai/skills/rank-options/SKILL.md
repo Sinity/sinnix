@@ -79,6 +79,15 @@ sinnix rank record design-directions --set opt-hub-page,opt-phone-deck \
 `--context` is free text carried on the comparison; use it to name the pass so
 a later refit can tell one sitting from another.
 
+## In pi
+
+`/compare <domain>` runs the pass for the operator in the terminal: one key
+per answer, no model turn. The `rank_options` tool does the same when you
+call it and returns the fitted order with the evidence, so use it there
+instead of mediating each question yourself. A front end that drives its own
+loop adds `--next` to `record` or `retract`: the answer is one JSON object
+with the recorded id, the next set (with item metadata) and the evidence.
+
 ## Reading the result
 
 `status --json` returns the fitted order plus an `evidence` block. Report both.

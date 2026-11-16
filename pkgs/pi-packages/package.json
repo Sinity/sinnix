@@ -1,0 +1,11 @@
+{
+  "name": "sinnix-pi-packages",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Third-party pi packages at exact versions; the lock file pins their dependencies",
+  "dependencies": {
+    "@plannotator/pi-extension": "0.28.66",
+    "pi-subagents": "0.88.1",
+    "pi-web-access": "0.48.0"
+  }
+}

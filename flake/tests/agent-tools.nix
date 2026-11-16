@@ -311,6 +311,11 @@ in
       agentToolsCodexSkillsActivation = pkgs.writeText "codex-skills-activation.sh" (
         agentToolsRuntimeConfig.home-manager.users.${agentToolsRuntimeConfig.sinnix.user.name}.home.activation.codexSkills.data
       );
+      agentToolsPiSources = agentToolsRuntimeConfig.sinnix.features.dev.agentTools.piSources;
+      agentToolsPiActivation = pkgs.writeText "pi-config-activation.sh" (
+        agentToolsRuntimeConfig.home-manager.users.${agentToolsRuntimeConfig.sinnix.user.name}.home.activation.piConfig.data
+      );
+      piPackage = inputs.pi.packages.${system}.pi;
       agentToolsClaudeStateActivation = pkgs.writeText "claude-state-activation.sh" (
         agentToolsRuntimeConfig.home-manager.users.${agentToolsRuntimeConfig.sinnix.user.name}.home.activation.claudeSymlink.data
       );
@@ -797,10 +802,14 @@ in
             # agent-scope-guard fixture cannot diverge.
             for wrapper in \
               "$HOME/.local/bin/claude" \
-              "$HOME/.local/bin/codex" \
-              "$HOME/.local/bin/pi"; do
+              "$HOME/.local/bin/codex"; do
               grep -Fq 'npm/bin/' "$wrapper"
               grep -Fq 'exec "$STATE/npm/bin/' "$wrapper"
+            done
+            for wrapper in \
+              "$HOME/.local/bin/claude" \
+              "$HOME/.local/bin/codex" \
+              "$HOME/.local/bin/pi"; do
               grep -Fq '/proc/self/cgroup' "$wrapper"
               grep -Fq -- '--slice=agent-cli.slice' "$wrapper"
               grep -Fq -- '${runtimeDefaults.agentContainedCasePattern}' "$wrapper"
@@ -809,7 +818,7 @@ in
               echo "agent wrappers must not hardcode resource limits" >&2
               exit 1
             fi
-            for wrapper in "$HOME/.local/bin/claude" "$HOME/.local/bin/codex" "$HOME/.local/bin/pi"; do
+            for wrapper in "$HOME/.local/bin/claude" "$HOME/.local/bin/codex"; do
               grep -Fq 'sinnix-agent-npm-bootstrap' "$wrapper"
               grep -Fq 'export npm_config_prefix="$STATE/npm"' "$wrapper"
               grep -Fq 'export NPM_CONFIG_PREFIX="$STATE/npm"' "$wrapper"
@@ -817,11 +826,92 @@ in
             done
             grep -Fq '@anthropic-ai/claude-code' "$HOME/.local/bin/claude"
             grep -Fq '@openai/codex' "$HOME/.local/bin/codex"
-            grep -Fq '@earendil-works/pi-coding-agent' "$HOME/.local/bin/pi"
-            grep -Fq -- '--provider openai-codex' "$HOME/.local/bin/pi"
-            grep -Fq -- '--append-system-prompt "$HOME/.config/claude/CLAUDE.md"' "$HOME/.local/bin/pi"
-            grep -Fq -- '--skill "$HOME/.config/claude/skills"' "$HOME/.local/bin/pi"
-            grep -Fq 'unset OPENAI_API_KEY' "$HOME/.local/bin/pi"
+
+            # Pi runs the pinned upstream package with the caller's arguments
+            # and nothing else: its provider, instructions and packages come
+            # from the settings and links checked below.
+            grep -Fxq 'exec ${piPackage}/bin/pi "$@"' "$HOME/.local/bin/pi"
+            grep -Fq 'source ${agentToolsPiSources.unsetProviderKeys}' "$HOME/.local/bin/pi"
+            grep -Fq 'export TMPDIR=' "$HOME/.local/bin/pi"
+            grep -Fq 'PI_CLAUDE_CODE_COMMAND="$HOME/.local/state/claude-code/npm/bin/claude"' "$HOME/.local/bin/pi"
+
+            # No key pi's own source reads from the environment survives the
+            # launcher, so no provider is selected by an ambient key. The
+            # names come from the pinned source, so a release that reads a
+            # new one fails here until the launcher removes it.
+            pi_key_names="$(grep -oE '"[A-Z][A-Z0-9_]*(API_KEY|TOKEN)[A-Z0-9_]*"' \
+              ${inputs.pi}/packages/ai/src/env-api-keys.ts | tr -d '"' | sort -u)"
+            test "$(wc -l <<<"$pi_key_names")" -ge 40
+            (
+              for name in $pi_key_names AWS_PROFILE AWS_ACCESS_KEY_ID EXA_API_KEY; do
+                export "$name=stray"
+              done
+              export CONTEXT7_API_KEY=kept GITHUB_TOKEN=kept
+              source ${agentToolsPiSources.unsetProviderKeys}
+              for name in $pi_key_names AWS_PROFILE AWS_ACCESS_KEY_ID EXA_API_KEY; do
+                if [ -n "''${!name:-}" ]; then
+                  echo "pi launcher leaves $name in the environment" >&2
+                  exit 1
+                fi
+              done
+              test "$CONTEXT7_API_KEY" = kept
+              test "$GITHUB_TOKEN" = kept
+            )
+
+            # The tool-server file lists exactly the registry's servers for
+            # pi, each found by search instead of declared up front.
+            rendered="$(jq -r '.mcpServers | keys | sort | join(",")' ${agentToolsPiSources.mcpConfigFile})"
+            test "$rendered" = '${lib.concatStringsSep "," (lib.attrNames (mcpRegistry.selectClientServersForProfile "default" "pi"))}'
+            jq -e '
+              (.mcpServers | length) >= 4 and
+              ([.mcpServers[] | .exposure] | all(. == "deferred")) and
+              ([.mcpServers[] | .description | length > 0] | all) and
+              .mcpServers.github.command == "mcp-github" and
+              (.mcpServers.context7.url | startswith("https://"))
+            ' ${agentToolsPiSources.mcpConfigFile} >/dev/null
+
+            # Declared settings: the ChatGPT sign-in as default, Sinnix's own
+            # package first and read from the checkout, the rest store paths.
+            jq -e --arg own ${agentToolsRuntimeConfig.sinnix.paths.dotsRoot}/pi '
+              .defaultProvider == "openai" and
+              (.defaultModel | length > 0) and
+              .enableInstallTelemetry == false and
+              .packages[0] == $own and
+              (.packages[1:] | length) >= 5 and
+              ([.packages[1:][] | if type == "object" then .source else . end
+                | startswith("/nix/store/")] | all) and
+              ([.packages[] | objects | select(.source | endswith("@plannotator/pi-extension")) | .skills == []] == [true])
+            ' ${agentToolsPiSources.settingsFile} >/dev/null
+            for package in $(jq -r '.packages[1:][] | if type == "object" then .source else . end' ${agentToolsPiSources.settingsFile}); do
+              test -e "$package"
+            done
+
+            # Activation links the instructions and tool servers and merges
+            # the declared settings over pi's own keys without losing them.
+            pi_home="$TMPDIR/pi-state"
+            mkdir -p "$pi_home/.pi/agent"
+            printf '{"deviceId": "kept", "defaultProvider": "deepseek", "packages": ["npm:stale"]}\n' \
+              > "$pi_home/.pi/agent/settings.json"
+            (
+              export HOME="$pi_home"
+              run() { "$@"; }
+              source ${agentToolsPiActivation}
+            )
+            jq -e --slurpfile declared ${agentToolsPiSources.settingsFile} '
+              .deviceId == "kept" and
+              .defaultProvider == "openai" and
+              .packages == $declared[0].packages
+            ' "$pi_home/.pi/agent/settings.json" >/dev/null
+            test "$(stat -c '%a' "$pi_home/.pi/agent/settings.json")" = 600
+            test "$(readlink "$pi_home/.pi/agent/AGENTS.md")" = "$pi_home/.config/claude/CLAUDE.md"
+            test "$(readlink "$pi_home/.pi/agent/mcp.json")" = ${agentToolsPiSources.mcpConfigFile}
+            rm "$pi_home/.pi/agent/settings.json"
+            (
+              export HOME="$pi_home"
+              run() { "$@"; }
+              source ${agentToolsPiActivation}
+            )
+            cmp "$pi_home/.pi/agent/settings.json" ${agentToolsPiSources.settingsFile}
             grep -Fq 'npm ci --prefix "$staged" --global=false --omit=dev' '${../../scripts/sinnix-agent-npm-bootstrap}'
             grep -Fq 'export npm_config_prefix="$STATE/npm"' '${../../scripts/sinnix-agent-npm-bootstrap}'
 

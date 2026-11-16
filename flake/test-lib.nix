@@ -28,6 +28,7 @@ let
       beads
       home-manager
       lynchpin
+      pi
       sinex
       polylogue-rewrite
       ;

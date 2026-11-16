@@ -18,6 +18,18 @@ let
   # the wrappers re-assert it because inheritance is not guaranteed.
   shellTmpRoot = "${sinnixCfg.paths.realmRoot}/tmp/work";
 
+  # Guarantee the NVMe scratch TMPDIR rather than trusting inheritance:
+  # environment.sessionVariables.TMPDIR (modules/profiles/workstation.nix) only
+  # reaches processes whose session imported it, so an agent CLI started
+  # outside that path runs with TMPDIR unset and everything beneath it
+  # fills the bounded /tmp tmpfs, truncating shell heredocs mid-write.
+  scratchTmpPrelude = ''
+    if [ -z "''${TMPDIR:-}" ] && [ -d ${lib.escapeShellArg sinnixCfg.paths.realmRoot} ]; then
+      export TMPDIR=${lib.escapeShellArg shellTmpRoot}
+      ${pkgs.coreutils}/bin/install -d -m 0700 "$TMPDIR" 2>/dev/null || true
+    fi
+  '';
+
   # Shared npm bootstrap prelude — delegates state-dir setup and first-run npm
   # recovery to scripts/sinnix-agent-npm-bootstrap. The agent executable is
   # invoked directly after setup, not through a generated launcher or
@@ -43,15 +55,7 @@ let
       export npm_config_prefix="$STATE/npm"
       export NPM_CONFIG_PREFIX="$STATE/npm"
       export PATH="$HOME/.local/bin:${agentRuntimePath}:$STATE/npm/bin:$PATH"
-      # Guarantee the NVMe scratch TMPDIR rather than trusting inheritance:
-      # environment.sessionVariables.TMPDIR (modules/profiles/workstation.nix) only
-      # reaches processes whose session imported it, so an agent CLI started
-      # outside that path runs with TMPDIR unset and everything beneath it
-      # fills the bounded /tmp tmpfs, truncating shell heredocs mid-write.
-      if [ -z "''${TMPDIR:-}" ] && [ -d ${lib.escapeShellArg sinnixCfg.paths.realmRoot} ]; then
-        export TMPDIR=${lib.escapeShellArg shellTmpRoot}
-        ${pkgs.coreutils}/bin/install -d -m 0700 "$TMPDIR" 2>/dev/null || true
-      fi
+      ${scratchTmpPrelude}
         ${scriptPkgs.sinnix-agent-npm-bootstrap}/bin/sinnix-agent-npm-bootstrap \
         ${lib.escapeShellArg stateDir} \
         ${lib.escapeShellArg npmPackage} \
@@ -192,56 +196,6 @@ let
     executable = true;
     force = true;
   };
-  # Pi is an interactive/context-experiment harness using its native ChatGPT
-  # OAuth provider. AgentCTL and interactive Pi sessions must consume the
-  # operator's Codex subscription, never quietly switch billing surfaces
-  # because an ambient key happens to exist. Log in with `/login` ->
-  # "ChatGPT Plus/Pro (Codex Subscription)"; Pi keeps its credential and
-  # sessions under ~/.pi (persisted, never read by Sinnix). `pi --list-models`
-  # lists usable models.
-  #
-  # What this wrapper actually enforces: the ambient OPENAI_API_KEY is removed,
-  # and the separated `--provider` / `--api-key` forms are refused. Pi's own
-  # parser only binds those two flags in their separated form, so `--provider=x`
-  # lands in its unknown-extension-flag map and selects no provider. A
-  # provider-prefixed `--model openai/gpt-4o` does still select a provider; that
-  # is allowed in interactive sessions; the AgentCTL route never reaches
-  # it because the adapter supplies --model from the backend registry.
-  mkPiWrapper = {
-    text = ''
-      #!/usr/bin/env bash
-      set -euo pipefail
-
-      ${agentScopePrelude}
-
-      ${mkNpmBootstrap {
-        stateDir = "pi";
-        # Upstream moved scope: @mariozechner/pi-coding-agent is deprecated by
-        # its own npm metadata ("please use @earendil-works/pi-coding-agent
-        # instead going forward") and frozen at 0.73.1 against 0.86.1 here.
-        npmPackage = "@earendil-works/pi-coding-agent";
-        binaryName = "pi";
-      }}
-
-      for argument in "$@"; do
-        case "$argument" in
-          --provider|--api-key)
-            echo "pi: provider and API-key overrides are disabled; use the ChatGPT Plus/Pro (Codex) login" >&2
-            exit 2
-            ;;
-        esac
-      done
-      unset OPENAI_API_KEY
-
-      exec "$STATE/npm/bin/pi" \
-        --provider openai-codex \
-        --append-system-prompt "$HOME/.config/claude/CLAUDE.md" \
-        --skill "$HOME/.config/claude/skills" \
-        "$@"
-    '';
-    executable = true;
-    force = true;
-  };
   # Env-only prelude for Hermes wrappers. PATH/HERMES_HOME/HERMES_INSTALL_DIR
   # must be exported here rather than in a subprocess: the final `exec` of the
   # hermes binary inherits them, and scripts/sinnix-ensure-hermes (which does
@@ -310,7 +264,7 @@ in
     mkClaudeLaunchArgs
     mkClaudeCodeWrapper
     mkCodexWrapper
-    mkPiWrapper
+    scratchTmpPrelude
     hermesBootstrap
     ensureHermes
     mkHermesWrapper

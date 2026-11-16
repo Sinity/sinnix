@@ -27,8 +27,7 @@ from pathlib import Path
 
 SOURCES = Path("flake/data/agent-cli-sources.nix")
 LOCKS = Path("flake/data/agent-cli-locks.json")
-# Entries rendered through dependency-source.nix, as opposed to pi-source.nix,
-# which keeps the publisher's own shrinkwrap.
+# Entries rendered through dependency-source.nix.
 ENTRY = re.compile(
     r'(?P<head>"(?P<name>[^"]+)" = import \.\./\.\./pkgs/agent-cli-sources/dependency-source\.nix \{.*?'
     r'url = ")(?P<url>[^"]+)(?P<mid>";\s*hash = ")(?P<hash>[^"]+)(?P<tail>";)',

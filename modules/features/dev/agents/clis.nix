@@ -1,5 +1,6 @@
 # AI agent CLI wrappers (claude/codex/pi/hermes), shared skills, and
-# per-agent runtime state. Wrapper-builder machinery lives in backends.nix.
+# per-agent runtime state. Wrapper-builder machinery lives in backends.nix;
+# everything about pi lives in pi.nix.
 {
   mkFeatureModule,
   lib,
@@ -17,6 +18,11 @@ mkFeatureModule {
     type = lib.types.path;
     internal = true;
     description = "Path to the generated default Hermes configuration (for tests)";
+  };
+  extraOptions.piSources = lib.mkOption {
+    type = lib.types.attrsOf lib.types.path;
+    internal = true;
+    description = "Paths to the generated pi settings, tool-server config and key-removal script (for tests)";
   };
   extraOptions.hermesProfileConfigSources = lib.mkOption {
     type = lib.types.attrsOf lib.types.path;
@@ -257,20 +263,34 @@ mkFeatureModule {
           ;
       };
       inherit (backends)
-        mkNpmBootstrap
         mkClaudeCodeWrapper
         mkCodexWrapper
-        mkPiWrapper
         agentScopePrelude
         hermesBootstrap
         ensureHermes
         mkHermesWrapper
         ;
+      pi = import ./pi.nix {
+        inherit
+          lib
+          pkgs
+          mcpRegistry
+          agentScopePrelude
+          agentRuntimePath
+          ;
+        inherit (backends) scratchTmpPrelude;
+        piPackage = inputs.pi.packages.${pkgs.stdenv.hostPlatform.system}.pi;
+        piPackages = scriptPkgs.pi-packages;
+        dotsRoot = sinnixCfg.paths.dotsRoot;
+      };
     in
     lib.mkMerge [
       {
         sinnix.features.dev.agentTools.hermesConfigSource = hermesConfigFile;
         sinnix.features.dev.agentTools.hermesProfileConfigSources = hermesProfileConfigFiles;
+        sinnix.features.dev.agentTools.piSources = {
+          inherit (pi) settingsFile mcpConfigFile unsetProviderKeys;
+        };
         environment.etc."claude-code/managed-settings.json".source = claudeManagedSettings;
         systemd.tmpfiles.rules = [
           "d /realm/state/codex 0700 ${user} users -"
@@ -305,9 +325,7 @@ mkFeatureModule {
               directory = ".gemini";
               mode = "0700";
             }
-            # Pi owns OAuth refresh tokens, model-cache metadata and its
-            # branchable JSONL sessions here. Keep this private app state
-            # durable without declaring its selected model or credentials.
+            # Pi keeps its sign-ins, sessions and its own settings here.
             {
               directory = ".pi";
               mode = "0700";
@@ -316,7 +334,6 @@ mkFeatureModule {
             # re-download on every activation.
             ".local/state/claude-code"
             ".local/state/codex"
-            ".local/state/pi"
             ".hermes"
             # Plannotator's Inbox threads, plan history and review drafts.
             {
@@ -391,6 +408,7 @@ mkFeatureModule {
             '';
             # Codex and the Antigravity editor (~/.gemini/GEMINI.md) share the
             # live global instruction source.
+            home.activation.piConfig = lib.hm.dag.entryAfter [ "linkGeneration" ] pi.activation;
             home.activation.linkGlobalAgentInstructions = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
               mkdir -p "$HOME/.codex" "$HOME/.gemini"
               ln -sfn "$HOME/.config/claude/CLAUDE.md" "$HOME/.codex/AGENTS.md"
@@ -426,9 +444,7 @@ mkFeatureModule {
               ) agentProfiles.hermesProfiles)
               // {
 
-                # Pi uses its own ChatGPT Plus/Pro OAuth flow. It is a
-                # context-engineering surface, not a second job scheduler.
-                ".local/bin/pi" = mkPiWrapper;
+                ".local/bin/pi" = pi.wrapper;
 
                 ".config/hermes/skills" = {
                   source = mkDotsFile "/_ai/skills";

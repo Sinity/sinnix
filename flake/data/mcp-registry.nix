@@ -32,8 +32,10 @@ let
         "claude"
         "codex"
         "hermes"
+        "pi"
       ];
       codex.bearer_token_env_var = "CONTEXT7_API_KEY";
+      pi.headers.Authorization = "Bearer \${CONTEXT7_API_KEY}";
       hermes.headers.Authorization = "Bearer \${CONTEXT7_API_KEY}";
     };
 
@@ -49,6 +51,7 @@ let
         "claude"
         "codex"
         "hermes"
+        "pi"
       ];
     };
 
@@ -124,6 +127,7 @@ let
       clients = [
         "claude"
         "codex"
+        "pi"
       ];
     };
 
@@ -143,6 +147,7 @@ let
         "codex"
         "claude"
         "hermes"
+        "pi"
       ];
     };
 
@@ -155,6 +160,7 @@ let
         "codex"
         "claude"
         "hermes"
+        "pi"
       ];
     };
   };
@@ -267,6 +273,36 @@ let
         }
     );
 
+  # Pi `mcpServers` entry (~/.pi/agent/mcp.json). Every server is `deferred`:
+  # its tools are declared to the model only after `tool_search` finds them,
+  # so five servers cost one tool declaration until one is needed. The
+  # description is what Pi lists in the system prompt and ranks searches by.
+  renderPiServer =
+    _name: server:
+    let
+      pi = server.pi or { };
+    in
+    pruneAttrs (
+      {
+        inherit (server) description;
+        exposure = pi.exposure or "deferred";
+        timeout = server.callTimeoutSeconds or null;
+      }
+      // (
+        if server.transport == "http" then
+          {
+            inherit (server) url;
+            headers = pi.headers or server.headers or { };
+          }
+        else
+          {
+            inherit (server) command;
+            args = pi.args or server.args or [ ];
+            env = pi.env or server.env or { };
+          }
+      )
+    );
+
 in
 {
   inherit
@@ -276,5 +312,6 @@ in
     renderClaudeServer
     renderCodexServer
     renderHermesServer
+    renderPiServer
     ;
 }

@@ -134,6 +134,15 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Pi coding agent, built from its own flake at a release tag. A bump is
+    # this tag plus `update pi`; `pi update` cannot replace a store path.
+    pi = {
+      url = "github:earendil-works/pi/v1.5.2";
+      inputs.nixpkgs.follows = "nixpkgs";
+      # Only its Intel macOS package uses this input.
+      inputs.nixpkgs-darwin-x64.follows = "nixpkgs";
+    };
+
     # Declarative Android state managed from the workstation over adb.
     nix-android = {
       url = "github:devindudeman/nix-android";

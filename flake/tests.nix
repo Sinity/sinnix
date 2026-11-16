@@ -26,7 +26,7 @@ in
       file = ./tests.nix;
     })
     ./tests/agent-tools.nix
-    ./tests/pi-recovery.nix
+    ./tests/pi.nix
     ./tests/bootstrap-outcome.nix
     ./tests/aichat-roster.nix
     ./tests/dependency-recovery.nix

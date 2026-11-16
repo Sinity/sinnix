@@ -1,6 +1,5 @@
 # Pinned recovery tarballs for the npm agent CLIs; the CLIs' own updaters
-# still manage the live installs. Pi keeps its publisher shrinkwrap with
-# missing integrity hashes repaired. Every other entry is locked by
+# still manage the live installs. Every entry is locked by
 # flake/data/agent-cli-locks.json, rendered only by
 # `nix run .#sinnix-agent-cli-locks` (agentctl operation agent_cli_locks).
 # To bump one: `nix run .#sinnix-agent-cli-locks -- --set @openai/codex=0.163.0`
@@ -21,13 +20,6 @@
     src = pkgs.fetchurl {
       url = "https://registry.npmjs.org/@openai/codex/-/codex-0.162.1.tgz";
       hash = "sha512-NWZdi/kxyjv/8EUGFupziGU38YyleugZRM4JXgY5XFH7FUmaFA33NZS2Bmq0HPazf7S3jJQQWsZ/jAK9jsrV3Q==";
-    };
-  };
-  "@earendil-works/pi-coding-agent" = import ../../pkgs/agent-cli-sources/pi-source.nix {
-    inherit pkgs;
-    src = pkgs.fetchurl {
-      url = "https://registry.npmjs.org/@earendil-works/pi-coding-agent/-/pi-coding-agent-0.87.1.tgz";
-      hash = "sha512-m8ArJUtVcQMSe1lLE/Ei7vX/JV7O39sWmWBsXV2NOU70F0qCp8GubA24pT3LnwTmM6LL2xV80/h6sQg85n69ew==";
     };
   };
 }
