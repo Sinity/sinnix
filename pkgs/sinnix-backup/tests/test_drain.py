@@ -879,6 +879,7 @@ def test_backlog_restart_collision_and_exclusions(backup_root, monkeypatch, capf
         "borgbackup-job-realm.service",
         "borgbackup-job-genome.service",
         "borgbackup-job-persist.service",
+        "sinex-backup.service",
         "borgbackup-root-snapshots.service",
         "borgbackup-maintenance.service",
         "borgbackup-coverage-audit-realm.service",

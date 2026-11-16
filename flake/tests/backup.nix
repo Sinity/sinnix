@@ -109,8 +109,6 @@ assert lib.assertMsg (
           let
             backup = builtins.fromJSON config.environment.etc."sinnix/backup.json".text;
             services = config.systemd.services;
-            nightlyUnits =
-              backup.nightly.dump_units ++ backup.nightly.archive_units ++ backup.nightly.final_units;
           in
           [
             {
@@ -138,13 +136,16 @@ assert lib.assertMsg (
                     "borgbackup-job-sinex.service"
                     "borgbackup-job-sinex-keys.service"
                   ]
-                && !(builtins.elem "sinex-backup.service" nightlyUnits)
+                && builtins.elem "sinex-backup.service" backup.nightly.archive_units
+                &&
+                  backup.nightly.sinex_completion
+                  == "${config.services.sinex.backup.artifactDir}/latest-complete.json"
                 && lib.all (name: config.systemd.services.${name}.serviceConfig.Slice == "background.slice") [
                   "sinex-backup"
                   "borgbackup-job-sinex"
                   "borgbackup-job-sinex-keys"
                 ];
-              message = "The paired Sinex backup runs only by hand, in its declared background slice, until the backup disk has room for its first archive.";
+              message = "The nightly sequence runs the paired Sinex backup in its declared background slice.";
             }
             {
               # Each backup unit runs one sinnix-backup command; the capacity
@@ -392,6 +393,7 @@ assert lib.assertMsg (
               "borgbackup-job-realm.service"
               "borgbackup-job-genome.service"
               "borgbackup-job-persist.service"
+              "sinex-backup.service"
               "borgbackup-root-snapshots.service"
               "borgbackup-maintenance.service"
               "borgbackup-coverage-audit-realm.service"
