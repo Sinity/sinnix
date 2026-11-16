@@ -245,6 +245,22 @@ def bootloader_lock_guard(stripped, **_):
     return None
 
 
+def pool_control_guard(stripped, **_):
+    """Shared job pools: pausing, resuming, resizing or emptying one stalls every other agent's work."""
+    if "SINNIX_POOL_CONTROL=1" in stripped:
+        return None
+    start = r"(^|[;&|]\s*)(sudo\s+(-n\s+)?)?"
+    if any_line(start + r"pueue\s+(pause|start|parallel|clean|reset)\b", stripped) or any_line(
+        start + r"pueue\s+kill\b[^;&|]*\s(-g|--group|-a|--all)\b", stripped
+    ) or any_line(start + r"agentctl\s+pools\s+apply\b", stripped):
+        return (
+            "Job pools are shared by every agent on this host: do not pause, resume, resize or empty one. "
+            "Cancel only your own job with `agentctl job cancel`. A coordinator changing pool state on purpose "
+            "prefixes the command with SINNIX_POOL_CONTROL=1 and tells the other sessions."
+        )
+    return None
+
+
 GUARDS = (
     bd_guard,
     install_guard,
@@ -253,6 +269,7 @@ GUARDS = (
     poll_guard,
     store_glob_guard,
     bootloader_lock_guard,
+    pool_control_guard,
 )
 
 

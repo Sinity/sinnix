@@ -50,6 +50,15 @@ for denied in '  fastboot flashing lock' $'\tfastboot oem lock' '  sudo fastboot
   payload=$(jq -cn --arg command "$denied" '{tool_input: {command: $command}}')
   run_hook "$hooks_dir/pretooluse-bash.py" "$payload" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
 done
+# Shared job pools are not an agent's to pause, resume, resize or empty.
+for denied in 'pueue pause --group bulk' 'pueue pause --wait --group compile' 'true; pueue start -g normal' 'pueue parallel 4 -g bulk' 'pueue clean' 'pueue kill --group bulk' 'agentctl pools apply'; do
+  payload=$(jq -cn --arg command "$denied" '{tool_input: {command: $command}}')
+  run_hook "$hooks_dir/pretooluse-bash.py" "$payload" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+done
+for allowed in 'pueue status --json' 'pueue group' 'pueue kill 12' 'pueue log 12' 'echo pueue pause' 'SINNIX_POOL_CONTROL=1 pueue pause --group bulk' 'agentctl pools list'; do
+  payload=$(jq -cn --arg command "$allowed" '{tool_input: {command: $command}}')
+  test -z "$(run_hook "$hooks_dir/pretooluse-bash.py" "$payload")"
+done
 for allowed in '  fastboot flashing unlock' 'echo fastboot flashing lock'; do
   payload=$(jq -cn --arg command "$allowed" '{tool_input: {command: $command}}')
   test -z "$(run_hook "$hooks_dir/pretooluse-bash.py" "$payload")"
