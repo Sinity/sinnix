@@ -16,7 +16,7 @@
 #
 # Sinex's own sinex-backup.service prepares its backup and archives it into
 # two Borg repositories (content, keys); it runs only when started by hand
-# (see the coordinator sequence in modules/lib/backup/acknowledgement.nix). Stopped earlier deployments are archived separately, whole, until their
+# (see the coordinator sequence in modules/backup.nix, archiveUnits). Stopped earlier deployments are archived separately, whole, until their
 # import has been compared.
 #
 # Sinex's module sets restartIfChanged on sinexd and sinex-nats, so an
@@ -123,7 +123,7 @@ in
         keysRepo = "${backupRoot}/borg-sinex-keys-v1";
         passCommand = "${pkgs.coreutils}/bin/cat ${secrets.borg-passphrase}";
         # No timer: sinex-backup.service is started by hand until the backup
-        # disk has room for its first archive (modules/lib/backup/acknowledgement.nix).
+        # disk has room for its first archive (modules/backup.nix, archiveUnits).
         startAt = [ ];
       };
     };

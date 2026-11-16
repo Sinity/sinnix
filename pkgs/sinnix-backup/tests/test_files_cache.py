@@ -1,11 +1,8 @@
 """Real Borg files-cache aging regression; only small private synthetic inputs."""
 
-import json
 import os
 import subprocess
-import tempfile
 import time
-from pathlib import Path
 
 
 def scenario(root, isolated):
@@ -87,12 +84,18 @@ def scenario(root, isolated):
     }
 
 
-with tempfile.TemporaryDirectory(
-    prefix="borg-files-cache-", dir=os.environ.get("TMPDIR")
-) as scratch:
-    root = Path(scratch)
-    print(
-        json.dumps(
-            [scenario(root / "shared", False), scenario(root / "isolated", True)]
-        )
-    )
+def test_genome_files_cache_suffix_survives_realm_creates(tmp_path):
+    assert [scenario(tmp_path / "shared", False), scenario(tmp_path / "isolated", True)] == [
+        {
+            "isolated": False,
+            "realm_creates": 21,
+            "payload_status": "A",
+            "unchanged_inode_size_ctime": True,
+        },
+        {
+            "isolated": True,
+            "realm_creates": 21,
+            "payload_status": "U",
+            "unchanged_inode_size_ctime": True,
+        },
+    ]

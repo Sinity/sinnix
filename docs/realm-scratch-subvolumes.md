@@ -12,7 +12,7 @@ The path list is declared in `modules/lib/storage/scratch-roots.nix`; the
 service in `modules/lib/storage/scratch-subvolumes.nix` is imported by storage
 infrastructure for Btrfs Realm mounts. A backup assertion requires every root
 to remain both Borg-excluded and classified as regenerable.
-Every target is an exact root already excluded by `realmExcludes` in
+Every target is an exact root already excluded by `realmExclusions` in
 `modules/backup.nix`:
 
 - `tmp`, `worktree`, the historical `worktrees`, and `state/cache`.

@@ -1,7 +1,7 @@
-# Real Borg fixtures exercise exact canonical coverage and rendered snapshot
-# drain scripts. Only mount/btrfs are mocked; no production data is touched.
-# Unique older bytes, same-name changes, restart, archive collision, and
-# unclassified exclusions must all pass through the deletion gate.
+# Backup checks. Evaluations assert the units, timers, surfaces and the
+# policy file /etc/sinnix/backup.json; the sinnix-backup package's pytest
+# suite runs every job against real Borg with mount, btrfs and systemctl
+# faked, reading the policy file this fixture host evaluates.
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;
@@ -16,6 +16,32 @@ let
       "library/model/control-vector"
     ];
   };
+  backupJson = evaluated: builtins.fromJSON evaluated.config.environment.etc."sinnix/backup.json".text;
+  # Every unit modules/lib/backup/units.nix declares.
+  backupJobNames = [
+    "btrbk"
+    "borgbackup-job-persist"
+    "borgbackup-job-realm"
+    "borgbackup-job-genome"
+    "borgbackup-drain-coordinator"
+    "borgbackup-root-snapshots"
+    "borgbackup-job-sinex-blobs"
+    "polylogue-sqlite-backup"
+    "borgbackup-job-polylogue-state"
+    "borgbackup-job-persist-hourly"
+    "borgbackup-job-live-small"
+    "borgbackup-maintenance"
+    "borgbackup-retention-plan"
+    "borgbackup-capacity"
+    "borgbackup-local-dumps"
+    "borgbackup-verify"
+    "borgbackup-coverage-audit-realm"
+    "sinnix-borg-beads-check"
+  ];
+  packageDirectory = ../../pkgs/sinnix-backup/sinnix_backup;
+  packageText = lib.concatMapStrings (name: builtins.readFile (packageDirectory + "/${name}")) (
+    lib.filter (lib.hasSuffix ".py") (builtins.attrNames (builtins.readDir packageDirectory))
+  );
 in
 assert lib.assertMsg (
   lib.all protectedPathMatches [
@@ -39,7 +65,7 @@ assert lib.assertMsg (
 ) "Realm exclusions must reject the canonical Sinex task store and every ancestor";
 {
   perSystem =
-    { system, ... }:
+    { system, sinnixScriptRegistry, ... }:
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
       testLib = import ../test-lib.nix { inherit inputs lib; };
@@ -50,6 +76,8 @@ assert lib.assertMsg (
         mkRuntimeCheck
         ;
 
+      # evalTestSpec throws when any of these assertions fails, whenever the
+      # evaluation is used.
       backupRuntimeEval = evalTestSpec system {
         name = "backup-borg-hook-runtime";
         modules = [
@@ -75,97 +103,141 @@ assert lib.assertMsg (
             sinnix.services.polylogue.dataDir = "/tmp/sentinel-polylogue-root";
           })
         ];
-        assertions = config: [
-          {
-            assertion =
-              let
-                unit = config.systemd.services.machine-telemetry-seal;
-              in
-              !unit.restartIfChanged && unit.serviceConfig.TimeoutStartSec == "infinity";
-            message = "Telemetry sealing must not restart on activation, and each sealed file's one structural check must run to completion.";
-          }
-          {
-            assertion = lib.all (
-              path: lib.hasInfix path config.systemd.services.borgbackup-job-sinex-blobs.script
-            ) config.sinnix.services.sinex.retainedStores;
-            message = "The predecessor archive job must cover every retained Sinex store";
-          }
-          {
-            assertion =
-              config.services.sinex.backup.repo != config.services.sinex.backup.keysRepo
-              && config.services.sinex.backup.startAt == [ ]
-              &&
-                config.systemd.services.sinex-backup.unitConfig.PropagatesStopTo == [
-                  "borgbackup-job-sinex.service"
-                  "borgbackup-job-sinex-keys.service"
-                ]
-              && !(lib.hasInfix "sinex-backup.service" config.systemd.services.borgbackup-drain-coordinator.script)
-              && lib.all (name: config.systemd.services.${name}.serviceConfig.Slice == "background.slice") [
-                "sinex-backup"
-                "borgbackup-job-sinex"
-                "borgbackup-job-sinex-keys"
-              ];
-            message = "The paired Sinex backup runs only by hand, in its declared background slice, until the backup disk has room for its first archive.";
-          }
-          {
-            # Every backup job's freshness marker is watched by the sentinel
-            # through its capture lane. The lane's path and the path actually
-            # written have to be the same file, or the health sweep reports a backup
-            # as fresh while nothing produces the marker (and the reverse: a
-            # marker nobody watches). The writer is the unit's own script plus
-            # the sources of the packaged scripts that unit invokes -- the
-            # check receipt, for one, is written by scripts/sinnix-borg-check
-            # rather than inline. Both sides come from the evaluated config,
-            # so neither is a restated literal.
-            assertion =
-              let
-                packagedScriptNames = builtins.attrNames (builtins.readDir ../../scripts);
-                writerText =
-                  name:
-                  let
-                    service = config.systemd.services.${name};
-                    script = (service.script or "") + (service.serviceConfig.ExecStart or "");
-                    invoked = lib.filter (scriptName: lib.hasInfix "/bin/${scriptName}" script) packagedScriptNames;
-                  in
-                  script
-                  + lib.concatMapStrings (scriptName: builtins.readFile (../../scripts + "/${scriptName}")) invoked;
-                jobs = lib.filterAttrs (
-                  name: surface: lib.hasPrefix "borgbackup-" name && surface.captures != [ ]
-                ) config.sinnix.runtime.units;
-              in
-              jobs != { }
-              && lib.all (
+        assertions =
+          config:
+          let
+            backup = builtins.fromJSON config.environment.etc."sinnix/backup.json".text;
+            services = config.systemd.services;
+            nightlyUnits =
+              backup.nightly.dump_units ++ backup.nightly.archive_units ++ backup.nightly.final_units;
+          in
+          [
+            {
+              assertion =
+                let
+                  unit = config.systemd.services.machine-telemetry-seal;
+                in
+                !unit.restartIfChanged && unit.serviceConfig.TimeoutStartSec == "infinity";
+              message = "Telemetry sealing must not restart on activation, and each sealed file's one structural check must run to completion.";
+            }
+            {
+              assertion =
+                backup.jobs.sinex_store_paths == config.sinnix.services.sinex.retainedStores
+                &&
+                  services.borgbackup-job-sinex-blobs.unitConfig.RequiresMountsFor
+                  == config.sinnix.services.sinex.retainedStores;
+              message = "The predecessor archive job must cover every retained Sinex store";
+            }
+            {
+              assertion =
+                config.services.sinex.backup.repo != config.services.sinex.backup.keysRepo
+                && config.services.sinex.backup.startAt == [ ]
+                &&
+                  config.systemd.services.sinex-backup.unitConfig.PropagatesStopTo == [
+                    "borgbackup-job-sinex.service"
+                    "borgbackup-job-sinex-keys.service"
+                  ]
+                && !(builtins.elem "sinex-backup.service" nightlyUnits)
+                && lib.all (name: config.systemd.services.${name}.serviceConfig.Slice == "background.slice") [
+                  "sinex-backup"
+                  "borgbackup-job-sinex"
+                  "borgbackup-job-sinex-keys"
+                ];
+              message = "The paired Sinex backup runs only by hand, in its declared background slice, until the backup disk has room for its first archive.";
+            }
+            {
+              # Each backup unit runs one sinnix-backup command; the capacity
+              # job runs its own packaged script.
+              assertion = lib.all (
                 name:
                 let
-                  written = writerText name;
+                  service = services.${name};
                 in
-                lib.all (lane: lib.hasInfix lane.path written) jobs.${name}.captures
-              ) (lib.attrNames jobs);
-            message = "Every Borg job's capture lane must point at a path its unit -- or a packaged script that unit runs -- actually writes";
-          }
-          {
-            assertion =
-              lib.all (name: lib.hasInfix "export BORG_HOST_ID=" config.services.borgbackup.jobs.${name}.preHook)
-                [
-                  "sinex"
-                  "sinex-keys"
-                ];
-            message = "Both upstream Sinex Borg jobs must use the stable local host identity";
-          }
-          {
-            # A liveness probe that cannot run is worse than none: the lane
-            # reads healthy because nothing contradicts it.
-            assertion = lib.all (
-              surface:
-              lib.all (
-                lane:
-                lane.livenessProbe == null
-                || (lane.livenessProbe.command != "" && lane.livenessProbe.timeoutSeconds > 0)
-              ) surface.captures
-            ) (lib.attrValues config.sinnix.runtime.units);
-            message = "A capture lane's liveness probe must carry a real command and a bounded timeout";
-          }
-        ];
+                service.script == ""
+                && (
+                  name == "borgbackup-capacity"
+                  || lib.hasInfix "/bin/sinnix-backup " service.serviceConfig.ExecStart
+                )
+              ) backupJobNames;
+              message = "Every backup unit must run a sinnix-backup command from ExecStart, with no inline script";
+            }
+            {
+              # A capture lane's path and the file its unit writes must be the
+              # same, or the health sweep watches a file nothing writes. The
+              # unit writes paths named in backup.json or its ExecStart, the
+              # markers sinnix-backup names in the state directory, and files
+              # of the packaged scripts it runs.
+              assertion =
+                let
+                  backupText = config.environment.etc."sinnix/backup.json".text;
+                  packagedScriptNames = builtins.attrNames (
+                    lib.filterAttrs (_: type: type == "regular") (builtins.readDir ../../scripts)
+                  );
+                  writerText =
+                    name:
+                    let
+                      execStart = services.${name}.serviceConfig.ExecStart or "";
+                      runsBackup = lib.hasInfix "/bin/sinnix-backup " execStart;
+                      invoked = lib.filter (
+                        scriptName:
+                        lib.hasInfix "/bin/${scriptName}" execStart
+                        || (runsBackup && lib.hasInfix "\"${scriptName}\"" packageText)
+                      ) packagedScriptNames;
+                    in
+                    backupText
+                    + execStart
+                    + lib.concatMapStrings (scriptName: builtins.readFile (../../scripts + "/${scriptName}")) invoked;
+                  stateMarker =
+                    path:
+                    let
+                      base = baseNameOf path;
+                      stem = builtins.head (lib.splitString "." base);
+                      kind = lib.removePrefix "${stem}." base;
+                    in
+                    dirOf path == backup.state_directory
+                    && (
+                      lib.hasInfix base packageText
+                      || (
+                        (backup.sources ? ${stem} || lib.hasInfix "\"${stem}\"" packageText)
+                        && lib.hasInfix kind packageText
+                      )
+                    );
+                  jobs = lib.filterAttrs (
+                    name: surface: lib.hasPrefix "borgbackup-" name && surface.captures != [ ]
+                  ) config.sinnix.runtime.units;
+                in
+                jobs != { }
+                && lib.all (
+                  name:
+                  lib.all (
+                    lane: lib.hasInfix lane.path (writerText name) || stateMarker lane.path
+                  ) jobs.${name}.captures
+                ) (lib.attrNames jobs);
+              message = "Every Borg job's capture lane must point at a path its unit -- or a packaged script that unit runs -- actually writes";
+            }
+            {
+              assertion =
+                lib.all (name: lib.hasInfix "export BORG_HOST_ID=" config.services.borgbackup.jobs.${name}.preHook)
+                  [
+                    "sinex"
+                    "sinex-keys"
+                  ];
+              message = "Both upstream Sinex Borg jobs must use the stable local host identity";
+            }
+            {
+              # A liveness probe that cannot run is worse than none: the lane
+              # reads healthy because nothing contradicts it.
+              assertion = lib.all (
+                surface:
+                lib.all (
+                  lane:
+                  lane.livenessProbe == null
+                  || (lane.livenessProbe.command != "" && lane.livenessProbe.timeoutSeconds > 0)
+                ) surface.captures
+              ) (lib.attrValues config.sinnix.runtime.units);
+              message = "A capture lane's liveness probe must carry a real command and a bounded timeout";
+            }
+          ];
       };
       customAuthorityEval = evalTestSpec system {
         name = "backup-custom-sinex-task-authority";
@@ -241,519 +313,118 @@ assert lib.assertMsg (
             builtins.attrNames headlessBackupEval.config.systemd.services
             ++ builtins.attrNames headlessBackupEval.config.systemd.timers
           );
-      # `assertions` fed into evalTestSpec above are declared as NixOS module
-      # assertions, but nothing in this test harness forces
-      # `config.assertions` (no `system.build.toplevel` or
-      # `lib.checkAssertions` consumer) -- confirmed empirically: a
-      # deliberately false entry there built without error. Real `assert`
-      # statements below, forced because `polylogueStateBorgScriptChecked`
-      # is what actually gets used, are the enforcement mechanism for the
-      # polylogue exclude-pattern checks instead.
-      polylogueStateBorgScriptChecked =
-        let
-          script = backupRuntimeEval.config.systemd.services.borgbackup-job-polylogue-state.script;
-          root = "tmp/sentinel-polylogue-root";
-        in
-        assert lib.assertMsg (lib.hasInfix "--exclude ${root}/source.db " script)
-          "Polylogue state Borg job must exclude the configured source.db path, not a bare filename";
-        assert lib.assertMsg (lib.hasInfix "--exclude ${root}/source.db-wal " script)
-          "Polylogue state Borg job must exclude source.db's WAL sidecar to avoid a torn copy";
-        assert lib.assertMsg (lib.hasInfix "--exclude ${root}/.salvage-internals-20261008 " script)
-          "Polylogue state Borg job must leave the inert campaign salvage directory unread";
-        assert lib.assertMsg (!lib.hasInfix "embeddings.db.retired" script)
-          "Polylogue state Borg job must not name retired database siblings in its exclude list -- they must stay covered by this direct-path job";
-        assert lib.assertMsg (lib.hasInfix "/tmp/sentinel-polylogue-root/hooks/**" script)
-          "Polylogue state Borg job must omit only the live hook input by its physical source path";
-        assert lib.assertMsg
-          (
-            lib.hasInfix "with_borg_lock" script
-            && lib.hasInfix "cut-polylogue-hooks.py" script
-            && lib.hasInfix "-- borg create" script
-          )
-          "Polylogue state must hold its verified native cut through Borg completion under the repository lock";
-        assert lib.assertMsg (lib.hasInfix "state/cache/polylogue-backup-hooks" script)
-          "Polylogue state Borg job must use its stable private cut storage";
-        assert lib.assertMsg (lib.hasInfix "install -d -m 0700 -o root -g root" script)
-          "Polylogue state cut storage must be private to root";
-        assert lib.assertMsg (
-          !(backupRuntimeEval.config.systemd.timers ? borgbackup-job-polylogue-state)
-          &&
-            backupRuntimeEval.config.systemd.services.borgbackup-job-polylogue-state.serviceConfig.TimeoutStartSec
-            == "90min"
-        ) "Polylogue state keeps its deadline inside the serial nightly coordinator";
-        script;
-      rewriteBackupHook =
-        hook: replacements:
-        builtins.replaceStrings (map (replacement: replacement.from) replacements)
-          (map (replacement: replacement.to) replacements)
-          (builtins.replaceStrings [ "install -d -m 0750 -o root -g users" ] [ "install -d -m 0750" ] hook);
-      coordinatorScript =
-        rewriteBackupHook backupRuntimeEval.config.systemd.services.borgbackup-drain-coordinator.script
-          [
-            {
-              from = "/run/lock/sinnix-borg.lock";
-              to = "$TMPDIR/coordinator-borg.lock";
-            }
-            {
-              from = "/neo-outer-realm/.btrfs/genome-snapshots";
-              to = "$TMPDIR/genome-snapshots";
-            }
-            {
-              from = "/realm/.btrfs/snapshot";
-              to = "$TMPDIR/realm-snapshots";
-            }
-            {
-              from = "/persist/.btrfs/snapshot";
-              to = "$TMPDIR/persist-snapshots";
-            }
-            {
-              from = "/persist/root/.cache/borg-drain";
-              to = "$TMPDIR/state/borg-drain";
-            }
-            {
-              from = "systemctl stop";
-              to = "$TMPDIR/mock-bin/systemctl stop";
-            }
-            {
-              from = "systemctl start";
-              to = "$TMPDIR/mock-bin/systemctl start";
-            }
-          ];
-      realmBorgDrainScriptFor =
-        name:
-        rewriteBackupHook backupRuntimeEval.config.systemd.services.${name}.script [
-          {
-            from = "/outer-realm/backup/borg-realm-v2";
-            to = "$TMPDIR/repos/borg-realm-v2";
-          }
-          {
-            from = "/persist/root/.cache/borg-drain";
-            to = "$TMPDIR/state/borg-drain";
-          }
-          {
-            from = "/persist/root/.cache/borg";
-            to = "$TMPDIR/state/borg-cache";
-          }
-          {
-            # The Borg cache moved to /realm (b47fb2094).
-            from = "/realm/state/cache/borg";
-            to = "$TMPDIR/state/borg-cache";
-          }
-          {
-            from = "/run/lock/sinnix-borg.lock";
-            to = "$TMPDIR/state/sinnix-borg.lock";
-          }
-          {
-            from = "install -d -m 0700 -o root -g root";
-            to = "install -d -m 0700";
-          }
-          {
-            from = "install -d -m 0755 -o root -g root";
-            to = "install -d -m 0755";
-          }
-          {
-            from = "${pkgs.util-linux}/bin/mountpoint";
-            to = "$TMPDIR/mock-bin/mountpoint";
-          }
-          {
-            from = "${pkgs.util-linux}/bin/umount";
-            to = "$TMPDIR/mock-bin/umount";
-          }
-          {
-            from = "${pkgs.util-linux}/bin/mount";
-            to = "$TMPDIR/mock-bin/mount";
-          }
-          {
-            from = "/realm/.btrfs/snapshot";
-            to = "$TMPDIR/realm-snapshots";
-          }
-          {
-            from = "/run/borgbackup-snapshot-inputs/realm";
-            to = "$TMPDIR/bind/realm";
-          }
-          {
-            # mkBorgExcludeArgs qualifies every non-`**` pattern with the
-            # source root minus its leading separator, which is what borg
-            # matches against. Rewrite that spelling too, or the exclude
-            # patterns name a path the test tree does not have and every
-            # path-based exclusion silently matches nothing.
-            from = "run/borgbackup-snapshot-inputs/realm";
-            to = "$TMPDIR/bind/realm";
-          }
-        ];
-      realmBorgDrainScript = realmBorgDrainScriptFor "borgbackup-job-realm";
-      genomeBorgDrainScript = rewriteBackupHook (realmBorgDrainScriptFor "borgbackup-job-genome") [
-        {
-          from = "/neo-outer-realm/.btrfs/genome-snapshots";
-          to = "$TMPDIR/genome-snapshots";
-        }
-        {
-          from = "/run/borgbackup-snapshot-inputs/genome";
-          to = "$TMPDIR/bind/genome";
-        }
-        {
-          from = "run/borgbackup-snapshot-inputs/genome";
-          to = "$TMPDIR/bind/genome";
-        }
-      ];
-      localDumpsScript = rewriteBackupHook (realmBorgDrainScriptFor "borgbackup-local-dumps") [
-        {
-          from = "/realm/state/db-dumps";
-          to = "$TMPDIR/live-dumps";
-        }
-      ];
-      persistBorgDrainScriptFor =
-        name:
-        rewriteBackupHook backupRuntimeEval.config.systemd.services.${name}.script [
-          {
-            from = "/outer-realm/backup/borg-persist-v1";
-            to = "$TMPDIR/repos/borg-persist-v1";
-          }
-          {
-            from = "/persist/root/.cache/borg-drain";
-            to = "$TMPDIR/state/borg-drain";
-          }
-          {
-            from = "/persist/root/.cache/borg";
-            to = "$TMPDIR/state/borg-cache";
-          }
-          {
-            # The Borg cache moved to /realm (b47fb2094).
-            from = "/realm/state/cache/borg";
-            to = "$TMPDIR/state/borg-cache";
-          }
-          {
-            from = "/run/lock/sinnix-borg.lock";
-            to = "$TMPDIR/state/sinnix-borg.lock";
-          }
-          {
-            from = "install -d -m 0700 -o root -g root";
-            to = "install -d -m 0700";
-          }
-          {
-            from = "install -d -m 0755 -o root -g root";
-            to = "install -d -m 0755";
-          }
-          {
-            from = "${pkgs.util-linux}/bin/mountpoint";
-            to = "$TMPDIR/mock-bin/mountpoint";
-          }
-          {
-            from = "${pkgs.util-linux}/bin/umount";
-            to = "$TMPDIR/mock-bin/umount";
-          }
-          {
-            from = "${pkgs.util-linux}/bin/mount";
-            to = "$TMPDIR/mock-bin/mount";
-          }
-          {
-            from = "/persist/.btrfs/snapshot";
-            to = "$TMPDIR/persist-snapshots";
-          }
-          {
-            from = "/run/borgbackup-snapshot-inputs/persist";
-            to = "$TMPDIR/bind/persist";
-          }
-          {
-            from = "run/borgbackup-snapshot-inputs/persist";
-            to = "$TMPDIR/bind/persist";
-          }
-        ];
-      persistBorgDrainScript = persistBorgDrainScriptFor "borgbackup-job-persist";
-      missingRealmBorgDrainScript =
-        rewriteBackupHook backupRuntimeEval.config.systemd.services.borgbackup-job-realm.script
-          [
-            {
-              from = "/outer-realm/backup/borg-realm-v2";
-              to = "$TMPDIR/repos/borg-realm-v2";
-            }
-            {
-              from = "/persist/root/.cache/borg-drain";
-              to = "$TMPDIR/state/borg-drain";
-            }
-            {
-              from = "/persist/root/.cache/borg";
-              to = "$TMPDIR/state/borg-cache";
-            }
-            {
-              # The Borg cache moved to /realm (b47fb2094).
-              from = "/realm/state/cache/borg";
-              to = "$TMPDIR/state/borg-cache";
-            }
-            {
-              from = "/run/lock/sinnix-borg.lock";
-              to = "$TMPDIR/state/sinnix-borg.lock";
-            }
-            {
-              from = "install -d -m 0700 -o root -g root";
-              to = "install -d -m 0700";
-            }
-            {
-              from = "install -d -m 0755 -o root -g root";
-              to = "install -d -m 0755";
-            }
-            {
-              from = "${pkgs.util-linux}/bin/mountpoint";
-              to = "$TMPDIR/mock-bin/mountpoint";
-            }
-            {
-              from = "${pkgs.util-linux}/bin/umount";
-              to = "$TMPDIR/mock-bin/umount";
-            }
-            {
-              from = "${pkgs.util-linux}/bin/mount";
-              to = "$TMPDIR/mock-bin/mount";
-            }
-            {
-              from = "/realm/.btrfs/snapshot";
-              to = "$TMPDIR/realm-empty";
-            }
-            {
-              from = "/run/borgbackup-snapshot-inputs/realm";
-              to = "$TMPDIR/bind/realm-empty";
-            }
-          ];
 
-      sinexBlobBorgScript =
-        rewriteBackupHook backupRuntimeEval.config.systemd.services.borgbackup-job-sinex-blobs.script
-          [
-            {
-              from = "/outer-realm/backup/borg-sinex-blobs-v1";
-              to = "$TMPDIR/repos/borg-sinex-blobs-v1";
-            }
-            {
-              from = "/persist/root/.cache/borg";
-              to = "$TMPDIR/state/borg-cache";
-            }
-            {
-              # The Borg cache moved to /realm (b47fb2094).
-              from = "/realm/state/cache/borg";
-              to = "$TMPDIR/state/borg-cache";
-            }
-            {
-              from = "/run/lock/sinnix-borg.lock";
-              to = "$TMPDIR/state/sinnix-borg.lock";
-            }
-            {
-              from = "install -d -m 0700 -o root -g root";
-              to = "install -d -m 0700";
-            }
-            {
-              from = "install -d -m 0755 -o root -g root";
-              to = "install -d -m 0755";
-            }
-            {
-              from = "/var/lib/sinex/retained";
-              to = "$TMPDIR/retained-sinex";
-            }
-          ];
-
-      polylogueStateBorgScript = rewriteBackupHook polylogueStateBorgScriptChecked [
-        {
-          from = "/realm/state/cache/polylogue-backup-hooks";
-          to = "$TMPDIR/realm-data/state/cache/polylogue-backup-hooks";
-        }
-        {
-          from = "/outer-realm/backup/borg-polylogue-state-v1";
-          to = "$TMPDIR/repos/borg-polylogue-state-v1";
-        }
-        {
-          from = "/neo-outer-realm/archive/polylogue/embeddings";
-          to = "$TMPDIR/paid-vectors";
-        }
-        {
-          # Must precede the plain ".cache/borg" pattern below:
-          # replaceStrings matches earlier list entries first at a given
-          # position, and "borg" is itself a prefix of "borg-drain".
-          from = "/persist/root/.cache/borg-drain";
-          to = "$TMPDIR/state/borg-drain";
-        }
-        {
-          from = "/persist/root/.cache/borg";
-          to = "$TMPDIR/state/borg-cache";
-        }
-        {
-          # The Borg cache moved to /realm (b47fb2094).
-          from = "/realm/state/cache/borg";
-          to = "$TMPDIR/state/borg-cache";
-        }
-        {
-          from = "/run/lock/sinnix-borg.lock";
-          to = "$TMPDIR/state/sinnix-borg.lock";
-        }
-        {
-          from = "install -d -m 0700 -o root -g root";
-          to = "install -d -m 0700";
-        }
-        {
-          from = "install -d -m 0755 -o root -g root";
-          to = "install -d -m 0755";
-        }
-        {
-          from = "--exclude '/tmp/sentinel-polylogue-root/hooks/**'";
-          to = "--exclude \"$TMPDIR/live-polylogue/hooks/**\"";
-        }
-        {
-          from = "/tmp/sentinel-polylogue-root";
-          to = "$TMPDIR/live-polylogue";
-        }
-        {
-          from = "tmp/sentinel-polylogue-root";
-          to = "$TMPDIR/live-polylogue";
-        }
-      ];
-
-      beadsCheckScript =
-        assert lib.assertMsg
-          (lib.hasInfix "authority/sinex/.beads" customAuthorityEval.config.systemd.services.sinnix-borg-beads-check.script)
-          "The Beads restore check must follow a configured task authority outside state/tasks";
-        rewriteBackupHook backupRuntimeEval.config.systemd.services.sinnix-borg-beads-check.script [
-          {
-            from = "/outer-realm/backup/borg-realm-v2";
-            to = "$TMPDIR/repos/borg-realm-v2";
-          }
-          {
-            from = "/run/lock/sinnix-borg.lock";
-            to = "$TMPDIR/state/sinnix-borg.lock";
-          }
-          {
-            from = "/realm";
-            to = "$TMPDIR/realm-data";
-          }
-          {
-            from = "${pkgs.dolt}/bin/dolt";
-            to = "$TMPDIR/mock-bin/dolt";
-          }
-          {
-            # The production wait is three hours; one second shows the same
-            # failure when the lock stays held.
-            from = "flock -w 10800 9";
-            to = "flock -w 1 9";
-          }
-        ];
-
-      # The retention fixture creates Realm and both Sinex repositories;
-      # other stores stay uninitialized.
-      maintenanceScript =
-        rewriteBackupHook backupRuntimeEval.config.systemd.services.borgbackup-maintenance.script
-          [
-            {
-              from = "/outer-realm/backup";
-              to = "$TMPDIR/maintenance/repos";
-            }
-            {
-              from = "/persist/root/.cache/borg";
-              to = "$TMPDIR/maintenance/cache";
-            }
-            {
-              # The Borg cache moved to /realm (b47fb2094).
-              from = "/realm/state/cache/borg";
-              to = "$TMPDIR/maintenance/cache";
-            }
-            {
-              from = "/run/lock/sinnix-borg.lock";
-              to = "$TMPDIR/maintenance/global.lock";
-            }
-          ];
+      services = backupRuntimeEval.config.systemd.services;
+      timers = backupRuntimeEval.config.systemd.timers;
+      backup = backupJson backupRuntimeEval;
+      runsCommand = name: command: lib.hasSuffix "/bin/sinnix-backup ${command}" services.${name}.serviceConfig.ExecStart;
 
       backupBorgHookRuntime =
         assert lib.assertMsg
           (
             let
-              verify = backupRuntimeEval.config.systemd.services.borgbackup-verify;
-              timer = backupRuntimeEval.config.systemd.timers.borgbackup-verify;
-              script = verify.script;
+              inherit (backup.jobs) polylogue;
+            in
+            polylogue.state_root == "/tmp/sentinel-polylogue-root"
+            && lib.all (name: builtins.elem name polylogue.state_excludes) [
+              "source.db"
+              "source.db-wal"
+              ".salvage-internals-20261008"
+            ]
+            && !(lib.any (lib.hasInfix "embeddings.db.retired") polylogue.state_excludes)
+            && polylogue.hook_cut_directory == "/realm/state/cache/polylogue-backup-hooks"
+            && runsCommand "borgbackup-job-polylogue-state" "polylogue-state"
+            && !(timers ? borgbackup-job-polylogue-state)
+            && services.borgbackup-job-polylogue-state.serviceConfig.TimeoutStartSec == "90min"
+          )
+          "Polylogue state excludes its live databases by name, keeps retired siblings covered, cuts hooks in its private storage, and keeps its deadline inside the nightly coordinator";
+        assert lib.assertMsg
+          (
+            let
+              verify = services.borgbackup-verify;
               checkScript = builtins.readFile ../../scripts/sinnix-borg-check;
-              audit = backupRuntimeEval.config.systemd.services.borgbackup-coverage-audit-realm;
+              audit = services.borgbackup-coverage-audit-realm;
             in
             verify.description == "Borg repository integrity checks with bounded partial passes"
-            && lib.hasInfix ''--timestamp "$snapshot_timestamp"'' backupRuntimeEval.config.systemd.services.borgbackup-root-snapshots.script
-            && lib.hasInfix ''--timestamp "$snapshot_timestamp"'' realmBorgDrainScript
             && verify.serviceConfig.TimeoutStartSec == "4h30m"
-            && timer.timerConfig.OnCalendar == "Sun 13:00:00"
-            && lib.hasInfix "--max-duration 1800 file:///outer-realm/backup/borg-persist-v1" script
-            && lib.hasInfix "--max-duration 7200 file:///outer-realm/backup/borg-realm-v2" script
-            && lib.hasInfix "--max-duration 1800 file:///outer-realm/backup/borg-sinex-blobs-v1" script
-            && lib.hasInfix "/bin/sinnix-borg-check\n" script
+            && timers.borgbackup-verify.timerConfig.OnCalendar == "Sun 13:00:00"
+            && runsCommand "borgbackup-verify" "check-repositories"
+            && lib.take 3 backup.jobs.integrity.repositories == [
+              {
+                repository = "persist";
+                seconds = 1800;
+              }
+              {
+                repository = "realm";
+                seconds = 7200;
+              }
+              {
+                repository = "sinex-blobs";
+                seconds = 1800;
+              }
+            ]
             && lib.hasInfix "MAX_DURATION=1800" checkScript
             && lib.hasInfix "VERIFY_DATA=0" checkScript
             && lib.hasInfix "file:///outer-realm/backup/borg-persist-v1" checkScript
             && lib.hasInfix "file:///outer-realm/backup/borg-realm-v2" checkScript
             && lib.hasInfix "borg check --repository-only --max-duration \"$MAX_DURATION\" \"$repo\"" checkScript
             && audit.serviceConfig.TimeoutStartSec == "2h"
-            && !(builtins.hasAttr "borgbackup-coverage-audit-realm" backupRuntimeEval.config.systemd.timers)
-            && lib.hasInfix "status=deferred reason=borg-lock-contention remains_due=true" audit.script
-            && lib.hasInfix "flock -n -s 8" audit.script
-            && lib.hasInfix "exec 9>&-" audit.script
-            && lib.hasInfix "--mode sampled --sample-bytes 1073741824 --sample-files 128" audit.script
-            && lib.hasInfix "flock -n -x 8" realmBorgDrainScript
+            && !(timers ? borgbackup-coverage-audit-realm)
+            && runsCommand "borgbackup-coverage-audit-realm" "audit-realm"
+            && backup.jobs.audit.sample_bytes == 1073741824
+            && backup.jobs.audit.sample_files == 128
           )
           "Weekly Borg verification must keep its CRC budgets and partial-check semantics while ending before the next archive window";
-        assert lib.assertMsg (lib.all
-          (name: backupRuntimeEval.config.systemd.services.${name}.serviceConfig.TimeoutStartSec == "4h")
-          [
-            "borgbackup-job-persist"
-            "borgbackup-root-snapshots"
-          ]
-        ) "Snapshot backlog drains must have a finite per-wake deadline";
+        assert lib.assertMsg (lib.all (name: services.${name}.serviceConfig.TimeoutStartSec == "4h") [
+          "borgbackup-job-persist"
+          "borgbackup-root-snapshots"
+        ]) "Snapshot backlog drains must have a finite per-wake deadline";
         assert lib.assertMsg (
-          backupRuntimeEval.config.systemd.services.borgbackup-drain-coordinator.serviceConfig.TimeoutStartSec
-          == "80h15m"
-          &&
-            backupRuntimeEval.config.systemd.services.borgbackup-job-realm.serviceConfig.TimeoutStartSec
-            == "24h"
-          &&
-            backupRuntimeEval.config.systemd.services.borgbackup-drain-coordinator.unitConfig.PropagatesStopTo
-            == [
-              "machine-telemetry-sqlite-backup.service"
-              "polylogue-sqlite-backup.service"
-              "btrbk.service"
-              "borgbackup-job-polylogue-state.service"
-              "borgbackup-job-sinex-blobs.service"
-              "borgbackup-job-realm.service"
-              "borgbackup-job-genome.service"
-              "borgbackup-job-persist.service"
-              "borgbackup-root-snapshots.service"
-              "borgbackup-maintenance.service"
-              "borgbackup-coverage-audit-realm.service"
-              "borgbackup-local-dumps.service"
-            ]
-          && lib.all (name: !(builtins.hasAttr name backupRuntimeEval.config.systemd.timers)) [
+          services.borgbackup-drain-coordinator.serviceConfig.TimeoutStartSec == "80h15m"
+          && services.borgbackup-job-realm.serviceConfig.TimeoutStartSec == "24h"
+          && services.borgbackup-drain-coordinator.unitConfig.PropagatesStopTo == [
+            "machine-telemetry-sqlite-backup.service"
+            "polylogue-sqlite-backup.service"
+            "btrbk.service"
+            "borgbackup-job-polylogue-state.service"
+            "borgbackup-job-sinex-blobs.service"
+            "borgbackup-job-realm.service"
+            "borgbackup-job-genome.service"
+            "borgbackup-job-persist.service"
+            "borgbackup-root-snapshots.service"
+            "borgbackup-maintenance.service"
+            "borgbackup-coverage-audit-realm.service"
+            "borgbackup-local-dumps.service"
+          ]
+          && lib.all (name: !(builtins.hasAttr name timers)) [
             "polylogue-sqlite-backup"
             "borgbackup-root-snapshots"
             "borgbackup-job-polylogue-state"
             "borgbackup-job-sinex-blobs"
             "borgbackup-maintenance"
             "borgbackup-local-dumps"
+            "borgbackup-job-persist"
+            "borgbackup-job-realm"
+            "borgbackup-job-genome"
           ]
-          && !backupRuntimeEval.config.systemd.timers.machine-telemetry-sqlite-backup.enable
+          && !timers.machine-telemetry-sqlite-backup.enable
           && !(backupRuntimeEval.config.sinnix.runtime.units ? machine-telemetry-sqlite-backup-timer)
           && !(backupRuntimeEval.config.sinnix.runtime.units ? polylogue-sqlite-backup-timer)
-          && !(lib.hasInfix "stop borgbackup-verify.service borgbackup-coverage-audit-realm.service" backupRuntimeEval.config.systemd.services.borgbackup-drain-coordinator.script)
-          && !(builtins.hasAttr "borgbackup-job-persist" backupRuntimeEval.config.systemd.timers)
-          && !(builtins.hasAttr "borgbackup-job-realm" backupRuntimeEval.config.systemd.timers)
-          && !(builtins.hasAttr "borgbackup-job-genome" backupRuntimeEval.config.systemd.timers)
-          && builtins.hasAttr "borgbackup-drain-coordinator" backupRuntimeEval.config.systemd.timers
-          &&
-            backupRuntimeEval.config.systemd.timers.borgbackup-drain-coordinator.timerConfig.OnCalendar
-            == "*-*-* 03:05:00"
-          &&
-            backupRuntimeEval.config.systemd.timers.borgbackup-drain-coordinator.timerConfig.OnBootSec
-            == "45min"
-          && backupRuntimeEval.config.systemd.timers.btrbk.timerConfig.OnCalendar == "*-*-* 00,06,12,18:00:00"
-          &&
-            backupRuntimeEval.config.systemd.services.borgbackup-job-realm.serviceConfig.Slice
-            == "borgdrain.slice"
-          && backupRuntimeEval.config.systemd.services.borgbackup-job-realm.serviceConfig.MemoryHigh == "6G"
-          && backupRuntimeEval.config.systemd.services.borgbackup-job-realm.serviceConfig.MemoryMax == "6G"
+          # The coordinator stops only the resumable integrity check for drain work.
+          && backup.nightly.verify_unit == "borgbackup-verify.service"
+          && runsCommand "borgbackup-drain-coordinator" "nightly"
+          && timers.borgbackup-drain-coordinator.timerConfig.OnCalendar == "*-*-* 03:05:00"
+          && timers.borgbackup-drain-coordinator.timerConfig.OnBootSec == "45min"
+          && timers.btrbk.timerConfig.OnCalendar == "*-*-* 00,06,12,18:00:00"
+          && services.borgbackup-job-realm.serviceConfig.Slice == "borgdrain.slice"
+          && services.borgbackup-job-realm.serviceConfig.MemoryHigh == "6G"
+          && services.borgbackup-job-realm.serviceConfig.MemoryMax == "6G"
           && backupRuntimeEval.config.systemd.slices.borgdrain.sliceConfig.MemoryHigh == "6G"
           && backupRuntimeEval.config.systemd.slices.borgdrain.sliceConfig.MemoryMax == "8G"
           &&
-            builtins.length (
-              builtins.filter (line: lib.hasInfix "$TMPDIR/bind/realm/state/cache" line) (
-                lib.splitString "\n" realmBorgDrainScript
-              )
-            ) == 1
+            lib.count (
+              pattern: pattern == "run/borgbackup-snapshot-inputs/realm/state/cache"
+            ) backup.sources.realm.coverage.borg_excludes == 1
         ) "Six-hour acquisition and bounded lossless archival must have separate schedules";
         assert lib.assertMsg (
           let
@@ -774,22 +445,19 @@ assert lib.assertMsg (
           (
             let
               units = backupRuntimeEval.config.sinnix.runtime.units;
-              probes = map (name: (builtins.head units.${name}.captures).livenessProbe.command) [
-                "borgbackup-job-realm"
-                "borgbackup-job-persist"
-              ];
-              genomeProbe = (builtins.head units.borgbackup-job-genome.captures).livenessProbe.command;
+              probe = name: (builtins.head units.${name}.captures).livenessProbe.command;
               rules = backupRuntimeEval.config.systemd.tmpfiles.rules;
             in
-            backupRuntimeEval.config.systemd.services.borgbackup-job-sinex-blobs.serviceConfig.TimeoutStartSec
-            == "6h"
-            && lib.all (lib.hasInfix " 108000") probes
-            && lib.hasInfix "acquisition-freshness" genomeProbe
-            && lib.hasInfix "--source /neo-outer-realm/content/genome" genomeProbe
-            && lib.hasInfix "--max-observation-age 64800" genomeProbe
-            && lib.hasInfix "--producer-unit btrbk.service" genomeProbe
-            && lib.hasInfix "observe-acquisitions" backupRuntimeEval.config.systemd.services.btrbk.script
-            && lib.hasInfix "--quiet --preserve-snapshots run" backupRuntimeEval.config.systemd.services.btrbk.script
+            services.borgbackup-job-sinex-blobs.serviceConfig.TimeoutStartSec == "6h"
+            && lib.hasSuffix "/bin/sinnix-backup freshness realm" (probe "borgbackup-job-realm")
+            && lib.hasSuffix "/bin/sinnix-backup freshness persist" (probe "borgbackup-job-persist")
+            && backup.jobs.freshness_seconds == 108000
+            && lib.hasSuffix "/bin/sinnix-backup acquisition-freshness" (probe "borgbackup-job-genome")
+            && lib.hasSuffix "/bin/sinnix-backup audit-status" (probe "borgbackup-coverage-audit-realm")
+            && backup.jobs.genome.source == "/neo-outer-realm/content/genome"
+            && backup.jobs.genome.max_observation_age_seconds == 64800
+            && backup.jobs.genome.producer_unit == "btrbk.service"
+            && runsCommand "btrbk" "take-snapshots"
             && builtins.elem "d /persist/root/.cache/borg-drain 0750 root users -" rules
             &&
               lib.all
@@ -802,10 +470,15 @@ assert lib.assertMsg (
                   "persist"
                   "genome"
                 ]
-            && lib.hasInfix ''install -d -m 0750 -o root -g users "$acknowledgement_root"'' backupRuntimeEval.config.systemd.services.borgbackup-job-realm.script
             && builtins.elem "d /realm/state/cache/borg 0700 root root -" rules
           )
           "Operator probes must read receipts with nightly/change-aware budgets while credentials stay private";
+        assert lib.assertMsg (
+          let
+            stores = (backupJson customAuthorityEval).jobs.beads.stores;
+          in
+          lib.any (store: store.path == "authority/sinex/.beads") stores
+        ) "The Beads restore check must follow a configured task authority outside state/tasks";
         assert lib.assertMsg (
           let
             serviceSurfaces =
@@ -838,40 +511,18 @@ assert lib.assertMsg (
             pkgs.util-linux
           ];
           script = ''
-            ${pkgs.python3}/bin/python3 ${./backup_retention.py} ${pkgs.writeText "backup-maintenance-fixture.sh" maintenanceScript}
             ${pkgs.python3}/bin/python3 ${./backup_capacity.py} ${../../scripts/sinnix-backup-capacity}
             ${pkgs.python3}/bin/python3 ${./backup_native_restore_test.py} ${./backup_native_restore.py}
             ${pkgs.python3}/bin/python3 ${./borg-check-arguments.py} ${../../scripts/sinnix-borg-check}
-            ${pkgs.python3}/bin/python3 ${./backup_snapshot_coverage.py} \
-              --verifier ${../../modules/lib/backup/snapshot-coverage.py} \
-              --scripts ${
-                pkgs.writeText "backup-fixture-scripts.json" (
-                  builtins.toJSON {
-                    realm = realmBorgDrainScript;
-                    genome = genomeBorgDrainScript;
-                    localDumps = localDumpsScript;
-                    persist = persistBorgDrainScript;
-                    coordinator = coordinatorScript;
-                    missing = missingRealmBorgDrainScript;
-                    sinex = sinexBlobBorgScript;
-                    polylogue = polylogueStateBorgScript;
-                    beads = beadsCheckScript;
-                    maintenance = maintenanceScript;
-                  }
-                )
-              }
           '';
         };
 
       # The freshness/liveness questions the retired borgbackup-status script
-      # asked are now capture lanes and livenessProbes on the surfaces that
-      # own the marker files (see modules/backup.nix). The claims about them
-      # live in the eval spec's assertions above -- each lane must point at a
-      # path its own unit writes, and each probe must be runnable. This
-      # derivation forces that evaluation and publishes the lanes it checked.
-      #
-      # Provably fails when: a Borg job's marker path and its capture lane
-      # drift apart, or a lane declares a probe with no command.
+      # asked are capture lanes and livenessProbes on the surfaces that own
+      # the marker files (see modules/backup.nix). The backupRuntimeEval
+      # assertions check them -- each lane must point at a path its own unit
+      # writes, and each probe must be runnable. This derivation forces that
+      # evaluation and publishes the lanes it checked.
       borgHealthLanesJson = builtins.toJSON {
         inherit (backupRuntimeEval.config.sinnix.runtime.units)
           borgbackup-job-persist
@@ -888,43 +539,49 @@ assert lib.assertMsg (
         ${borgHealthLanesJson}
         EOF_LANES
       '';
-      polylogueHookCutRuntime =
-        pkgs.runCommand "backup-polylogue-hook-cut-check"
+      # The evaluated policy file of the fixture host above. Package tests
+      # relocate its absolute paths into a scratch tree, so they run against
+      # the schema and values production reads.
+      backupFixtureConfig = pkgs.writeText "backup-fixture-config.json" backupRuntimeEval.config.environment.etc."sinnix/backup.json".text;
+      # pytest over the package's tests (all of them, or the files named).
+      mkBackupSuite =
+        name: testPaths:
+        pkgs.runCommand name
           {
             nativeBuildInputs = [
-              pkgs.python3
+              (pkgs.python3.withPackages (ps: [
+                ps.pytest
+                sinnixScriptRegistry.packageSet.sinnix-backup
+              ]))
+              pkgs.acl
+              pkgs.bash
               pkgs.borgbackup
+              pkgs.coreutils
+              pkgs.util-linux
+              sinnixScriptRegistry.packageSet.sinnix-borg-check
+              sinnixScriptRegistry.packageSet.sinnix-borg-expire
+              sinnixScriptRegistry.packageSet.sinnix-borg-prune-dumps
             ];
+            SINNIX_BACKUP_FIXTURE_CONFIG = backupFixtureConfig;
+            TZ = "UTC";
+            passthru.fixtureConfig = backupFixtureConfig;
           }
           ''
-            python3 ${./polylogue-hook-cut.py} ${../../modules/lib/backup/cut-polylogue-hooks.py}
+            cp -r ${../../pkgs/sinnix-backup/tests} tests
+            chmod -R u+w tests
+            python3 -m pytest -q ${testPaths}
             touch "$out"
           '';
     in
     {
       checks = {
+        backup-suite = mkBackupSuite "sinnix-backup-suite" "tests";
         backup-genome-files-cache =
-          assert
-            backupRuntimeEval.config.systemd.services.borgbackup-job-genome.environment.BORG_FILES_CACHE_SUFFIX
-            == "genome";
-          assert
-            !(
-              backupRuntimeEval.config.systemd.services.borgbackup-job-realm.environment ? BORG_FILES_CACHE_SUFFIX
-            );
-          pkgs.runCommand "backup-genome-files-cache-check"
-            {
-              nativeBuildInputs = [
-                pkgs.python3
-                pkgs.borgbackup
-              ];
-            }
-            ''
-              python3 ${./backup_files_cache.py}
-              touch "$out"
-            '';
+          assert backup.sources.genome.files_cache_suffix == "genome";
+          assert backup.sources.realm.files_cache_suffix == null;
+          mkBackupSuite "backup-genome-files-cache-check" "tests/test_files_cache.py";
         backup-borg-hook-runtime = backupBorgHookRuntime;
         backup-health-lanes-runtime = borgHealthLanesRuntime;
-        backup-polylogue-hook-cut = polylogueHookCutRuntime;
         backup-headless-default =
           assert headlessBackupUnits == [ ];
           pkgs.runCommand "backup-headless-default-check" { } ''

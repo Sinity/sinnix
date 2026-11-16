@@ -1,6 +1,5 @@
 """Exercise Borg's archive paths and exact native-cut cleanup ownership."""
 
-import importlib.util
 import os
 import shutil
 import subprocess
@@ -10,11 +9,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-# Native root fixtures must not leave root-owned bytecode in the checkout.
-sys.dont_write_bytecode = True
-spec = importlib.util.spec_from_file_location("cut", sys.argv.pop(1))
-cut = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(cut)
+from sinnix_backup import hook_cut as cut
+
 ORIGIN = "bd4b5bed-7abc-1e48-b9ff-1a3df8651105"
 CUT_UUID = "79daa3e5-d30a-44c8-8e50-f73316d27a95"
 NATIVE = os.environ.get("NATIVE_BTRFS") == "1"
@@ -232,5 +228,3 @@ class CutTests(unittest.TestCase):
                 self.create()
         self.assertEqual(len(list(self.cuts.glob("cut-*"))), 1)
 
-
-unittest.main()

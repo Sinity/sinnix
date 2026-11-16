@@ -5,37 +5,8 @@ let
     let
       globStarPlaceholder = "__SINNIX_BORG_GLOBSTAR__";
       withGlobStarPlaceholder = lib.replaceStrings [ "**" ] [ globStarPlaceholder ] pattern;
-      escaped =
-        lib.replaceStrings
-          [
-            "\\"
-            "."
-            "+"
-            "("
-            ")"
-            "["
-            "]"
-            "{"
-            "}"
-            "^"
-            "$"
-            "|"
-          ]
-          [
-            "\\\\"
-            "\\."
-            "\\+"
-            "\\("
-            "\\)"
-            "\\["
-            "\\]"
-            "\\{"
-            "\\}"
-            "\\^"
-            "\\$"
-            "\\|"
-          ]
-          withGlobStarPlaceholder;
+      special = lib.stringToCharacters "\\.+()[]{}^$|";
+      escaped = lib.replaceStrings special (map (c: "\\${c}") special) withGlobStarPlaceholder;
       withSingleStar = lib.replaceStrings [ "*" ] [ "[^/]*" ] escaped;
       withQuestion = lib.replaceStrings [ "?" ] [ "[^/]" ] withSingleStar;
     in

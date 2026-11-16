@@ -1,15 +1,13 @@
-"""Synthetic real-Borg coverage and rendered drain regression fixtures."""
+"""Synthetic real-Borg coverage fixtures: metadata, ACLs, policy identity and content samples."""
 
-import argparse
 import errno
-import fcntl
-import importlib.util
+import hashlib
 import io
 import json
 import os
-import re
 import shutil
 import sqlite3
+import struct
 import subprocess
 import sys
 import tempfile
@@ -17,444 +15,13 @@ import time
 import tracemalloc
 import unittest
 import uuid
-from contextlib import redirect_stdout
-from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-PARSER = argparse.ArgumentParser()
-PARSER.add_argument("--verifier", required=True)
-PARSER.add_argument("--scripts")
-ARGS = PARSER.parse_args()
-SPEC = importlib.util.spec_from_file_location("coverage", ARGS.verifier)
-COVERAGE = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(COVERAGE)
+from sinnix_backup import audit, coverage, create_record, markers, snapshots
 
-# Every task store the default configuration declares, plus one tracker the
-# configuration does not name, which the check must find in the archive.
-BEADS_STORES = {}
-for store, database, project in (
-    ("sinnix", "sinnix", None),
-    ("sinex-next", "sxnext", "9a23622c-4af5-4f3a-99d9-467edd816653"),
-    ("polylogue-next", "plnext", "d06821b6-158a-4b18-add6-6d26e936a97e"),
-    ("lynchpin", "lynchpin", None),
-    ("stashbox", "stashbox", None),
-):
-    metadata = {"dolt_database": database}
-    if project:
-        metadata["project_id"] = project
-    root_path = "state/tasks/" + store + "/.beads"
-    BEADS_STORES.update(
-        {
-            root_path + "/metadata.json": json.dumps(metadata),
-            root_path + "/config.yaml": "issue-prefix: " + database,
-            root_path
-            + "/embeddeddolt/"
-            + database
-            + "/.dolt/HEAD": "0123456789abcdefghijklmnopqrstuv",
-            root_path + "/embeddeddolt/" + database + "/issue.json": json.dumps(
-                {"id": database + "-task", "title": "Current task"}
-            ),
-        }
-    )
-# Real stores list tens of thousands of archive entries. More than a pipe
-# buffer of names follows the sinnix metadata file, so a membership test that
-# stops reading early (grep -q under pipefail) fails here as on the host.
-for index in range(1500):
-    BEADS_STORES[
-        "state/tasks/sinnix/.beads/dolt/sinnix/.dolt/noms/" + f"{index:064d}"
-    ] = ""
-
-
-class BorgHostIdentityFixture(unittest.TestCase):
-    @unittest.skipUnless(ARGS.scripts, "requires rendered owner scripts")
-    def test_stable_identity_and_explicit_override(self):
-        scripts = json.loads(Path(ARGS.scripts).read_text())
-        for name in (
-            "realm",
-            "genome",
-            "persist",
-            "sinex",
-            "polylogue",
-            "beads",
-            "maintenance",
-        ):
-            with self.subTest(script=name):
-                self.check_identity(scripts[name])
-
-    def check_identity(self, script):
-        prefix = script.split("with_borg_lock()", 1)[0]
-        with tempfile.TemporaryDirectory() as tmp:
-            identity = Path(tmp) / "machine-id"
-            prefix = prefix.replace("/etc/machine-id", str(identity))
-            env = os.environ.copy()
-            env.pop("BORG_HOST_ID", None)
-
-            def run(extra=None):
-                return subprocess.run(
-                    ["bash", "-eu", "-c", prefix + '\nprintf "%s" "$BORG_HOST_ID"'],
-                    env=env | (extra or {}),
-                    capture_output=True,
-                    text=True,
-                )
-
-            identity.write_text("0123456789abcdef0123456789abcdef\n")
-            first, second = run(), run()
-            self.assertEqual(first.returncode, 0, first.stderr)
-            self.assertEqual(first.stdout, second.stdout)
-            self.assertTrue(first.stdout.endswith("@0123456789abcdef0123456789abcdef"))
-            identity.unlink()
-            explicit = run({"BORG_HOST_ID": "explicit-fixture@stable"})
-            self.assertEqual(explicit.returncode, 0, explicit.stderr)
-            self.assertEqual(explicit.stdout, "explicit-fixture@stable")
-            self.assertNotEqual(run().returncode, 0)
-            identity.write_text("invalid\n")
-            self.assertNotEqual(run().returncode, 0)
-
-
-class OnchangeFreshnessFixture(unittest.TestCase):
-    def setUp(self):
-        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
-        self.snapshots = self.root / "snapshots"
-        self.snapshots.mkdir()
-        self.marker = self.root / "latest"
-        self.policy = self.root / "policy.json"
-        self.policy.write_text(json.dumps({"noncanonical": [], "borg_excludes": []}))
-        self.old = "genome.20260101T000000+0000"
-        self.new = "genome.20260102T000000+0000"
-        self.young = "genome.20260102T230000+0000"
-        self.details = {
-            self.old: ("11111111-1111-1111-1111-111111111111", 10, 1),
-            self.new: ("22222222-2222-2222-2222-222222222222", 11, 2),
-            self.young: ("33333333-3333-3333-3333-333333333333", 12, 3),
-        }
-        (self.snapshots / self.old).mkdir()
-        self.filesystem = "44444444-4444-4444-4444-444444444444"
-        self.source_uuid = "55555555-5555-5555-5555-555555555555"
-        self.source = self.root / "source"
-        self.source.mkdir()
-        self.fields = {
-            "snapshot": self.old,
-            "archive": "genome-" + self.old,
-            "filesystem_uuid": self.filesystem,
-            "generation": "10",
-            "subvolume_id": "1",
-            "coverage": json.dumps(
-                {
-                    "policy_sha256": COVERAGE.policy_identity(
-                        self.policy, require_borg_excludes=True
-                    ),
-                    "proof_mode": "created",
-                    "producer": COVERAGE.REALM_PRODUCER_CONTRACT,
-                    "create_receipt_sha256": "c" * 64,
-                    "archive": "genome-" + self.old,
-                    "archive_id": "a" * 64,
-                    "snapshot_uuid": self.details[self.old][0],
-                }
-            ),
-        }
-        self.publish()
-        self.now = int(datetime(2026, 1, 3, tzinfo=timezone.utc).timestamp())
-        self.enterContext(
-            patch.object(COVERAGE.time, "time", side_effect=lambda: self.now)
-        )
-        self.enterContext(
-            patch.object(COVERAGE, "filesystem_identity", return_value=self.filesystem)
-        )
-        self.enterContext(
-            patch.object(
-                COVERAGE,
-                "snapshot_details",
-                side_effect=lambda p: self.details[Path(p).name],
-            )
-        )
-        self.enterContext(patch.object(COVERAGE, "run", side_effect=self.metadata))
-        self.enterContext(
-            patch.object(
-                COVERAGE,
-                "archive_identity",
-                side_effect=AssertionError("health must not open Borg"),
-            )
-        )
-        self.inventory = self.root / "acquisition-inventory.json"
-        self.publish_inventory()
-
-    def publish(self):
-        payload = "".join(f"{key}={value}\n" for key, value in self.fields.items())
-        self.marker.write_text(payload)
-        receipts = COVERAGE.acknowledgement_directory(self.marker)
-        receipts.mkdir(exist_ok=True)
-        (receipts / self.old).write_text(payload)
-
-    def metadata(self, *args):
-        self.assertEqual(args[:3], ("btrfs", "subvolume", "show"))
-        if Path(args[3]) == self.source:
-            return f"UUID: {self.source_uuid}\n"
-        return f"Parent UUID: {self.source_uuid}\n"
-
-    def publish_inventory(self):
-        observed = COVERAGE.observe_acquisitions(
-            self.snapshots, "genome.*", self.policy, self.source
-        )
-        self.inventory.write_text(json.dumps(observed))
-
-    def probe(self):
-        return COVERAGE.acquisition_freshness(
-            self.inventory,
-            "genome.*",
-            self.marker,
-            self.policy,
-            36 * 3600,
-            self.source,
-            18 * 3600,
-        )
-
-    def test_unchanged_old_cut_is_current_without_borg_io(self):
-        self.assertEqual(
-            self.probe(),
-            {"status": "accepted-current-observed-acquired-generation", "pending": 0},
-        )
-
-    def test_pending_debt_ages_oldest_acquisition_not_old_archive_or_new_arrival(self):
-        for name in (self.new, self.young):
-            (self.snapshots / name).mkdir()
-        self.publish_inventory()
-        self.assertEqual(self.probe()["oldest_pending_age_seconds"], 24 * 3600)
-        self.now += 13 * 3600
-        with self.assertRaisesRegex(ValueError, "pending onchange acquisition"):
-            self.probe()
-
-    def test_operator_reader_needs_no_snapshot_or_secret_access(self):
-        self.source.chmod(0)
-        self.snapshots.chmod(0)
-        try:
-            with patch.object(
-                COVERAGE,
-                "run",
-                side_effect=AssertionError("reader must not run Btrfs/Borg"),
-            ):
-                self.assertEqual(self.probe()["pending"], 0)
-        finally:
-            self.source.chmod(0o700)
-            self.snapshots.chmod(0o700)
-
-    def test_nested_receipt_permission_failure_is_not_healthy(self):
-        # The parent can be readable while an old per-snapshot namespace is
-        # still inaccessible. The reader must fail rather than accept latest.
-        receipts = COVERAGE.acknowledgement_directory(self.marker)
-        original_reader = COVERAGE.read_marker_fields
-
-        def guarded_reader(path):
-            if Path(path).parent == receipts:
-                raise PermissionError("nested receipt namespace unavailable")
-            return original_reader(path)
-
-        with patch.object(COVERAGE, "read_marker_fields", side_effect=guarded_reader):
-            with self.assertRaises(PermissionError):
-                self.probe()
-
-    def test_missing_unavailable_and_changed_inputs_fail(self):
-        self.marker.unlink()
-        with self.assertRaises(ValueError):
-            self.probe()
-        # Publishing immutable inventory precedes archive completion and does
-        # not need another acquisition after the new accepted marker appears.
-        self.publish_inventory()
-        self.publish()
-        self.assertEqual(self.probe()["pending"], 0)
-        self.inventory.unlink()
-        with self.assertRaises(FileNotFoundError):
-            self.probe()
-        with patch.object(
-            COVERAGE, "snapshot_names", side_effect=PermissionError("unavailable")
-        ):
-            with self.assertRaises(PermissionError):
-                self.publish_inventory()
-        with patch.object(COVERAGE, "run", side_effect=OSError("source unavailable")):
-            with self.assertRaises(OSError):
-                self.publish_inventory()
-        with patch.object(
-            COVERAGE,
-            "filesystem_identity",
-            side_effect=[self.filesystem, "another-volume"],
-        ):
-            with self.assertRaises(ValueError):
-                self.publish_inventory()
-
-    def test_stale_future_corrupt_projection_or_identity_fails(self):
-        original = json.loads(self.inventory.read_text())
-        for key, value in (
-            ("schema", "unknown"),
-            ("source_uuid", "66666666-6666-6666-6666-666666666666"),
-            ("policy_sha256", "b" * 64),
-            (
-                "observed_at",
-                datetime.fromtimestamp(self.now + 1, timezone.utc).isoformat(),
-            ),
-            (
-                "observed_at",
-                datetime.fromtimestamp(self.now - 19 * 3600, timezone.utc).isoformat(),
-            ),
-        ):
-            self.inventory.write_text(json.dumps(dict(original, **{key: value})))
-            with self.assertRaises(ValueError):
-                self.probe()
-        self.inventory.write_text(json.dumps(original))
-        future = "genome.20260104T000000+0000"
-        self.details[future] = ("77777777-7777-7777-7777-777777777777", 13, 4)
-        (self.snapshots / future).mkdir()
-        self.publish_inventory()
-        with self.assertRaisesRegex(ValueError, "future"):
-            self.probe()
-
-    def test_failed_native_producer_rejects_even_a_previous_fresh_projection(self):
-        argv = [
-            "snapshot-coverage",
-            "acquisition-freshness",
-            str(self.inventory),
-            "genome.*",
-            str(self.marker),
-            str(self.policy),
-            "129600",
-            "--source",
-            str(self.source),
-            "--max-observation-age",
-            "64800",
-            "--producer-unit",
-            "btrbk.service",
-        ]
-        with (
-            patch.object(COVERAGE.sys, "argv", argv),
-            patch.object(COVERAGE, "run", return_value="exit-code"),
-        ):
-            with self.assertRaisesRegex(ValueError, "producer"):
-                COVERAGE.main()
-
-    def test_stale_policy_or_changed_receipt_binding_fails(self):
-        proof = json.loads(self.fields["coverage"])
-        for key, value in (
-            ("policy_sha256", "b" * 64),
-            ("snapshot_uuid", self.details[self.new][0]),
-            ("create_receipt_sha256", "invalid"),
-        ):
-            altered = dict(proof, **{key: value})
-            self.fields["coverage"] = json.dumps(altered)
-            self.publish()
-            with self.assertRaises(ValueError):
-                self.probe()
-        self.fields["coverage"] = json.dumps(proof)
-        self.publish()
-        (COVERAGE.acknowledgement_directory(self.marker) / self.old).unlink()
-        with self.assertRaises(ValueError):
-            self.probe()
-
-
-class SnapshotInventoryFixture(unittest.TestCase):
-    def test_empty_and_filtered_inventory(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self.assertEqual(COVERAGE.snapshot_names(root, "realm.*"), [])
-            old = "realm.20261015T020000+0200"
-            new = "realm.20261016T020000+0200"
-            for name in (new, old, "persist.20261016T020000+0200"):
-                (root / name).mkdir()
-            (root / "realm.20261014T020000+0200").symlink_to(root / old)
-            (root / "realm.20261013T020000+0200").touch()
-            self.assertEqual(COVERAGE.snapshot_names(root, "realm.*"), [old, new])
-
-    def test_unavailable_root_is_not_empty(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / "snapshots"
-            with self.assertRaises(FileNotFoundError):
-                COVERAGE.snapshot_names(root, "realm.*")
-            root.touch()
-            with self.assertRaises(NotADirectoryError):
-                COVERAGE.snapshot_names(root, "realm.*")
-        with patch.object(
-            COVERAGE.os, "scandir", side_effect=PermissionError(errno.EACCES, "denied")
-        ):
-            with self.assertRaises(PermissionError):
-                COVERAGE.snapshot_names("/synthetic/snapshots", "realm.*")
-
-    def test_entry_lookup_error_is_not_omitted(self):
-        entry = SimpleNamespace(name="realm.20261016T020000+0200")
-
-        def unavailable(**kwargs):
-            raise OSError(errno.EIO, "entry lookup failed")
-
-        entry.stat = unavailable
-        from contextlib import nullcontext
-
-        with patch.object(
-            COVERAGE.os, "scandir", return_value=nullcontext(iter([entry]))
-        ):
-            with self.assertRaises(OSError):
-                COVERAGE.snapshot_names("/synthetic/snapshots", "realm.*")
-
-
-class FilesystemIdentityFixture(unittest.TestCase):
-    def test_exact_filesystem_uuid_is_required(self):
-        mount = json.dumps(
-            {"filesystems": [{"target": "/synthetic", "fstype": "btrfs"}]}
-        )
-        with patch.object(
-            COVERAGE, "run", side_effect=[mount, f"Label: 'fixture'  uuid: {FS_UUID}\n"]
-        ) as probe:
-            self.assertEqual(
-                COVERAGE.filesystem_identity("/synthetic/nested/snapshot"), FS_UUID
-            )
-            self.assertEqual(
-                probe.call_args_list[0].args,
-                (
-                    "findmnt",
-                    "--json",
-                    "--output",
-                    "TARGET,FSTYPE",
-                    "--target",
-                    "/synthetic/nested/snapshot",
-                ),
-            )
-            self.assertEqual(
-                probe.call_args_list[1].args,
-                ("btrfs", "filesystem", "show", "--raw", "/synthetic"),
-            )
-        for output in ("", f"UUID: {FS_UUID}\n", f"Label: none uuid: {FS_UUID}\n" * 2):
-            with patch.object(COVERAGE, "run", side_effect=[mount, output]):
-                with self.assertRaisesRegex(
-                    ValueError, "identify one Btrfs filesystem"
-                ):
-                    COVERAGE.filesystem_identity("/synthetic/nested/snapshot")
-        for mounts in ([], [{"target": "/synthetic", "fstype": "ext4"}]):
-            with patch.object(
-                COVERAGE, "run", return_value=json.dumps({"filesystems": mounts})
-            ):
-                with self.assertRaisesRegex(ValueError, "identify one Btrfs mount"):
-                    COVERAGE.filesystem_identity("/synthetic/nested/snapshot")
-
-    def test_automount_trigger_does_not_hide_backing_filesystem(self):
-        backing = {"target": "/synthetic", "fstype": "btrfs"}
-        trigger = {"target": "/synthetic", "fstype": "autofs"}
-        with patch.object(
-            COVERAGE,
-            "run",
-            side_effect=[
-                json.dumps({"filesystems": [trigger, backing]}),
-                f"Label: 'fixture'  uuid: {FS_UUID}\n",
-            ],
-        ):
-            self.assertEqual(COVERAGE.filesystem_identity("/synthetic/cut"), FS_UUID)
-        for mounts in (
-            [trigger],
-            [trigger, backing, backing],
-            [backing, trigger | {"target": "/other"}],
-            [backing, trigger | {"fstype": "ext4"}],
-        ):
-            with patch.object(
-                COVERAGE, "run", return_value=json.dumps({"filesystems": mounts})
-            ):
-                with self.assertRaisesRegex(ValueError, "identify one Btrfs mount"):
-                    COVERAGE.filesystem_identity("/synthetic/cut")
+os.environ.setdefault("BORG_HOST_ID", "backup-fixture@stable")
 
 
 class CoverageMemoryFixture(unittest.TestCase):
@@ -532,18 +99,18 @@ class CoverageMemoryFixture(unittest.TestCase):
 
         with (
             patch.object(
-                COVERAGE,
+                coverage,
                 "Path",
                 new=lambda path: (
                     VirtualPath() if path == "synthetic-source" else real_path(path)
                 ),
             ),
-            patch.object(COVERAGE, "command_items", new=items),
-            patch.object(COVERAGE.os, "listxattr", new=lambda path, **kw: []),
+            patch.object(coverage, "command_items", new=items),
+            patch.object(os, "listxattr", new=lambda path, **kw: []),
         ):
             tracemalloc.start()
             try:
-                result = COVERAGE.verify("synthetic-source", "synthetic-archive", [])
+                result = coverage.verify("synthetic-source", "synthetic-archive", [])
                 _, peak = tracemalloc.get_traced_memory()
             finally:
                 tracemalloc.stop()
@@ -577,7 +144,7 @@ class CoverageFixture(unittest.TestCase):
         (self.source / "old-only").write_text("unique historical bytes")
         self.snapshot_uuid = str(uuid.uuid4())
         filesystem_probe = patch.object(
-            COVERAGE, "filesystem_identity", return_value=FS_UUID
+            snapshots, "filesystem_identity", return_value=FS_UUID
         )
         filesystem_probe.start()
         self.addCleanup(filesystem_probe.stop)
@@ -604,8 +171,8 @@ class CoverageFixture(unittest.TestCase):
         self.archive("literal[1]")
         self.archive("literal1")
         self.assertNotEqual(
-            COVERAGE.archive_identity("literal[1]", self.snapshot_uuid),
-            COVERAGE.archive_identity("literal1", self.snapshot_uuid),
+            snapshots.archive_identity("literal[1]", self.snapshot_uuid),
+            snapshots.archive_identity("literal1", self.snapshot_uuid),
         )
 
     def test_newest_archive_cannot_release_an_unarchived_historical_version(self):
@@ -620,9 +187,9 @@ class CoverageFixture(unittest.TestCase):
         (self.source / "same-name").write_text("new version")
         archive = "realm-" + new
         self.archive(archive)
-        proof = COVERAGE.verify(self.source, archive, []) | {
+        proof = coverage.verify(self.source, archive, []) | {
             "snapshot_uuid": self.snapshot_uuid,
-            "archive_id": COVERAGE.archive_identity(archive, self.snapshot_uuid),
+            "archive_id": snapshots.archive_identity(archive, self.snapshot_uuid),
             "archive": archive,
         }
         marker = self.root / "unacknowledged-latest"
@@ -635,48 +202,34 @@ class CoverageFixture(unittest.TestCase):
             new: (self.snapshot_uuid, 20, 102),
         }
         with patch.object(
-            COVERAGE, "snapshot_details", side_effect=lambda path: details[path.name]
+            snapshots, "snapshot_details", side_effect=lambda path: details[path.name]
         ):
             self.assertEqual(
-                COVERAGE.verified_prune_plan(
+                snapshots.verified_prune_plan(
                     queue, "realm.*", marker, "realm", "-coverage-v3"
                 ),
                 [],
             )
-            policy = self.root / "adoption-policy.json"
-            policy.write_text(json.dumps({"noncanonical": [], "borg_excludes": []}))
+            policy = {"noncanonical": [], "borg_excludes": []}
             proof.update(
-                proof_mode="full", policy_sha256=COVERAGE.policy_identity(policy, True)
+                proof_mode="full", policy_sha256=coverage.policy_identity(policy, True)
             )
-            fields = COVERAGE.read_marker_fields(marker)
+            fields = markers.read_marker(marker)
             fields["coverage"] = json.dumps(proof)
             marker.write_text(
                 "".join(f"{key}={value}\n" for key, value in fields.items())
             )
-            argv = [
-                "coverage",
-                "acknowledged",
-                "--policy",
-                str(policy),
-                "--",
-                str(queue),
-                "realm.*",
-                str(marker),
-                "realm",
-                "-coverage-v3",
-            ]
-            output = io.StringIO()
-            with patch.object(COVERAGE.sys, "argv", argv), redirect_stdout(output):
-                COVERAGE.main()
-            self.assertEqual(output.getvalue().strip(), new)
-            policy.write_text(
-                json.dumps({"noncanonical": ["changed-policy"], "borg_excludes": []})
+            self.assertEqual(
+                snapshots.acknowledged_snapshot(
+                    queue, "realm.*", marker, "realm", "-coverage-v3", policy
+                ),
+                new,
             )
-            with (
-                patch.object(COVERAGE.sys, "argv", argv),
-                self.assertRaisesRegex(ValueError, "active policy"),
-            ):
-                COVERAGE.main()
+            changed_policy = {"noncanonical": ["changed-policy"], "borg_excludes": []}
+            with self.assertRaisesRegex(ValueError, "active policy"):
+                snapshots.acknowledged_snapshot(
+                    queue, "realm.*", marker, "realm", "-coverage-v3", changed_policy
+                )
 
     def test_each_released_snapshot_has_its_own_archive_and_receipt(self):
         queue = self.root / "queue"
@@ -688,9 +241,9 @@ class CoverageFixture(unittest.TestCase):
         old_uuid = self.snapshot_uuid
         old_archive = "realm-" + old
         self.archive(old_archive)
-        old_proof = COVERAGE.verify(self.source, old_archive, []) | {
+        old_proof = coverage.verify(self.source, old_archive, []) | {
             "snapshot_uuid": old_uuid,
-            "archive_id": COVERAGE.archive_identity(old_archive, old_uuid),
+            "archive_id": snapshots.archive_identity(old_archive, old_uuid),
             "archive": old_archive,
         }
         self.snapshot_uuid = str(uuid.uuid4())
@@ -698,86 +251,86 @@ class CoverageFixture(unittest.TestCase):
         (self.source / "same-name").write_text("new version")
         archive = "realm-" + new
         self.archive(archive)
-        proof = COVERAGE.verify(self.source, archive, []) | {
+        proof = coverage.verify(self.source, archive, []) | {
             "snapshot_uuid": self.snapshot_uuid,
-            "archive_id": COVERAGE.archive_identity(archive, self.snapshot_uuid),
+            "archive_id": snapshots.archive_identity(archive, self.snapshot_uuid),
             "archive": archive,
         }
         marker = self.root / "latest"
 
-        def receipt(name, native, coverage):
+        def receipt(name, native, proof_fields):
             return (
-                f"archive={coverage['archive']}\nsnapshot={name}\nfilesystem_uuid={FS_UUID}\n"
-                f"generation={native[1]}\nsubvolume_id={native[2]}\ncoverage={json.dumps(coverage)}\n"
+                f"archive={proof_fields['archive']}\nsnapshot={name}\nfilesystem_uuid={FS_UUID}\n"
+                f"generation={native[1]}\nsubvolume_id={native[2]}\ncoverage={json.dumps(proof_fields)}\n"
             )
 
         details = {old: (old_uuid, 10, 101), new: (self.snapshot_uuid, 20, 102)}
         marker.write_text(receipt(new, details[new], proof))
-        acknowledgements = COVERAGE.acknowledgement_directory(marker)
+        acknowledgements = snapshots.acknowledgement_directory(marker)
         acknowledgements.mkdir()
         with patch.object(
-            COVERAGE, "snapshot_details", side_effect=lambda path: details[path.name]
+            snapshots, "snapshot_details", side_effect=lambda path: details[path.name]
         ):
             self.assertEqual(
-                COVERAGE.queued_snapshots(
+                snapshots.queued_snapshots(
                     queue, "realm.*", marker, "realm", "-coverage-v3"
                 ),
                 [new, old],
             )
             self.assertEqual(
-                COVERAGE.verified_prune_plan(
+                snapshots.verified_prune_plan(
                     queue, "realm.*", marker, "realm", "-coverage-v3"
                 ),
                 [],
             )
             (acknowledgements / old).write_text(receipt(old, details[old], old_proof))
             self.assertEqual(
-                COVERAGE.queued_snapshots(
+                snapshots.queued_snapshots(
                     queue, "realm.*", marker, "realm", "-coverage-v3"
                 ),
                 [new],
             )
             self.assertEqual(
-                COVERAGE.verified_prune_plan(
+                snapshots.verified_prune_plan(
                     queue, "realm.*", marker, "realm", "-coverage-v3"
                 ),
                 [(old, *details[old])],
             )
             (acknowledgements / new).write_bytes(marker.read_bytes())
             self.assertEqual(
-                COVERAGE.queued_snapshots(
+                snapshots.queued_snapshots(
                     queue, "realm.*", marker, "realm", "-coverage-v3"
                 ),
                 [],
             )
-            self.assertFalse(COVERAGE.should_advance_marker(queue, marker, old))
+            self.assertFalse(snapshots.should_advance_marker(queue, marker, old))
             rolled_back = "realm.20260401T233000+0000"
             (queue / rolled_back).mkdir()
             details[rolled_back] = (str(uuid.uuid4()), 30, 103)
             self.assertEqual(
-                COVERAGE.queued_snapshots(
+                snapshots.queued_snapshots(
                     queue, "realm.*", marker, "realm", "-coverage-v3"
                 ),
                 [rolled_back],
             )
-            self.assertTrue(COVERAGE.should_advance_marker(queue, marker, rolled_back))
+            self.assertTrue(snapshots.should_advance_marker(queue, marker, rolled_back))
             (acknowledgements / old).write_text(
                 receipt(old, details[old], old_proof).replace(
                     old_proof["archive_id"], "a" * 64
                 )
             )
             with self.assertRaisesRegex(ValueError, "archive identity changed"):
-                COVERAGE.verified_prune_plan(
+                snapshots.verified_prune_plan(
                     queue, "realm.*", marker, "realm", "-coverage-v3"
                 )
             with self.assertRaisesRegex(ValueError, "archive identity changed"):
-                COVERAGE.queued_snapshots(
+                snapshots.queued_snapshots(
                     queue, "realm.*", marker, "realm", "-coverage-v3"
                 )
             (acknowledgements / old).write_text(receipt(old, details[old], old_proof))
             details[old] = (str(uuid.uuid4()), 10, 101)
             with self.assertRaisesRegex(ValueError, "snapshot identity changed"):
-                COVERAGE.verified_prune_plan(
+                snapshots.verified_prune_plan(
                     queue, "realm.*", marker, "realm", "-coverage-v3"
                 )
 
@@ -797,16 +350,16 @@ class CoverageFixture(unittest.TestCase):
         # the old marker nor an existing Borg archive orders its snapshots.
         with (
             patch.object(
-                COVERAGE, "snapshot_details", return_value=(str(uuid.uuid4()), 10, 101)
+                snapshots, "snapshot_details", return_value=(str(uuid.uuid4()), 10, 101)
             ),
-            patch.object(COVERAGE, "archive_identity", return_value="a" * 64),
+            patch.object(snapshots, "archive_identity", return_value="a" * 64),
         ):
             with self.assertRaisesRegex(ValueError, "snapshot is unavailable"):
-                COVERAGE.verified_prune_plan(
+                snapshots.verified_prune_plan(
                     queue, "realm.*", marker, "realm", "-coverage-v3"
                 )
             self.assertEqual(
-                COVERAGE.queued_snapshots(
+                snapshots.queued_snapshots(
                     queue, "realm.*", marker, "realm", "-coverage-v3"
                 ),
                 [current],
@@ -825,16 +378,16 @@ class CoverageFixture(unittest.TestCase):
             f"coverage={json.dumps({'snapshot_uuid': self.snapshot_uuid, 'archive': archive, 'archive_id': 'a' * 64})}\n"
         )
         with patch.object(
-            COVERAGE, "snapshot_details", return_value=(self.snapshot_uuid, 20, 102)
+            snapshots, "snapshot_details", return_value=(self.snapshot_uuid, 20, 102)
         ):
             self.assertEqual(
-                COVERAGE.queued_snapshots(
+                snapshots.queued_snapshots(
                     queue, "realm.*", marker, "realm", "-coverage-v3"
                 ),
                 [current],
             )
             with self.assertRaisesRegex(ValueError, "filesystem identity changed"):
-                COVERAGE.verified_prune_plan(
+                snapshots.verified_prune_plan(
                     queue, "realm.*", marker, "realm", "-coverage-v3"
                 )
         # An older marker is history, not authority over current generations.
@@ -849,16 +402,16 @@ class CoverageFixture(unittest.TestCase):
             )
         )
         self.assertEqual(
-            COVERAGE.verified_prune_plan(
+            snapshots.verified_prune_plan(
                 queue, "realm.*", marker, "realm", "-coverage-v3"
             ),
             [],
         )
         with patch.object(
-            COVERAGE, "snapshot_details", return_value=(self.snapshot_uuid, 20, 102)
+            snapshots, "snapshot_details", return_value=(self.snapshot_uuid, 20, 102)
         ):
             self.assertEqual(
-                COVERAGE.queued_snapshots(
+                snapshots.queued_snapshots(
                     queue, "realm.*", marker, "realm", "-coverage-v3"
                 ),
                 [current],
@@ -875,21 +428,21 @@ class CoverageFixture(unittest.TestCase):
             return temp
 
         with (
-            patch.object(COVERAGE.tempfile, "TemporaryDirectory", new=scratch),
+            patch.object(tempfile, "TemporaryDirectory", new=scratch),
             patch.object(
-                COVERAGE.CoverageInventory,
+                coverage.CoverageInventory,
                 "add",
                 side_effect=sqlite3.OperationalError("database or disk is full"),
             ),
         ):
             with self.assertRaisesRegex(sqlite3.OperationalError, "disk is full"):
-                COVERAGE.verify(self.source, "unused", [])
+                coverage.verify(self.source, "unused", [])
         self.assertEqual(len(created), 1)
         self.assertFalse(created[0].exists())
 
     def test_duplicate_metadata_cannot_satisfy_coverage(self):
         self.archive()
-        original = COVERAGE.command_items
+        original = coverage.command_items
 
         def duplicate(command, parser):
             for item in original(command, parser):
@@ -897,21 +450,21 @@ class CoverageFixture(unittest.TestCase):
                 if "dump-archive" in command:
                     yield item
 
-        with patch.object(COVERAGE, "command_items", new=duplicate):
+        with patch.object(coverage, "command_items", new=duplicate):
             with self.assertRaisesRegex(ValueError, "duplicate archive path"):
-                COVERAGE.verify(self.source, "snapshot", [])
+                coverage.verify(self.source, "snapshot", [])
 
     def test_exact_versions_and_metadata(self):
         os.link(self.source / "same-name", self.source / "hardlink")
         (self.source / "symlink").symlink_to("same-name")
         self.archive()
-        result = COVERAGE.verify(self.source, "snapshot", [])
+        result = coverage.verify(self.source, "snapshot", [])
         self.assertEqual(result["canonical_entries"], 5)
         self.assertEqual(
-            len(COVERAGE.archive_identity("snapshot", self.snapshot_uuid)), 64
+            len(snapshots.archive_identity("snapshot", self.snapshot_uuid)), 64
         )
         with self.assertRaisesRegex(ValueError, "UUID"):
-            COVERAGE.archive_identity("snapshot", str(uuid.uuid4()))
+            snapshots.archive_identity("snapshot", str(uuid.uuid4()))
         old_stat = (self.source / "same-name").stat()
         (self.source / "same-name").write_text("new version")
         # Keep size and mtime identical: only reading archived/source bytes
@@ -920,22 +473,22 @@ class CoverageFixture(unittest.TestCase):
             self.source / "same-name", ns=(old_stat.st_atime_ns, old_stat.st_mtime_ns)
         )
         with self.assertRaisesRegex(ValueError, "content mismatch"):
-            COVERAGE.verify(self.source, "snapshot", [])
+            coverage.verify(self.source, "snapshot", [])
 
     def test_routine_child_deadline_kills_and_reaps_blocked_reader(self):
-        token = COVERAGE._COMMAND_TIMEOUT.set(0.05)
+        token = coverage._COMMAND_TIMEOUT.set(0.05)
         started = time.monotonic()
         try:
             with self.assertRaisesRegex(ValueError, "exceeded.*budget"):
                 list(
-                    COVERAGE.command_items(
+                    coverage.command_items(
                         [sys.executable, "-c", "import time; time.sleep(10)"],
                         lambda stream: iter(stream),
                     )
                 )
             self.assertLess(time.monotonic() - started, 2)
         finally:
-            COVERAGE._COMMAND_TIMEOUT.reset(token)
+            coverage._COMMAND_TIMEOUT.reset(token)
 
     def test_slow_metadata_parser_does_not_hold_native_repository_lock(self):
         # Exceed the pipe capacity so the old streaming path keeps Borg alive
@@ -946,7 +499,7 @@ class CoverageFixture(unittest.TestCase):
         commands = [
             (
                 ["borg", "debug", "dump-archive", "::snapshot", "/dev/stdout"],
-                lambda stream: COVERAGE.JsonStream(stream).items(),
+                lambda stream: coverage.JsonStream(stream).items(),
             ),
             (
                 [
@@ -962,7 +515,7 @@ class CoverageFixture(unittest.TestCase):
         ]
         for i, (command, parser) in enumerate(commands):
             with self.subTest(command=command[1]):
-                items = COVERAGE.command_items(command, parser)
+                items = coverage.command_items(command, parser)
                 try:
                     self.assertIsInstance(next(items), dict)
                     self.archive(f"while-parser-paused-{i}", "--lock-wait", "1")
@@ -971,21 +524,21 @@ class CoverageFixture(unittest.TestCase):
 
     def test_metadata_coverage_does_not_hash_payloads_or_claim_content_equality(self):
         self.archive()
-        original = COVERAGE.command_items
+        original = coverage.command_items
 
         def metadata_only(command, parser):
             self.assertNotIn("{path}{sha256}{health}{size}", command)
             yield from original(command, parser)
 
         with (
-            patch.object(COVERAGE, "command_items", new=metadata_only),
+            patch.object(coverage, "command_items", new=metadata_only),
             patch.object(
-                COVERAGE.hashlib,
+                hashlib,
                 "file_digest",
                 side_effect=AssertionError("payload read"),
             ),
         ):
-            result = COVERAGE.verify(
+            result = coverage.verify(
                 self.source, "snapshot", [], content_mode="metadata"
             )
         self.assertEqual(result["content_verification"], "not_performed")
@@ -994,7 +547,7 @@ class CoverageFixture(unittest.TestCase):
 
     def test_sample_has_exact_byte_file_bounds_and_continuation(self):
         self.archive()
-        first = COVERAGE.verify(
+        first = coverage.verify(
             self.source,
             "snapshot",
             [],
@@ -1006,7 +559,7 @@ class CoverageFixture(unittest.TestCase):
         self.assertEqual(first["source_hashed_bytes"], len("unique historical bytes"))
         self.assertEqual(first["sample_next_after"], "old-only")
         self.assertEqual(first["sample_objects"][0]["path"], "old-only")
-        second = COVERAGE.verify(
+        second = coverage.verify(
             self.source,
             "snapshot",
             [],
@@ -1020,7 +573,7 @@ class CoverageFixture(unittest.TestCase):
         self.assertEqual(second["source_hashed_bytes"], len("old version"))
         self.assertEqual(second["content_coverage"], "partial")
         self.assertNotIn("content_sha256", second)
-        no_fit = COVERAGE.verify(
+        no_fit = coverage.verify(
             self.source,
             "snapshot",
             [],
@@ -1034,7 +587,7 @@ class CoverageFixture(unittest.TestCase):
     def test_oversized_only_population_never_claims_sampled_content(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            inventory = COVERAGE.CoverageInventory(root / "inventory.sqlite")
+            inventory = coverage.CoverageInventory(root / "inventory.sqlite")
             try:
                 for name in ("large-a", "large-b"):
                     path = root / name
@@ -1042,11 +595,11 @@ class CoverageFixture(unittest.TestCase):
                         stream.truncate(1073741825)
                     inventory.add(name, path.stat())
                 with patch.object(
-                    COVERAGE,
+                    coverage,
                     "command_items",
                     side_effect=AssertionError("no selected content"),
                 ):
-                    result = COVERAGE.verify_content_sample(
+                    result = coverage.verify_content_sample(
                         root,
                         "unused",
                         inventory,
@@ -1066,7 +619,7 @@ class CoverageFixture(unittest.TestCase):
     def test_sampling_wraps_eof_and_skips_oversized_prefix_without_stalling(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            inventory = COVERAGE.CoverageInventory(root / "inventory.sqlite")
+            inventory = coverage.CoverageInventory(root / "inventory.sqlite")
             try:
                 for i in range(8):
                     path = root / f"a-large-{i}"
@@ -1081,14 +634,14 @@ class CoverageFixture(unittest.TestCase):
                         "path": path.name,
                         "size": 2,
                         "healthy": True,
-                        "sha256": COVERAGE.hashlib.sha256(b"ok").hexdigest(),
+                        "sha256": hashlib.sha256(b"ok").hexdigest(),
                     }
 
-                with patch.object(COVERAGE, "command_items", new=items):
-                    first = COVERAGE.verify_content_sample(
+                with patch.object(coverage, "command_items", new=items):
+                    first = coverage.verify_content_sample(
                         root, "unused", inventory, byte_budget=2, file_budget=1
                     )
-                    wrapped = COVERAGE.verify_content_sample(
+                    wrapped = coverage.verify_content_sample(
                         root,
                         "unused",
                         inventory,
@@ -1110,7 +663,7 @@ class CoverageFixture(unittest.TestCase):
             (self.source / name).write_text("neutral")
         self.archive()
         for after, expected in (("a1", "a[1]"), ("a[1]", "b\n[1]ą")):
-            result = COVERAGE.verify(
+            result = coverage.verify(
                 self.source,
                 "snapshot",
                 [],
@@ -1130,28 +683,27 @@ class CoverageFixture(unittest.TestCase):
         previous = path.stat()
         path.write_text("new version")
         os.utime(path, ns=(previous.st_atime_ns, previous.st_mtime_ns))
-        result = COVERAGE.verify(self.source, "snapshot", [], content_mode="metadata")
+        result = coverage.verify(self.source, "snapshot", [], content_mode="metadata")
         self.assertEqual(result["content_verification"], "not_performed")
         with self.assertRaisesRegex(ValueError, "sampled archive content mismatch"):
-            COVERAGE.verify(self.source, "snapshot", [], content_mode="sampled")
+            coverage.verify(self.source, "snapshot", [], content_mode="sampled")
 
     def test_created_proof_requires_current_full_anchor_and_borg_reads_changed_bytes(
         self,
     ):
-        policy = self.root / "policy.json"
-        policy.write_text(json.dumps({"noncanonical": [], "borg_excludes": []}))
+        policy = {"noncanonical": [], "borg_excludes": []}
         archive = "first"
         self.archive(archive)
-        full_content_hash = COVERAGE.verify(self.source, archive, [])["content_sha256"]
+        full_content_hash = coverage.verify(self.source, archive, [])["content_sha256"]
         previous = {
             "archive": archive,
-            "archive_id": COVERAGE.archive_identity(archive, self.snapshot_uuid),
+            "archive_id": snapshots.archive_identity(archive, self.snapshot_uuid),
             "snapshot_uuid": self.snapshot_uuid,
             "proof_mode": "full",
             "full_proof_epoch": int(time.time()),
             "content_sha256": full_content_hash,
             "full_proof_content_sha256": full_content_hash,
-            "policy_sha256": COVERAGE.policy_identity(policy),
+            "policy_sha256": coverage.policy_identity(policy),
         }
         snapshot_directory = self.root / "snapshots"
         snapshot_directory.mkdir()
@@ -1163,9 +715,9 @@ class CoverageFixture(unittest.TestCase):
             f"coverage={json.dumps(previous)}\n"
         )
         details = (self.snapshot_uuid, 20, 102)
-        with patch.object(COVERAGE, "snapshot_details", return_value=details):
+        with patch.object(snapshots, "snapshot_details", return_value=details):
             self.assertEqual(
-                COVERAGE.previous_proof(
+                create_record.previous_proof(
                     marker,
                     previous["policy_sha256"],
                     int(time.time()),
@@ -1184,65 +736,44 @@ class CoverageFixture(unittest.TestCase):
                 self.borg("extract", "--stdout", "::second", "same-name"),
                 "new version",
             )
-            stdout = io.StringIO()
-            with (
-                patch.object(
-                    sys,
-                    "argv",
-                    [
-                        "snapshot-coverage",
-                        "verify",
-                        str(self.source),
-                        "second",
-                        self.snapshot_uuid,
-                        str(policy),
-                        "--mode",
-                        "created",
-                        "--latest-marker",
-                        str(marker),
-                        "--snapshot-directory",
-                        str(snapshot_directory),
-                    ],
-                ),
-                redirect_stdout(stdout),
-            ):
-                COVERAGE.main()
-            created = json.loads(stdout.getvalue())
+            created = create_record.compare_archive(
+                self.source,
+                "second",
+                self.snapshot_uuid,
+                policy,
+                mode="created",
+                latest_marker=marker,
+                snapshot_directory=snapshot_directory,
+            )
             self.assertEqual(created["proof_mode"], "created")
             self.assertEqual(created["previous_archive_id"], previous["archive_id"])
             self.assertEqual(created["source_hashed_bytes"], 0)
-            changed_policy = self.root / "changed-policy.json"
-            changed_policy.write_text(json.dumps({"noncanonical": ["old-only"]}))
+            changed_policy = {"noncanonical": ["old-only"]}
             self.assertIsNone(
-                COVERAGE.previous_proof(
+                create_record.previous_proof(
                     marker,
-                    COVERAGE.policy_identity(changed_policy),
+                    coverage.policy_identity(changed_policy),
                     int(time.time()),
                     snapshot_directory,
                 )
             )
-            changed_excludes = self.root / "changed-excludes.json"
-            changed_excludes.write_text(
-                json.dumps(
-                    {
-                        "noncanonical": [],
-                        "borg_excludes": ["bind/project/build"],
-                    }
-                )
-            )
+            changed_excludes = {
+                "noncanonical": [],
+                "borg_excludes": ["bind/project/build"],
+            }
             self.assertIsNone(
-                COVERAGE.previous_proof(
+                create_record.previous_proof(
                     marker,
-                    COVERAGE.policy_identity(changed_excludes),
+                    coverage.policy_identity(changed_excludes),
                     int(time.time()),
                     snapshot_directory,
                 )
             )
             self.assertIsNone(
-                COVERAGE.previous_proof(
+                create_record.previous_proof(
                     marker,
                     previous["policy_sha256"],
-                    previous["full_proof_epoch"] + COVERAGE.FULL_PROOF_INTERVAL,
+                    previous["full_proof_epoch"] + create_record.FULL_PROOF_INTERVAL,
                     snapshot_directory,
                 )
             )
@@ -1250,35 +781,23 @@ class CoverageFixture(unittest.TestCase):
                 marker.read_text().replace(previous["archive_id"], "a" * 64)
             )
             self.assertIsNone(
-                COVERAGE.previous_proof(
+                create_record.previous_proof(
                     marker,
                     previous["policy_sha256"],
                     int(time.time()),
                     snapshot_directory,
                 )
             )
-            with (
-                patch.object(
-                    sys,
-                    "argv",
-                    [
-                        "snapshot-coverage",
-                        "verify",
-                        str(self.source),
-                        "second",
-                        self.snapshot_uuid,
-                        str(policy),
-                        "--mode",
-                        "created",
-                        "--latest-marker",
-                        str(marker),
-                        "--snapshot-directory",
-                        str(snapshot_directory),
-                    ],
-                ),
-                self.assertRaisesRegex(ValueError, "no current verified predecessor"),
-            ):
-                COVERAGE.main()
+            with self.assertRaisesRegex(ValueError, "no current verified predecessor"):
+                create_record.compare_archive(
+                    self.source,
+                    "second",
+                    self.snapshot_uuid,
+                    policy,
+                    mode="created",
+                    latest_marker=marker,
+                    snapshot_directory=snapshot_directory,
+                )
 
     def test_archive_identity_uses_exact_repository_listing_entry(self):
         listing = json.dumps(
@@ -1297,9 +816,9 @@ class CoverageFixture(unittest.TestCase):
                 ]
             }
         )
-        with patch.object(COVERAGE, "run", return_value=listing) as command:
+        with patch.object(snapshots, "run", return_value=listing) as command:
             self.assertEqual(
-                COVERAGE.archive_identity("snapshot", self.snapshot_uuid), "b" * 64
+                snapshots.archive_identity("snapshot", self.snapshot_uuid), "b" * 64
             )
             command.assert_called_once_with(
                 "borg",
@@ -1311,10 +830,10 @@ class CoverageFixture(unittest.TestCase):
                 "snapshot",
             )
             with self.assertRaisesRegex(ValueError, "UUID"):
-                COVERAGE.archive_identity("absent", self.snapshot_uuid)
-        self.assertEqual(COVERAGE.decode_policy(["run"]), (["run"], False))
+                snapshots.archive_identity("absent", self.snapshot_uuid)
+        self.assertEqual(coverage.decode_policy(["run"]), (["run"], False))
         self.assertEqual(
-            COVERAGE.decode_policy(
+            coverage.decode_policy(
                 {"noncanonical": ["run"], "chrome_extension_caches": True}
             ),
             (["run"], True),
@@ -1322,7 +841,7 @@ class CoverageFixture(unittest.TestCase):
 
     def test_borg_checkpoint_parts_are_not_source_items_or_complete_file_proof(self):
         self.archive("checkpointed")
-        original = COVERAGE.command_items
+        original = coverage.command_items
         partial = {"path": "same-name.borg_part_1", "part": 1}
 
         def with_part(command, parser):
@@ -1330,9 +849,9 @@ class CoverageFixture(unittest.TestCase):
                 yield partial
             yield from original(command, parser)
 
-        with patch.object(COVERAGE, "command_items", side_effect=with_part):
+        with patch.object(coverage, "command_items", side_effect=with_part):
             self.assertEqual(
-                COVERAGE.verify(self.source, "checkpointed", [])["canonical_entries"],
+                coverage.verify(self.source, "checkpointed", [])["canonical_entries"],
                 3,
             )
 
@@ -1348,10 +867,10 @@ class CoverageFixture(unittest.TestCase):
                 yield from original(command, parser)
 
         with patch.object(
-            COVERAGE, "command_items", side_effect=part_without_complete_file
+            coverage, "command_items", side_effect=part_without_complete_file
         ):
             with self.assertRaisesRegex(ValueError, "canonical content missing"):
-                COVERAGE.verify(self.source, "checkpointed", [])
+                coverage.verify(self.source, "checkpointed", [])
 
     def test_extended_attributes(self):
         try:
@@ -1363,10 +882,10 @@ class CoverageFixture(unittest.TestCase):
                 self.skipTest("fixture filesystem does not support xattrs")
             raise
         self.archive()
-        COVERAGE.verify(self.source, "snapshot", [])
+        coverage.verify(self.source, "snapshot", [])
         os.setxattr(self.source / "same-name", "user.fixture", b"changed")
         with self.assertRaisesRegex(ValueError, "extended metadata"):
-            COVERAGE.verify(self.source, "snapshot", [])
+            coverage.verify(self.source, "snapshot", [])
 
     def test_posix_acls_compare_through_borgs_own_fields(self):
         # Borg keeps POSIX ACLs in its own acl_access/acl_default item fields
@@ -1375,11 +894,11 @@ class CoverageFixture(unittest.TestCase):
         # any ACL'd path. The Nix build sandbox cannot create an ACL
         # ("setfacl: Operation not supported"), so the comparison is exercised
         # directly rather than through a fixture that would silently skip.
-        markers, ordinary = COVERAGE.partition_acl_xattrs(
+        acl_markers, ordinary = coverage.partition_acl_xattrs(
             ["system.posix_acl_access", "user.fixture", "system.posix_acl_default"]
         )
         self.assertEqual(
-            markers, {b"system.posix_acl_access", b"system.posix_acl_default"}
+            acl_markers, {b"system.posix_acl_access", b"system.posix_acl_default"}
         )
         self.assertEqual(ordinary, ["user.fixture"])
         text = "user::rwx\nuser:neutral:r--:1000\ngroup::r-x\nmask::r-x\nother::---"
@@ -1390,16 +909,16 @@ class CoverageFixture(unittest.TestCase):
             (16, None): 5,
             (32, None): 0,
         }
-        raw = COVERAGE.struct.pack("<I", 2) + b"".join(
-            COVERAGE.struct.pack(
+        raw = struct.pack("<I", 2) + b"".join(
+            struct.pack(
                 "<HHI", tag, perm, identity if identity is not None else 0xFFFFFFFF
             )
             for (tag, identity), perm in expected.items()
         )
-        self.assertEqual(COVERAGE.source_acl_entries(raw), expected)
-        self.assertEqual(COVERAGE.archived_acl_entries(text), expected)
+        self.assertEqual(coverage.source_acl_entries(raw), expected)
+        self.assertEqual(coverage.archived_acl_entries(text), expected)
         self.assertEqual(
-            COVERAGE.archived_acl_entries(text.replace("neutral", "renamed")), expected
+            coverage.archived_acl_entries(text.replace("neutral", "renamed")), expected
         )
         encoded = (
             "\x7f"
@@ -1407,7 +926,7 @@ class CoverageFixture(unittest.TestCase):
             .encode("utf-8", "surrogateescape")
             .hex()
         )
-        self.assertEqual(COVERAGE.archived_acl_entries(encoded), expected)
+        self.assertEqual(coverage.archived_acl_entries(encoded), expected)
 
     def test_changed_acl_principal_or_permission_cannot_satisfy_coverage(self):
         self.archive()
@@ -1419,17 +938,17 @@ class CoverageFixture(unittest.TestCase):
             (16, 4, 0xFFFFFFFF),
             (32, 4, 0xFFFFFFFF),
         ]
-        raw = COVERAGE.struct.pack("<I", 2) + b"".join(
-            COVERAGE.struct.pack("<HHI", *entry) for entry in source_entries
+        raw = struct.pack("<I", 2) + b"".join(
+            struct.pack("<HHI", *entry) for entry in source_entries
         )
         archived = {"uid": 1000, "permission": "r--"}
-        original_items = COVERAGE.command_items
+        original_items = coverage.command_items
         original_list = os.listxattr
         original_get = os.getxattr
 
         def items(command, parser):
             for item in original_items(command, parser):
-                if "debug" in command and COVERAGE.archive_path(item) == "same-name":
+                if "debug" in command and coverage.archive_path(item) == "same-name":
                     item = {
                         **item,
                         "acl_access": f"user::rw-\nuser:neutral:{archived['permission']}:{archived['uid']}\ngroup::r--\nmask::r--\nother::r--",
@@ -1452,17 +971,17 @@ class CoverageFixture(unittest.TestCase):
             )
 
         with (
-            patch.object(COVERAGE, "command_items", items),
+            patch.object(coverage, "command_items", items),
             patch.object(os, "listxattr", names),
             patch.object(os, "getxattr", value),
         ):
-            COVERAGE.verify(self.source, "snapshot", [])
+            coverage.verify(self.source, "snapshot", [])
             archived["uid"] = 1001
             with self.assertRaisesRegex(ValueError, "ACL mismatch"):
-                COVERAGE.verify(self.source, "snapshot", [])
+                coverage.verify(self.source, "snapshot", [])
             archived.update(uid=1000, permission="---")
             with self.assertRaisesRegex(ValueError, "ACL mismatch"):
-                COVERAGE.verify(self.source, "snapshot", [])
+                coverage.verify(self.source, "snapshot", [])
 
     def test_masked_named_acl_accepts_borg_permission_padding(self):
         # Captured from a neutral native Borg archive with a named rwx entry
@@ -1476,9 +995,9 @@ class CoverageFixture(unittest.TestCase):
             (16, None): 4,
             (32, None): 4,
         }
-        self.assertEqual(COVERAGE.archived_acl_entries(text), expected)
+        self.assertEqual(coverage.archived_acl_entries(text), expected)
         self.assertNotEqual(
-            COVERAGE.archived_acl_entries(text.replace("rwx\t", "r--\t")), expected
+            coverage.archived_acl_entries(text.replace("rwx\t", "r--\t")), expected
         )
 
     def test_default_only_acl_uses_mode_for_borg_access_entries(self):
@@ -1489,19 +1008,19 @@ class CoverageFixture(unittest.TestCase):
             (16, 5, 0xFFFFFFFF),
             (32, 5, 0xFFFFFFFF),
         ]
-        raw = COVERAGE.struct.pack("<I", 2) + b"".join(
-            COVERAGE.struct.pack("<HHI", *entry) for entry in entries
+        raw = struct.pack("<I", 2) + b"".join(
+            struct.pack("<HHI", *entry) for entry in entries
         )
         item = {
             "acl_access": "user::rwx\ngroup::r-x\nother::r-x",
             "acl_default": "user::rwx\nuser:neutral:r--:1000\ngroup::r-x\nmask::r-x\nother::r-x",
         }
         with patch.object(os, "getxattr", return_value=raw):
-            COVERAGE.verify_acl_metadata(
+            coverage.verify_acl_metadata(
                 self.source, 0o755, {b"system.posix_acl_default"}, item
             )
             with self.assertRaisesRegex(ValueError, "ACL mismatch"):
-                COVERAGE.verify_acl_metadata(
+                coverage.verify_acl_metadata(
                     self.source,
                     0o755,
                     {b"system.posix_acl_default"},
@@ -1509,25 +1028,23 @@ class CoverageFixture(unittest.TestCase):
                 )
 
     def test_metadata_contract_changes_the_policy_proof_identity(self):
-        policy = self.root / "policy.json"
-        declaration = {"noncanonical": [], "borg_excludes": []}
-        policy.write_text(json.dumps(declaration))
-        legacy = COVERAGE.hashlib.sha256(
-            json.dumps(declaration, sort_keys=True, separators=(",", ":")).encode()
+        policy = {"noncanonical": [], "borg_excludes": []}
+        legacy = hashlib.sha256(
+            json.dumps(policy, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
-        self.assertNotEqual(COVERAGE.policy_identity(policy), legacy)
-        with patch.object(COVERAGE, "METADATA_CONTRACT", "older-weaker-contract"):
-            older = COVERAGE.policy_identity(policy)
-        self.assertNotEqual(COVERAGE.policy_identity(policy), older)
+        self.assertNotEqual(coverage.policy_identity(policy), legacy)
+        with patch.object(coverage, "METADATA_CONTRACT", "older-weaker-contract"):
+            older = coverage.policy_identity(policy)
+        self.assertNotEqual(coverage.policy_identity(policy), older)
 
     def test_malformed_acl_refuses_instead_of_waiving_metadata(self):
         for raw in [
             b"",
-            COVERAGE.struct.pack("<I", 3),
-            COVERAGE.struct.pack("<IHHI", 2, 2, 4, 0xFFFFFFFF),
+            struct.pack("<I", 3),
+            struct.pack("<IHHI", 2, 2, 4, 0xFFFFFFFF),
         ]:
             with self.subTest(raw=raw), self.assertRaises(ValueError):
-                COVERAGE.source_acl_entries(raw)
+                coverage.source_acl_entries(raw)
         for text in [
             "user:unknown:rwx",
             "user::rwx\nuser::rwx",
@@ -1535,7 +1052,7 @@ class CoverageFixture(unittest.TestCase):
             "user::rwx\nuser:neutral:r--:1000\ngroup::r-x\nother::---",
         ]:
             with self.subTest(text=text), self.assertRaises(ValueError):
-                COVERAGE.archived_acl_entries(text)
+                coverage.archived_acl_entries(text)
 
     def test_nested_subvolume_stub_mtime_is_not_coverage(self):
         # Snapshotting a subvolume replaces each nested subvolume with an
@@ -1545,18 +1062,18 @@ class CoverageFixture(unittest.TestCase):
         # cannot create a btrfs subvolume, so the exemption is exercised
         # directly rather than through a fixture that would have to skip.
         self.assertEqual(
-            COVERAGE.metadata_keys_for("ordinary/path", frozenset()),
+            coverage.metadata_keys_for("ordinary/path", frozenset()),
             ("mode", "uid", "gid", "mtime"),
         )
         stub = ".btrfs/snapshot/persist.20260913T023000+0200"
         self.assertEqual(
-            COVERAGE.metadata_keys_for(stub, frozenset({stub})),
+            coverage.metadata_keys_for(stub, frozenset({stub})),
             ("mode", "uid", "gid"),
         )
         # Ownership and mode remain compared for a stub: only the mtime is
         # meaningless, and dropping the rest would stop proving anything.
-        self.assertIn("mode", COVERAGE.metadata_keys_for(stub, frozenset({stub})))
-        self.assertIn("uid", COVERAGE.metadata_keys_for(stub, frozenset({stub})))
+        self.assertIn("mode", coverage.metadata_keys_for(stub, frozenset({stub})))
+        self.assertIn("uid", coverage.metadata_keys_for(stub, frozenset({stub})))
 
     def test_unix_sockets_are_not_coverage(self):
         # Borg dispatches on file type and skips a socket outright, so
@@ -1573,9 +1090,9 @@ class CoverageFixture(unittest.TestCase):
             self.skipTest(f"fixture filesystem cannot host a unix socket: {error}")
         try:
             self.archive()
-            result = COVERAGE.verify(self.source, "snapshot", [])
+            result = coverage.verify(self.source, "snapshot", [])
             self.assertEqual(result["unarchivable_entries"], ["live.sock"])
-            modes = COVERAGE.is_unarchivable_type
+            modes = coverage.is_unarchivable_type
             self.assertTrue(modes(os.lstat(self.source / "live.sock").st_mode))
             # Ordinary content is untouched by the exemption: this is a
             # file-type rule, not a blanket waiver for anything unusual.
@@ -1590,7 +1107,7 @@ class CoverageFixture(unittest.TestCase):
         # a single netdata timer FIFO.
         os.mkfifo(self.source / "timer.fifo")
         self.archive()
-        before = COVERAGE.verify(self.source, "snapshot", [])
+        before = coverage.verify(self.source, "snapshot", [])
         # It is covered, not exempted: the socket exemption must not have
         # swallowed it, and it counts toward the canonical entry total.
         self.assertNotIn("timer.fifo", before.get("unarchivable_entries", []))
@@ -1601,7 +1118,7 @@ class CoverageFixture(unittest.TestCase):
         # Its metadata is still proved: a changed mode must be caught.
         os.chmod(self.source / "timer.fifo", 0o600)
         with self.assertRaisesRegex(ValueError, "mode mismatch"):
-            COVERAGE.verify(self.source, "snapshot", [])
+            coverage.verify(self.source, "snapshot", [])
 
     def test_non_utf8_filenames_are_covered(self):
         # Borg's debug JSON cannot hold a non-UTF-8 name as text and encodes it
@@ -1615,14 +1132,14 @@ class CoverageFixture(unittest.TestCase):
         except (OSError, UnicodeError) as error:
             self.skipTest(f"fixture filesystem rejects the name: {error}")
         self.archive()
-        result = COVERAGE.verify(self.source, "snapshot", [])
+        result = coverage.verify(self.source, "snapshot", [])
         self.assertEqual(
             result["canonical_entries"],
             sum(1 for _ in self.source.rglob("*")) + 1,
         )
         # The decode is exact, not a normalisation that would let a different
         # name pass: the surrogate-escaped form round-trips to the same bytes.
-        decoded = COVERAGE.archive_path({"path": "\x7f" + raw.rsplit(b"/", 1)[1].hex()})
+        decoded = coverage.archive_path({"path": "\x7f" + raw.rsplit(b"/", 1)[1].hex()})
         self.assertEqual(os.fsencode(decoded), raw.rsplit(b"/", 1)[1])
 
     def test_unclassified_exclusion_is_not_coverage(self):
@@ -1631,11 +1148,11 @@ class CoverageFixture(unittest.TestCase):
         (hidden / "irreplaceable").write_text("unknown producer material")
         self.archive("glob", "--exclude", "**/build")
         with self.assertRaisesRegex(ValueError, "largest roots: project/build=2"):
-            COVERAGE.verify(self.source, "glob", [])
+            coverage.verify(self.source, "glob", [])
         (hidden / ".nobackup").touch()
         self.archive("marker", "--exclude-if-present", ".nobackup")
         with self.assertRaisesRegex(ValueError, "canonical content missing"):
-            COVERAGE.verify(self.source, "marker", [])
+            coverage.verify(self.source, "marker", [])
 
     def test_chrome_extension_cache_requires_a_valid_extension_id(self):
         base = "home/sinity/.config/chrome-ws/Default/Storage/ext"
@@ -1653,14 +1170,14 @@ class CoverageFixture(unittest.TestCase):
             str(self.source / base / invalid / "def/GPUCache").lstrip("/"),
         )
         with self.assertRaisesRegex(ValueError, "canonical content missing"):
-            COVERAGE.verify(self.source, "extension-caches", [], True)
+            coverage.verify(self.source, "extension-caches", [], True)
         shutil.rmtree(self.source / base / invalid)
         self.archive(
             "valid-extension-cache",
             "--exclude",
             str(self.source / base / valid / "def/GPUCache").lstrip("/"),
         )
-        result = COVERAGE.verify(self.source, "valid-extension-cache", [], True)
+        result = coverage.verify(self.source, "valid-extension-cache", [], True)
         self.assertIn(f"{base}/{valid}/def/GPUCache", result["noncanonical_roots"])
         cache_path = self.source / base / valid / "def/GPUCache"
         shutil.rmtree(cache_path)
@@ -1670,7 +1187,7 @@ class CoverageFixture(unittest.TestCase):
         cache_path.symlink_to(target, target_is_directory=True)
         self.archive("symlink-cache", "--exclude", str(cache_path).lstrip("/"))
         with self.assertRaisesRegex(ValueError, "canonical content missing"):
-            COVERAGE.verify(self.source, "symlink-cache", [], True)
+            coverage.verify(self.source, "symlink-cache", [], True)
 
     def test_cache_api_storage_stays_canonical(self):
         cache_api = (
@@ -1685,7 +1202,7 @@ class CoverageFixture(unittest.TestCase):
             str(cache_api).lstrip("/"),
         )
         with self.assertRaisesRegex(ValueError, "canonical content missing"):
-            COVERAGE.verify(self.source, "missing-cache-api", [], True)
+            coverage.verify(self.source, "missing-cache-api", [], True)
 
     def test_service_worker_storage_stays_canonical(self):
         storage = (
@@ -1696,7 +1213,7 @@ class CoverageFixture(unittest.TestCase):
         (storage / "entry").write_text("site data")
         self.archive("missing-service-worker", "--exclude", str(storage).lstrip("/"))
         with self.assertRaisesRegex(ValueError, "canonical content missing"):
-            COVERAGE.verify(self.source, "missing-service-worker", [], True)
+            coverage.verify(self.source, "missing-service-worker", [], True)
 
     def test_optguide_model_file_stays_canonical(self):
         model = (
@@ -1707,7 +1224,7 @@ class CoverageFixture(unittest.TestCase):
         model.write_bytes(b"model cache")
         self.archive("missing-optguide", "--exclude", str(model).lstrip("/"))
         with self.assertRaisesRegex(ValueError, "canonical content missing"):
-            COVERAGE.verify(self.source, "missing-optguide", [], True)
+            coverage.verify(self.source, "missing-optguide", [], True)
 
     def test_declared_scratch_and_nested_stub(self):
         scratch = self.source / "tmp"
@@ -1716,7 +1233,7 @@ class CoverageFixture(unittest.TestCase):
         (self.source / "dedicated-subvolume-stub").mkdir()
         self.archive("scratch", "--exclude", str(scratch).lstrip("/"))
         self.assertEqual(
-            COVERAGE.verify(self.source, "scratch", ["tmp"])["canonical_entries"], 4
+            coverage.verify(self.source, "scratch", ["tmp"])["canonical_entries"], 4
         )
 
     def test_exact_realm_pytest_cache_is_disposable(self):
@@ -1744,7 +1261,7 @@ class CoverageFixture(unittest.TestCase):
             str(models).lstrip("/"),
         )
         with self.assertRaisesRegex(ValueError, "canonical content missing"):
-            COVERAGE.verify(
+            coverage.verify(
                 self.source,
                 "caches",
                 [".pytest_cache", "project/.pytest_cache", "library/models"],
@@ -1758,7 +1275,7 @@ class CoverageFixture(unittest.TestCase):
             "--exclude",
             str(models).lstrip("/"),
         )
-        result = COVERAGE.verify(
+        result = coverage.verify(
             self.source,
             "named-caches-only",
             [".pytest_cache", "project/.pytest_cache", "library/models"],
@@ -1773,21 +1290,20 @@ class CoverageFixture(unittest.TestCase):
         (self.source / "old-only").unlink()
         self.archive("newer")
         with self.assertRaises(ValueError):
-            COVERAGE.verify(older, "newer", [])
+            coverage.verify(older, "newer", [])
         with self.assertRaises((ValueError, subprocess.CalledProcessError)):
-            COVERAGE.verify(older, "absent", [])
+            coverage.verify(older, "absent", [])
 
     def test_independent_audit_refuses_changed_bytes_without_success_receipt(self):
         archive = "realm-audit-fixture"
         self.archive(archive)
-        policy = self.root / "policy.json"
-        policy.write_text(json.dumps({"noncanonical": [], "borg_excludes": []}))
+        policy = {"noncanonical": [], "borg_excludes": []}
         marker = self.root / "latest"
         proof = {
             "archive": archive,
-            "archive_id": COVERAGE.archive_identity(archive, self.snapshot_uuid),
+            "archive_id": snapshots.archive_identity(archive, self.snapshot_uuid),
             "snapshot_uuid": self.snapshot_uuid,
-            "policy_sha256": COVERAGE.policy_identity(policy),
+            "policy_sha256": coverage.policy_identity(policy),
         }
         marker.write_text(
             f"snapshot={self.source.name}\narchive={archive}\n"
@@ -1803,1677 +1319,9 @@ class CoverageFixture(unittest.TestCase):
         )
         with (
             patch.object(
-                COVERAGE, "snapshot_details", return_value=(self.snapshot_uuid, 17, 117)
+                snapshots, "snapshot_details", return_value=(self.snapshot_uuid, 17, 117)
             ),
             self.assertRaisesRegex(ValueError, "content mismatch"),
         ):
-            COVERAGE.audit_latest(marker, self.root, policy)
+            audit.audit_latest(marker, self.root, policy)
         self.assertFalse(receipt.exists())
-
-
-class ProducerReceiptFixture(unittest.TestCase):
-    def setUp(self):
-        filesystem_probe = patch.object(
-            COVERAGE, "filesystem_identity", return_value=FS_UUID
-        )
-        filesystem_probe.start()
-        self.addCleanup(filesystem_probe.stop)
-
-    def test_create_receipt_binds_exact_command_snapshot_archive_and_policy(self):
-        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as scratch:
-            root = Path(scratch)
-            source = root / "mounted"
-            source.mkdir()
-            policy = root / "policy.json"
-            policy.write_text(
-                json.dumps(
-                    {
-                        "noncanonical": [],
-                        "chrome_extension_caches": False,
-                        "borg_excludes": ["run/borgbackup-snapshot-inputs/realm/cache"],
-                        "producer_contract": COVERAGE.REALM_PRODUCER_CONTRACT,
-                    }
-                )
-            )
-            uuid_value = str(uuid.uuid4())
-            archive = "realm-realm.20260402T033000+0200"
-            archive_id = "a" * 64
-            decoded = json.loads(policy.read_text())
-            command = COVERAGE.expected_create_command(
-                "/store/borg", source, archive, uuid_value, decoded
-            )
-            stats = {
-                "archive": {
-                    "command_line": command,
-                    "name": archive,
-                    "id": archive_id,
-                    "stats": {
-                        "original_size": 123,
-                        "compressed_size": 80,
-                        "deduplicated_size": 17,
-                    },
-                }
-            }
-            details = (uuid_value, 17, 117)
-            with (
-                patch.object(COVERAGE, "snapshot_details", return_value=details),
-                patch.object(COVERAGE, "archive_identity", return_value=archive_id),
-            ):
-                receipt = COVERAGE.record_create(source, archive, policy, stats)
-                receipt_path = root / "receipt.json"
-                receipt_path.write_text(json.dumps(receipt))
-                proof = COVERAGE.verify_created(
-                    source, archive, uuid_value, policy, receipt_path
-                )
-                self.assertEqual(proof["proof_mode"], "created")
-                self.assertEqual(proof["source_hashed_bytes"], 0)
-                self.assertEqual(proof["archive_id"], archive_id)
-                self.assertEqual(proof["filesystem_uuid"], FS_UUID)
-                self.assertEqual(proof["created_epoch"], receipt["created_epoch"])
-                for name, expected in (
-                    ("original", 123),
-                    ("compressed", 80),
-                    ("deduplicated", 17),
-                ):
-                    self.assertEqual(receipt["create_" + name + "_bytes"], expected)
-                    self.assertEqual(proof["create_" + name + "_bytes"], expected)
-                legacy = {
-                    key: value
-                    for key, value in receipt.items()
-                    if key
-                    not in (
-                        "create_compressed_bytes",
-                        "create_deduplicated_bytes",
-                        "created_epoch",
-                    )
-                }
-                receipt_path.write_text(json.dumps(legacy))
-                legacy_proof = COVERAGE.verify_created(
-                    source, archive, uuid_value, policy, receipt_path
-                )
-                self.assertNotIn("create_deduplicated_bytes", legacy_proof)
-                self.assertNotIn("create_compressed_bytes", legacy_proof)
-                self.assertNotIn("created_epoch", legacy_proof)
-                for invalid in (-1, True, "17", 1.5, None):
-                    receipt_path.write_text(
-                        json.dumps(receipt | {"created_epoch": invalid})
-                    )
-                    with self.assertRaisesRegex(ValueError, "timestamp"):
-                        COVERAGE.verify_created(
-                            source, archive, uuid_value, policy, receipt_path
-                        )
-                for name in ("original", "compressed", "deduplicated"):
-                    for invalid in (-1, True, "17", 1.5, None):
-                        bad = json.loads(json.dumps(stats))
-                        bad["archive"]["stats"][name + "_size"] = invalid
-                        with self.subTest(name=name, invalid=invalid):
-                            with self.assertRaisesRegex(ValueError, "byte count"):
-                                COVERAGE.record_create(source, archive, policy, bad)
-                            receipt_path.write_text(
-                                json.dumps(
-                                    receipt | {"create_" + name + "_bytes": invalid}
-                                )
-                            )
-                            with self.assertRaisesRegex(ValueError, "byte count"):
-                                COVERAGE.verify_created(
-                                    source, archive, uuid_value, policy, receipt_path
-                                )
-                for altered in (
-                    receipt | {"filesystem_uuid": str(uuid.uuid4())},
-                    {
-                        key: value
-                        for key, value in receipt.items()
-                        if key != "filesystem_uuid"
-                    },
-                ):
-                    receipt_path.write_text(json.dumps(altered))
-                    with self.assertRaisesRegex(ValueError, "receipt does not bind"):
-                        COVERAGE.verify_created(
-                            source, archive, uuid_value, policy, receipt_path
-                        )
-                receipt_path.write_text(json.dumps(receipt))
-                with patch.object(
-                    COVERAGE, "filesystem_identity", return_value=str(uuid.uuid4())
-                ):
-                    with self.assertRaisesRegex(ValueError, "receipt does not bind"):
-                        COVERAGE.verify_created(
-                            source, archive, uuid_value, policy, receipt_path
-                        )
-                bad_stats = json.loads(json.dumps(stats))
-                bad_stats["archive"]["command_line"].extend(
-                    [
-                        "--exclude-if-present",
-                        ".nobackup",
-                    ]
-                )
-                with self.assertRaisesRegex(ValueError, "command differs"):
-                    COVERAGE.record_create(source, archive, policy, bad_stats)
-                policy.write_text(
-                    json.dumps(
-                        decoded
-                        | {
-                            "borg_excludes": [
-                                "run/borgbackup-snapshot-inputs/realm/project/build/repo"
-                            ],
-                        }
-                    )
-                )
-                with self.assertRaisesRegex(ValueError, "receipt does not bind"):
-                    COVERAGE.verify_created(
-                        source, archive, uuid_value, policy, receipt_path
-                    )
-                policy.write_text(json.dumps(decoded))
-                with self.assertRaises(FileNotFoundError):
-                    COVERAGE.verify_created(
-                        source, archive, uuid_value, policy, root / "missing.json"
-                    )
-
-    def test_full_audit_receipt_overdue_until_independent_comparison_succeeds(self):
-        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as scratch:
-            root = Path(scratch)
-            policy = root / "policy.json"
-            policy.write_text(json.dumps({"noncanonical": [], "borg_excludes": []}))
-            receipt = root / "audit.json"
-            with self.assertRaisesRegex(ValueError, "has not completed"):
-                COVERAGE.audit_status(receipt, policy, 691200)
-            marker = root / "latest"
-            self.assertEqual(
-                COVERAGE.audit_readiness(marker, policy),
-                {"ready": False, "reason": "awaiting-acknowledged-archive"},
-            )
-            uuid_value = str(uuid.uuid4())
-            archive_id = "a" * 64
-            proof = {
-                "policy_sha256": COVERAGE.policy_identity(policy),
-                "snapshot_uuid": uuid_value,
-                "archive": "realm-fixture",
-                "archive_id": archive_id,
-            }
-            marker.write_text(
-                "snapshot=realm.20260402T010000+0000\narchive=realm-fixture\n"
-                "generation=17\nsubvolume_id=117\n"
-                f"coverage={json.dumps(proof)}\n"
-            )
-            self.assertTrue(COVERAGE.audit_readiness(marker, policy)["ready"])
-            policy.write_text(
-                json.dumps({"noncanonical": [], "borg_excludes": ["new-boundary"]})
-            )
-            self.assertEqual(
-                COVERAGE.audit_readiness(marker, policy),
-                {"ready": False, "reason": "awaiting-current-policy-archive"},
-            )
-            self.assertFalse(receipt.exists())
-            policy.write_text(json.dumps({"noncanonical": [], "borg_excludes": []}))
-            with (
-                patch.object(
-                    COVERAGE, "snapshot_details", return_value=(uuid_value, 17, 117)
-                ),
-                patch.object(COVERAGE, "archive_identity", return_value=archive_id),
-                patch.object(
-                    COVERAGE,
-                    "verify",
-                    return_value={
-                        "content_sha256": "b" * 64,
-                        "source_hashed_bytes": 123,
-                        "archive_content_verified_bytes": 123,
-                    },
-                ),
-            ):
-                audit = COVERAGE.audit_latest(marker, root, policy)
-            receipt.write_text(json.dumps(audit))
-            self.assertEqual(audit["audit_mode"], "independent_full")
-            self.assertEqual(audit["source_hashed_bytes"], 123)
-            self.assertLessEqual(COVERAGE.audit_status(receipt, policy, 691200), 1)
-            sampled = dict(
-                audit,
-                audit_mode="independent_metadata_sampled",
-                content_coverage="partial",
-                content_verification="bounded_sample",
-                sampled_files=1,
-                sample_byte_budget=128,
-                sample_file_budget=1,
-                sample_content_sha256=COVERAGE.hashlib.sha256(
-                    json.dumps(["neutral", "c" * 64], ensure_ascii=True).encode()
-                ).hexdigest(),
-                sample_objects=[{"path": "neutral", "sha256": "c" * 64, "size": 123}],
-            )
-            sampled.pop("content_sha256")
-            receipt.write_text(json.dumps(sampled))
-            with self.assertRaisesRegex(ValueError, "overdue"):
-                COVERAGE.audit_status(receipt, policy, 691200)
-            self.assertLessEqual(
-                COVERAGE.audit_status(receipt, policy, 691200, mode="sampled"), 1
-            )
-            zero = dict(
-                sampled,
-                sampled_files=0,
-                source_hashed_bytes=0,
-                archive_content_verified_bytes=0,
-                content_verification="not_performed",
-                sample_objects=[],
-                sample_content_sha256=COVERAGE.hashlib.sha256().hexdigest(),
-            )
-            receipt.write_text(json.dumps(zero))
-            with self.assertRaisesRegex(ValueError, "invalid bounded"):
-                COVERAGE.audit_status(receipt, policy, 691200, mode="sampled")
-            sampled["source_hashed_bytes"] = 129
-            receipt.write_text(json.dumps(sampled))
-            with self.assertRaisesRegex(ValueError, "invalid bounded"):
-                COVERAGE.audit_status(receipt, policy, 691200, mode="sampled")
-            audit["audited_epoch"] -= 691201
-            receipt.write_text(json.dumps(audit))
-            with self.assertRaisesRegex(ValueError, "overdue"):
-                COVERAGE.audit_status(receipt, policy, 691200)
-
-
-class DrainFixture(unittest.TestCase):
-    def test_producer_timestamp_for_each_lane_and_collision(self):
-        for lane in ("realm", "genome"):
-            for suffix in ("", "-coverage-v3"):
-                with self.subTest(lane=lane, suffix=suffix):
-                    command = COVERAGE.expected_create_command(
-                        "/store/borg",
-                        Path("/source"),
-                        f"{lane}-{lane}.20260402T033000+0200{suffix}",
-                        "fixture-uuid",
-                        {"borg_excludes": []},
-                    )
-                    self.assertEqual(
-                        command[command.index("--timestamp") + 1],
-                        "2026-04-02T01:30:00",
-                    )
-        with self.assertRaisesRegex(ValueError, "no snapshot cut timestamp"):
-            COVERAGE.expected_create_command(
-                "/store/borg",
-                Path("/source"),
-                "genome-realm.20260402T033000+0200",
-                "fixture-uuid",
-                {"borg_excludes": []},
-            )
-
-    @unittest.skipUnless(
-        ARGS.scripts, "rendered Nix scripts supplied by the flake check"
-    )
-    def test_backlog_restart_collision_and_exclusions(self):
-        scripts = json.loads(Path(ARGS.scripts).read_text())
-        with tempfile.TemporaryDirectory(
-            prefix="backup-drain-", dir=os.environ.get("TMPDIR")
-        ) as scratch:
-            root = Path(scratch)
-            scripts["polylogue"] = (
-                scripts["polylogue"]
-                .replace("$TMPDIR/live-polylogue", str(root / "live-polylogue"))
-                .replace("$TMPDIR/polylogue-stage", str(root / "polylogue-stage-root"))
-                .replace(
-                    "/realm/state/cache/polylogue-backup-hooks",
-                    str(root / "polylogue-stage-root"),
-                )
-            )
-            env = os.environ | {
-                "TMPDIR": scratch,
-                "BORG_SECURITY_DIR": scratch + "/security",
-                "BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK": "yes",
-            }
-            fixture_policies = {}
-            for lane in ("realm", "persist", "genome"):
-                # The rendered shell script is relocated to this synthetic
-                # tree. Its Nix-store policy is a separate file, so relocate
-                # the effective Borg exclusions in that policy as well.
-                match = re.search(
-                    rf"/nix/store/[a-z0-9]+-{lane}-snapshot-coverage\.json",
-                    scripts[lane],
-                )
-                self.assertIsNotNone(match)
-                policy = json.loads(Path(match.group()).read_text())
-                original_root = f"run/borgbackup-snapshot-inputs/{lane}"
-                fixture_root = str(root / "bind" / lane)
-                policy["borg_excludes"] = [
-                    pattern.replace(original_root, fixture_root, 1)
-                    if pattern.startswith(original_root + "/")
-                    else pattern
-                    for pattern in policy["borg_excludes"]
-                ]
-                fixture_policy = root / f"{lane}-snapshot-coverage.json"
-                fixture_policy.write_text(json.dumps(policy))
-                fixture_policies[lane] = policy
-                scripts[lane] = scripts[lane].replace(
-                    match.group(), str(fixture_policy)
-                )
-                if lane == "realm":
-                    scripts["localDumps"] = scripts["localDumps"].replace(
-                        match.group(), str(fixture_policy)
-                    )
-            for path in (
-                "mock-bin",
-                "logs",
-                "bind",
-                "repos",
-                "state/borg-cache",
-                "state/borg-drain",
-                "realm-snapshots",
-                "persist-snapshots",
-                "genome-snapshots",
-                "realm-empty",
-                "live-dumps",
-                "polylogue-stage-root",
-            ):
-                (root / path).mkdir(parents=True, exist_ok=True)
-            # Btrfs is synthetic here, so its post-delete I/O pressure must be
-            # synthetic too. Start busy; the sleep stub settles it immediately.
-            (root / "io-pressure").write_text(
-                "full avg10=20.00 avg60=20.00 avg300=20.00 total=1\n"
-            )
-            scripts = {
-                name: script.replace("/proc/pressure/io", str(root / "io-pressure"))
-                for name, script in scripts.items()
-            }
-            (root / "identities.json").write_text("{}")
-            (root / "generations.json").write_text("{}")
-            mock = """#!PYTHON
-import fcntl, json, os, pathlib, shutil, subprocess, sys, uuid
-root=pathlib.Path(os.environ['TMPDIR']); command=pathlib.Path(sys.argv[0]).name; args=sys.argv[1:]
-def check_global_lock(held):
-    # A separately opened descriptor models another normal Borg reader.
-    with (root/'state/sinnix-borg.lock').open('a') as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            assert held, (command, args, 'reader blocked outside the locked section')
-        else:
-            assert not held, (command, args, 'reader entered the locked section')
-with (root/'logs/commands').open('a') as log: log.write(json.dumps([command,*args])+'\\n')
-if command=='sleep':
-    assert args==['5'], args
-    check_global_lock(False)
-    changed=root/'remove-archive-during-settle.json'
-    if changed.exists():
-        request=json.loads(changed.read_text()); changed.unlink()
-        with (root/'state/sinnix-borg.lock').open('a') as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            subprocess.run([REAL_BORG,'delete',request['repo']+'::'+request['archive']],check=True)
-    (root/'io-pressure').write_text('full avg10=0.00 avg60=0.00 avg300=0.00 total=1\\n')
-    sys.exit(0)
-if command=='borg':
-    if args[0]=='create' and any(arg.startswith(('::realm-', '::persist-', '::genome-')) for arg in args):
-        check_global_lock(True)
-    if args[0]=='create' and (root/'fail-create').exists(): sys.exit(2)
-    if args[0]=='create' and (root/'logs/append-hooks').exists() and any(arg.startswith('::polylogue-state-') for arg in args):
-        if (root/'live-polylogue/hooks').is_dir():
-            for relative in ('hooks/codex-session-live.jsonl', 'hooks/carriers/codex/2026-09-27/4242.ndjson'):
-                with (root/'live-polylogue'/relative).open('a') as stream:
-                    stream.write('{"event":"written-during-borg-create"}\\n')
-    if args[0]=='debug' and (root/'fail-read').exists(): sys.exit(2)
-    if args[:2]==['list','--json'] and (root/'fail-read').exists(): sys.exit(2)
-    if args[:2]==['list','--json'] and (root/'fail-proof-list').exists(): sys.exit(2)
-    os.execv(REAL_BORG, [REAL_BORG,*args])
-if command=='systemctl':
-    if args[0]=='stop': sys.exit(0)
-    lane={'borgbackup-job-persist.service':'persist', 'borgbackup-job-realm.service':'realm', 'borgbackup-job-genome.service':'genome'}.get(args[-1])
-    if lane is None: sys.exit(0)
-    if lane=='persist' and (root/'fail-persist-unit').exists(): sys.exit(1)
-    if lane=='genome' and (root/'fail-genome-unit').exists(): sys.exit(1)
-    sys.exit(subprocess.run(['bash',str(root/(lane+'.sh'))],env=os.environ).returncode)
-if command=='findmnt':
-    print(json.dumps({'filesystems':[{'target':args[-1],'fstype':'btrfs'}]})); sys.exit(0)
-if command=='mountpoint': sys.exit(0 if (root/'logs/mounted').exists() else 1)
-if command=='mount':
-    source,target=args[-2:]; subprocess.run(['cp','-a',source+'/.',target],check=True); (root/'logs/mounted').touch()
-    identities=json.loads((root/'identities.json').read_text())
-    generations=json.loads((root/'generations.json').read_text())
-    identities[target]=identities[source]; generations[target]=generations[source]
-    (root/'identities.json').write_text(json.dumps(identities))
-    (root/'generations.json').write_text(json.dumps(generations))
-elif command=='umount':
-    target=pathlib.Path(args[-1]); shutil.rmtree(target); target.mkdir(); (root/'logs/mounted').unlink(missing_ok=True)
-    identities=json.loads((root/'identities.json').read_text())
-    generations=json.loads((root/'generations.json').read_text())
-    identities.pop(str(target),None); generations.pop(str(target),None)
-    (root/'identities.json').write_text(json.dumps(identities))
-    (root/'generations.json').write_text(json.dumps(generations))
-elif command=='btrfs':
-    identities=json.loads((root/'identities.json').read_text())
-    generations=json.loads((root/'generations.json').read_text())
-    parents_path=root/'cut-parents.json'
-    parents=json.loads(parents_path.read_text()) if parents_path.exists() else {}
-    if args[:3]==['filesystem','show','--raw']:
-        print("Label: 'fixture'  uuid: 22222222-2222-2222-2222-222222222222")
-    elif args[:2]==['subvolume','list']: pass
-    elif args[:3]==['subvolume','snapshot','-r']:
-        source,target=args[3:]
-        shutil.copytree(source,target,symlinks=True)
-        identities[target]=str(uuid.uuid4()); generations[target]=generations[source]
-        parents[target]=identities[source]
-        (root/'identities.json').write_text(json.dumps(identities))
-        (root/'generations.json').write_text(json.dumps(generations))
-        parents_path.write_text(json.dumps(parents))
-    elif args[:2]==['subvolume','show']:
-        print('Parent UUID: '+parents.get(args[2],'-'))
-        print('Flags: '+('readonly' if args[2] in parents else '-'))
-        print('UUID: '+identities[args[2]])
-        print('Gen at creation: '+str(generations[args[2]]))
-        ids_path=root/'subvolume-ids.json'
-        ids=json.loads(ids_path.read_text()) if ids_path.exists() else {}
-        print('Subvolume ID: '+str(ids.get(args[2],100+generations[args[2]])))
-    elif args[:2]==['property','get']: print('ro=true')
-    elif args[:2]==['subvolume','sync']:
-        check_global_lock(False)
-    elif args[:2]==['subvolume','delete']:
-        check_global_lock(True)
-        assert args[2] in identities
-        if (root/'fail-delete').exists(): sys.exit(1)
-        shutil.rmtree(args[2])
-    else: sys.exit(64)
-""".replace("PYTHON", sys.executable).replace("REAL_BORG", repr(shutil.which("borg")))
-            for name in (
-                "findmnt",
-                "mountpoint",
-                "mount",
-                "umount",
-                "btrfs",
-                "borg",
-                "systemctl",
-                "sleep",
-            ):
-                (root / "mock-bin" / name).write_text(mock)
-                (root / "mock-bin" / name).chmod(0o755)
-            (root / "mock-bin/dolt").write_text(
-                """#!PYTHON
-import json, pathlib, sys
-args = sys.argv[1:]
-repo = pathlib.Path(args[args.index('--data-dir') + 1]) / args[args.index('--use-db') + 1]
-head = repo / '.dolt/HEAD'
-issue = repo / 'issue.json'
-if not head.is_file() or not issue.is_file(): sys.exit(1)
-commit = head.read_text().strip()
-if len(commit) != 32 or any(c not in '0123456789abcdefghijklmnopqrstuv' for c in commit): sys.exit(1)
-if 'FROM dolt_log' in args[args.index('-q') + 1]:
-    print(json.dumps({'rows': [{'commit_hash': commit}]}))
-elif 'FROM issues' in args[args.index('-q') + 1]:
-    print(json.dumps({'rows': [json.loads(issue.read_text())]}))
-else: sys.exit(1)
-""".replace("PYTHON", sys.executable)
-            )
-            for name in ("dolt",):
-                (root / "mock-bin" / name).chmod(0o755)
-            env["PATH"] = str(root / "mock-bin") + ":" + env["PATH"]
-            for script_name, script in scripts.items():
-                (root / (script_name + ".sh")).write_text(script)
-            for repo in (
-                "borg-realm-v2",
-                "borg-persist-v1",
-                "borg-sinex-blobs-v1",
-                "borg-polylogue-state-v1",
-            ):
-                subprocess.run(
-                    ["borg", "init", "--encryption=none", str(root / "repos" / repo)],
-                    env=env,
-                    check=True,
-                )
-
-            def snapshot(name, files, lane="realm"):
-                path = root / (lane + "-snapshots") / name
-                path.mkdir()
-                for relative, data in files.items():
-                    file = path / relative
-                    file.parent.mkdir(parents=True, exist_ok=True)
-                    file.write_text(data)
-                identities = json.loads((root / "identities.json").read_text())
-                identities[str(path)] = str(uuid.uuid4())
-                (root / "identities.json").write_text(json.dumps(identities))
-                generations = json.loads((root / "generations.json").read_text())
-                generations[str(path)] = max(generations.values(), default=0) + 1
-                (root / "generations.json").write_text(json.dumps(generations))
-                return path
-
-            def run(name="realm", ok=True):
-                result = subprocess.run(
-                    ["bash", str(root / (name + ".sh"))],
-                    env=env,
-                    capture_output=True,
-                    text=True,
-                )
-                self.assertEqual(
-                    result.returncode == 0, ok, result.stdout + result.stderr
-                )
-                return result
-
-            def extract(name, path):
-                return subprocess.check_output(
-                    [
-                        "borg",
-                        "extract",
-                        "--stdout",
-                        str(root / "repos/borg-realm-v2") + "::realm-" + name,
-                        path,
-                    ],
-                    env=env,
-                    text=True,
-                )
-
-            old = snapshot(
-                "realm.20260402T010000+0000",
-                {"old-only": "historical", "same-name": "old"},
-            )
-            new = snapshot(
-                "realm.20260402T033000+0200",
-                {
-                    "same-name": "new",
-                    "inbox/download": "canonical",
-                    "tmp/scratch": "scratch",
-                    "project/sinex/.beads/issues.jsonl": '{"id":"stale-checkout-decoy"}\n',
-                    **BEADS_STORES,
-                    "project/build/precious": "source build material",
-                    "project/dist/precious": "source distribution material",
-                    "project/node_modules/precious": "source package material",
-                    "project/target/precious": "source target material",
-                    "project/.venv/precious": "source environment material",
-                    "project/.direnv/precious": "source environment state",
-                    "project/.ruff_cache/precious": "source cache material",
-                    "project/sample/.pytest_cache/precious": "source test material",
-                    "project/.cache/precious": "source hidden material",
-                    "project/compiled.pyc": "source bytecode material",
-                    "project/inbox/monero/precious": "source inbox material",
-                    "project/.Trash-1000/precious": "nested trash material",
-                    "project/tagged/CACHEDIR.TAG": "Signature: 8a477f597d28d172789f06886806bc55\n",
-                    "project/tagged/precious": "source content beside cache tag",
-                    "project/marked/.nobackup": "",
-                    "project/marked/precious": "source content beside backup marker",
-                    "state/cache/polylogue-backup-hooks/state/polylogue/hooks/sealed.ndjson": "synthetic sealed hook",
-                },
-            )
-            self.assertFalse((root / "state/borg-drain/realm.latest-archived").exists())
-            # A shared directory lock pins only the old audit source. Fresh
-            # archive work still completes; retirement resumes after release.
-            pin = os.open(old, os.O_RDONLY | os.O_DIRECTORY)
-            try:
-                fcntl.flock(pin, fcntl.LOCK_SH)
-                result = run()
-                self.assertTrue(old.exists())
-                self.assertTrue(new.exists())
-                self.assertIn("held by an independent audit", result.stdout)
-            finally:
-                os.close(pin)
-            run()
-            # Both cuts are backfilled long after capture, newest first. Borg
-            # must record source time and select the newer daily cut even
-            # though the older cut was created last.
-            repo = str(root / "repos/borg-realm-v2")
-            inventory = json.loads(
-                subprocess.check_output(
-                    ["borg", "list", "--json", repo], env=env, text=True
-                )
-            )["archives"]
-            for cut in (old, new):
-                entry = next(a for a in inventory if a["name"] == "realm-" + cut.name)
-                recorded = datetime.fromisoformat(entry["time"])
-                self.assertEqual(
-                    int(recorded.replace(tzinfo=timezone.utc).timestamp()),
-                    COVERAGE.snapshot_epoch(cut.name),
-                )
-            selection = subprocess.run(
-                [
-                    "borg",
-                    "prune",
-                    "--dry-run",
-                    "--list",
-                    "--keep-daily",
-                    "1",
-                    "--glob-archives",
-                    "realm-*",
-                    repo,
-                ],
-                env=env,
-                text=True,
-                capture_output=True,
-                check=True,
-            )
-            kept = [
-                line
-                for line in selection.stderr.splitlines()
-                if "Keeping archive" in line
-            ]
-            self.assertTrue(
-                any("realm-" + new.name in line for line in kept), selection.stderr
-            )
-            self.assertFalse(
-                any("realm-" + old.name in line for line in kept), selection.stderr
-            )
-            self.assertFalse(old.exists())
-            self.assertTrue(new.exists())
-            latest_marker = root / "state/borg-drain/realm.latest-archived"
-            self.assertIn("snapshot=" + new.name, latest_marker.read_text())
-            # Publishing the latest pointer must not clobber the caller's
-            # separate completion-marker destination during historical backfill.
-            completion = root / "state/borg-drain/realm.last-success"
-            self.assertIn("snapshot=" + old.name, completion.read_text())
-            first_proof = json.loads(
-                COVERAGE.read_marker_fields(latest_marker)["coverage"]
-            )
-            self.assertEqual(first_proof["proof_mode"], "created")
-            self.assertEqual(first_proof["source_hashed_bytes"], 0)
-            self.assertTrue(first_proof["create_receipt_sha256"])
-            # Exercise the rendered local-expiry caller against the actual
-            # admitted receipt, not merely its standalone restore helper.
-            local_expiry = run("localDumps")
-            self.assertIn('"outcome": "ok"', local_expiry.stdout)
-            self.assertIn('"removed_logical_bytes": 0', local_expiry.stdout)
-            self.assertIn(
-                "realm-" + old.name,
-                subprocess.check_output(
-                    ["borg", "list", "--short", str(root / "repos/borg-realm-v2")],
-                    env=env,
-                    text=True,
-                ).splitlines(),
-            )
-            self.assertEqual(extract(new.name, "same-name"), "new")
-            self.assertEqual(extract(old.name, "old-only"), "historical")
-            self.assertEqual(extract(old.name, "same-name"), "old")
-            realm_members = subprocess.check_output(
-                [
-                    "borg",
-                    "list",
-                    "--short",
-                    str(root / "repos/borg-realm-v2") + "::realm-" + new.name,
-                ],
-                env=env,
-                text=True,
-            ).splitlines()
-            self.assertFalse(
-                any(
-                    path.endswith(
-                        "state/cache/polylogue-backup-hooks/state/polylogue/hooks/sealed.ndjson"
-                    )
-                    for path in realm_members
-                )
-            )
-            for relative, content in {
-                "project/build/precious": "source build material",
-                "project/dist/precious": "source distribution material",
-                "project/node_modules/precious": "source package material",
-                "project/target/precious": "source target material",
-                "project/.venv/precious": "source environment material",
-                "project/.direnv/precious": "source environment state",
-                "project/.ruff_cache/precious": "source cache material",
-                "project/sample/.pytest_cache/precious": "source test material",
-                "project/.cache/precious": "source hidden material",
-                "project/compiled.pyc": "source bytecode material",
-                "project/inbox/monero/precious": "source inbox material",
-                "project/.Trash-1000/precious": "nested trash material",
-                "project/tagged/precious": "source content beside cache tag",
-                "project/marked/precious": "source content beside backup marker",
-            }.items():
-                self.assertEqual(extract(new.name, relative), content)
-            commands = [
-                json.loads(line)
-                for line in (root / "logs/commands").read_text().splitlines()
-            ]
-            realm_creates = [
-                entry
-                for entry in commands
-                if entry[:2] == ["borg", "create"]
-                and any(arg.startswith("::realm-") for arg in entry)
-            ]
-            self.assertTrue(realm_creates)
-            for entry in realm_creates:
-                self.assertEqual(
-                    entry[entry.index("--files-cache") + 1], "ctime,size,inode"
-                )
-                self.assertEqual(entry[entry.index("--files-changed") + 1], "ctime")
-                self.assertNotIn("--exclude-caches", entry)
-                self.assertNotIn("--exclude-if-present", entry)
-                self.assertEqual(
-                    [
-                        entry[index + 1]
-                        for index, arg in enumerate(entry)
-                        if arg == "--exclude"
-                    ],
-                    fixture_policies["realm"]["borg_excludes"],
-                )
-            deleted = [
-                entry[-1]
-                for entry in commands
-                if entry[:3] == ["btrfs", "subvolume", "delete"]
-            ]
-            self.assertEqual(deleted, [str(old)])
-            self.assertEqual(commands.count(["sleep", "5"]), 1)
-
-            # A normal maintenance reader can change which archives exist during
-            # cleaner settling. The next source must be checked again under
-            # the lock, rather than trusting the earlier retirement plan.
-            first = snapshot("realm.20260301T000000+0000", {"first": "retained"})
-            second = snapshot("realm.20260302T000000+0000", {"second": "retained"})
-            generations = json.loads((root / "generations.json").read_text())
-            generations[str(first)] = 1
-            generations[str(second)] = 1
-            (root / "generations.json").write_text(json.dumps(generations))
-            (root / "subvolume-ids.json").write_text(
-                json.dumps({str(first): 97, str(second): 98})
-            )
-            pins = [
-                os.open(path, os.O_RDONLY | os.O_DIRECTORY) for path in (first, second)
-            ]
-            try:
-                for descriptor in pins:
-                    fcntl.flock(descriptor, fcntl.LOCK_SH)
-                run()
-            finally:
-                for descriptor in pins:
-                    os.close(descriptor)
-            (root / "io-pressure").write_text(
-                "full avg10=20.00 avg60=20.00 avg300=20.00 total=1\n"
-            )
-            (root / "remove-archive-during-settle.json").write_text(
-                json.dumps({"repo": repo, "archive": "realm-" + second.name})
-            )
-            run(ok=False)
-            self.assertFalse(first.exists())
-            self.assertTrue(second.exists())
-            # Remove the now-invalid acknowledgement and recreate its archive
-            # through the normal drain before continuing other controls.
-            (
-                root
-                / "state/borg-drain/realm.latest-archived.by-snapshot"
-                / second.name
-            ).unlink()
-            run()
-            self.assertFalse(second.exists())
-
-            rollback = snapshot(
-                "realm.20260401T233000+0000",
-                {"unique": "new bytes after clock rollback"},
-            )
-            run()
-            self.assertTrue(rollback.exists())
-            self.assertIn(
-                "snapshot=" + rollback.name,
-                latest_marker.read_text(),
-            )
-            created_proof = json.loads(
-                COVERAGE.read_marker_fields(latest_marker)["coverage"]
-            )
-            self.assertEqual(created_proof["proof_mode"], "created")
-            self.assertEqual(created_proof["source_hashed_bytes"], 0)
-            self.assertTrue(created_proof["create_receipt_sha256"])
-            self.assertEqual(
-                extract(rollback.name, "unique"), "new bytes after clock rollback"
-            )
-
-            interrupted = snapshot(
-                "realm.20260402T080000+0000",
-                {
-                    "same-name": "interrupted proof",
-                    "project/sinex/.beads/issues.jsonl": '{"id":"stale-checkout-decoy"}\n',
-                    **BEADS_STORES,
-                },
-            )
-            before = latest_marker.read_bytes()
-            (root / "fail-proof-list").touch()
-            run(ok=False)
-            self.assertEqual(latest_marker.read_bytes(), before)
-            self.assertTrue(interrupted.exists())
-            (root / "fail-proof-list").unlink()
-            run()
-            resumed_fields = COVERAGE.read_marker_fields(latest_marker)
-            self.assertEqual(
-                json.loads(resumed_fields["coverage"])["proof_mode"], "created"
-            )
-            # Existing acknowledgements are validated before archive creation,
-            # so the failed identity read leaves no new archive to collide with.
-            self.assertEqual(resumed_fields["archive"], "realm-" + interrupted.name)
-            # A receipt can survive a crash before the acknowledgement. Reuse
-            # that exact archive on restart instead of creating another one.
-            acknowledged = COVERAGE.read_marker_fields(latest_marker)
-            latest_marker.write_bytes(before)
-            creates_before = sum(
-                1
-                for line in (root / "logs/commands").read_text().splitlines()
-                if json.loads(line)[:2] == ["borg", "create"]
-            )
-            run()
-            repeated = COVERAGE.read_marker_fields(latest_marker)
-            self.assertEqual(repeated["archive"], acknowledged["archive"])
-            self.assertEqual(
-                json.loads(repeated["coverage"])["create_receipt_sha256"],
-                json.loads(acknowledged["coverage"])["create_receipt_sha256"],
-            )
-            self.assertEqual(
-                sum(
-                    1
-                    for line in (root / "logs/commands").read_text().splitlines()
-                    if json.loads(line)[:2] == ["borg", "create"]
-                ),
-                creates_before,
-            )
-
-            # Retained Sinex stores keep both CAS and producer state; direct
-            # Polylogue coverage excludes its mutable databases. These use real Borg too.
-            for relative, data in {
-                "retained-sinex/store/objects/ab/cdef": "synthetic CAS",
-                "retained-sinex/spool/producer/frame": "synthetic spool frame",
-                "live-polylogue/blob/objects/cd/ef01": "synthetic blob",
-                "live-polylogue/source.db": "mutable database",
-                "live-polylogue/.salvage-internals-20261008/embeddings.db": "inert synthetic salvage",
-                "live-polylogue/hooks/codex-session-live.jsonl": '{"event":"sealed-before-create"}\n',
-                "live-polylogue/hooks/carriers/codex/2026-09-27/4242.ndjson": '{"event":"carrier-before-create"}\n',
-                "paid-vectors/2026-07-10-synthetic-3.db": "synthetic purchased vectors",
-            }.items():
-                file = root / relative
-                file.parent.mkdir(parents=True, exist_ok=True)
-                file.write_text(data)
-            identities = json.loads((root / "identities.json").read_text())
-            identities[str(root / "live-polylogue")] = str(uuid.uuid4())
-            (root / "identities.json").write_text(json.dumps(identities))
-            generations = json.loads((root / "generations.json").read_text())
-            generations[str(root / "live-polylogue")] = 1
-            (root / "generations.json").write_text(json.dumps(generations))
-            run("sinex")
-            (root / "logs/append-hooks").touch()
-            run("polylogue")
-            (root / "logs/append-hooks").unlink()
-            for repo, source, excluded in (
-                ("borg-sinex-blobs-v1", "retained-sinex/store/objects/ab/cdef", None),
-                ("borg-sinex-blobs-v1", "retained-sinex/spool/producer/frame", None),
-                (
-                    "borg-polylogue-state-v1",
-                    "live-polylogue/blob/objects/cd/ef01",
-                    "source.db",
-                ),
-            ):
-                repo_path = str(root / "repos" / repo)
-                names = subprocess.check_output(
-                    ["borg", "list", "--short", repo_path], env=env, text=True
-                ).splitlines()
-                self.assertEqual(len(names), 1)
-                entries = subprocess.check_output(
-                    ["borg", "list", "--short", repo_path + "::" + names[0]],
-                    env=env,
-                    text=True,
-                ).splitlines()
-                member = next(path for path in entries if path.endswith(source))
-                if repo == "borg-polylogue-state-v1":
-                    self.assertFalse(
-                        any("/.salvage-internals-20261008" in path for path in entries)
-                    )
-                contents = subprocess.check_output(
-                    [
-                        "borg",
-                        "extract",
-                        "--stdout",
-                        repo_path + "::" + names[0],
-                        member,
-                    ],
-                    env=env,
-                    text=True,
-                )
-                self.assertEqual(contents, (root / source).read_text())
-                if excluded:
-                    self.assertFalse(
-                        any(path.endswith("/" + excluded) for path in entries)
-                    )
-            polylogue_repo = str(root / "repos/borg-polylogue-state-v1")
-            polylogue_archive = subprocess.check_output(
-                ["borg", "list", "--short", polylogue_repo], env=env, text=True
-            ).splitlines()[0]
-            # The purchased vectors travel in the nightly Polylogue state archive.
-            vector_members = [
-                path
-                for path in subprocess.check_output(
-                    [
-                        "borg",
-                        "list",
-                        "--short",
-                        polylogue_repo + "::" + polylogue_archive,
-                    ],
-                    env=env,
-                    text=True,
-                ).splitlines()
-                if path.endswith("paid-vectors/2026-07-10-synthetic-3.db")
-            ]
-            self.assertEqual(len(vector_members), 1)
-            self.assertEqual(
-                subprocess.check_output(
-                    [
-                        "borg",
-                        "extract",
-                        "--stdout",
-                        polylogue_repo + "::" + polylogue_archive,
-                        vector_members[0],
-                    ],
-                    env=env,
-                    text=True,
-                ),
-                "synthetic purchased vectors",
-            )
-            for relative, original in (
-                (
-                    "hooks/codex-session-live.jsonl",
-                    '{"event":"sealed-before-create"}\n',
-                ),
-                (
-                    "hooks/carriers/codex/2026-09-27/4242.ndjson",
-                    '{"event":"carrier-before-create"}\n',
-                ),
-            ):
-                members = [
-                    path
-                    for path in subprocess.check_output(
-                        [
-                            "borg",
-                            "list",
-                            "--short",
-                            polylogue_repo + "::" + polylogue_archive,
-                        ],
-                        env=env,
-                        text=True,
-                    ).splitlines()
-                    if path.endswith("/" + relative)
-                ]
-                self.assertEqual(len(members), 1)
-                archived = subprocess.check_output(
-                    [
-                        "borg",
-                        "extract",
-                        "--stdout",
-                        polylogue_repo + "::" + polylogue_archive,
-                        members[0],
-                    ],
-                    env=env,
-                    text=True,
-                )
-                self.assertEqual(archived, original)
-                self.assertEqual(
-                    (root / "live-polylogue" / relative).read_text(),
-                    original + '{"event":"written-during-borg-create"}\n',
-                )
-            # Repeated archives read native cuts directly. There is no staged
-            # hook copy to retain, and each successful command releases its cut.
-            hook = root / "live-polylogue/hooks/codex-session-live.jsonl"
-            stable_payload = hook.read_bytes()
-            for _ in range(2):
-                time.sleep(1.1)
-                run("polylogue")
-                self.assertEqual(hook.read_bytes(), stable_payload)
-                self.assertEqual(
-                    list(
-                        (
-                            root / "realm-data/state/cache/polylogue-backup-hooks/cuts"
-                        ).iterdir()
-                    ),
-                    [],
-                )
-            shutil.rmtree(root / "live-polylogue/hooks")
-            time.sleep(1.1)
-            run("polylogue")
-            archive_names = subprocess.check_output(
-                ["borg", "list", "--short", polylogue_repo], env=env, text=True
-            ).splitlines()
-            self.assertEqual(len(archive_names), 4)
-            empty_hooks_archive = archive_names[-1]
-            empty_hook_members = [
-                path
-                for path in subprocess.check_output(
-                    [
-                        "borg",
-                        "list",
-                        "--short",
-                        polylogue_repo + "::" + empty_hooks_archive,
-                    ],
-                    env=env,
-                    text=True,
-                ).splitlines()
-                if "/hooks/" in path
-            ]
-            self.assertEqual(empty_hook_members, [])
-            # A held Borg lock past the wait fails the check instead of
-            # reporting success without a restore.
-            with open(root / "state/sinnix-borg.lock", "w") as held:
-                fcntl.flock(held, fcntl.LOCK_EX)
-                run("beads", ok=False)
-            self.assertFalse(any((root / "realm-data").rglob("borg_beads_drill.jsonl")))
-            run("beads")
-            receipt = next((root / "realm-data").rglob("borg_beads_drill.jsonl"))
-            evidence = {
-                record["store"]: record
-                for record in map(json.loads, receipt.read_text().splitlines())
-            }
-            self.assertEqual(
-                sorted(evidence),
-                sorted(
-                    "state/tasks/" + store + "/.beads"
-                    for store in (
-                        "sinnix",
-                        "sinex-next",
-                        "polylogue-next",
-                        "lynchpin",
-                        "stashbox",
-                    )
-                ),
-            )
-            sinex = evidence["state/tasks/sinex-next/.beads"]
-            self.assertTrue(sinex["ok"])
-            self.assertEqual(
-                sinex["issue"], {"id": "sxnext-task", "title": "Current task"}
-            )
-            self.assertEqual(sinex["dolt_commit"], "0123456789abcdefghijklmnopqrstuv")
-            self.assertNotIn("stale-checkout-decoy", receipt.read_text())
-
-            snapshot(
-                "realm.20260402T090000+0000",
-                {
-                    "project/sinex/.beads/issues.jsonl": '{"id":"stale-checkout-decoy"}\n',
-                },
-            )
-            run()
-            run("beads", ok=False)
-            snapshot(
-                "realm.20260402T100000+0000",
-                {
-                    "project/sinex/.beads/issues.jsonl": '{"id":"stale-checkout-decoy"}\n',
-                    **BEADS_STORES,
-                    "state/tasks/sinex-next/.beads/embeddeddolt/sxnext/.dolt/HEAD": "corrupt",
-                },
-            )
-            run()
-            run("beads", ok=False)
-            self.assertEqual(len(receipt.read_text().splitlines()), 5)
-
-            older = snapshot("realm.20260403T010000+0000", {"old-only": "older bytes"})
-            middle = snapshot("realm.20260403T020000+0000", {"same-name": "middle"})
-            fresh = snapshot("realm.20260403T030000+0000", {"same-name": "fresh"})
-            run()
-            self.assertFalse(older.exists())
-            self.assertFalse(middle.exists())
-            self.assertTrue(fresh.exists())
-            latest_marker = root / "state/borg-drain/realm.latest-archived"
-            self.assertIn("snapshot=" + fresh.name, latest_marker.read_text())
-            archives = subprocess.check_output(
-                ["borg", "list", "--short", str(root / "repos/borg-realm-v2")],
-                env=env,
-                text=True,
-            ).splitlines()
-            self.assertIn("realm-" + fresh.name, archives)
-            self.assertIn("realm-" + older.name, archives)
-            self.assertIn("realm-" + middle.name, archives)
-            self.assertEqual(extract(older.name, "old-only"), "older bytes")
-            self.assertEqual(extract(middle.name, "same-name"), "middle")
-
-            # A newer creation generation advances freshness despite an older
-            # clock name. Release resumes only from each predecessor's own
-            # durable acknowledgement, without creating another archive.
-            leftover = snapshot("realm.20260403T013000+0000", {"old-only": "leftover"})
-            (root / "fail-delete").touch()
-            run(ok=False)
-            self.assertTrue(leftover.exists())
-            (root / "fail-delete").unlink()
-            run()
-            self.assertTrue(leftover.exists())
-            self.assertFalse(fresh.exists())
-            self.assertIn("snapshot=" + leftover.name, latest_marker.read_text())
-
-            pending = snapshot("realm.20260404T010000+0000", {"old-only": "pending"})
-            newer = snapshot("realm.20260404T013000+0000", {"same-name": "newer"})
-            (root / "fail-create").touch()
-            run(ok=False)
-            self.assertTrue(pending.exists())
-            self.assertTrue(newer.exists())
-            (root / "fail-create").unlink()
-            (root / "fail-read").touch()
-            run(ok=False)
-            self.assertTrue(pending.exists())
-            self.assertTrue(newer.exists())
-            (root / "fail-read").unlink()
-            run()
-            self.assertFalse(pending.exists())
-            self.assertTrue(newer.exists())
-            self.assertEqual(extract(newer.name, "same-name"), "newer")
-
-            resumed = snapshot("realm.20260405T010000+0000", {"same-name": "resumable"})
-            (root / "fail-delete").touch()
-            run(ok=False)
-            self.assertTrue(resumed.exists())
-            self.assertIn("snapshot=" + resumed.name, latest_marker.read_text())
-            (root / "fail-delete").unlink()
-            run()
-            self.assertTrue(resumed.exists())
-            self.assertEqual(extract(resumed.name, "same-name"), "resumable")
-
-            stale = snapshot(
-                "realm.20260405T020000+0000",
-                {
-                    "inbox/download/media": "canonical download",
-                    ".pytest_cache/v/cache": "derived pytest data",
-                    "project/.pytest_cache/v/cache": "derived pytest data",
-                    "library/models/weights": "re-acquirable weights",
-                },
-            )
-            realm_repo = str(root / "repos/borg-realm-v2")
-            stale_name = "realm-" + stale.name
-            stale_uuid = json.loads((root / "identities.json").read_text())[str(stale)]
-            transient = stale / "inbox/download/media.borg_part_1"
-            transient.write_text("stale archive entry")
-            subprocess.run(
-                [
-                    "borg",
-                    "create",
-                    "--comment",
-                    "sinnix-snapshot-v1:" + stale_uuid,
-                    realm_repo + "::" + stale_name,
-                    str(stale) + "/./",
-                ],
-                env=env,
-                check=True,
-            )
-            subprocess.run(
-                [
-                    "borg",
-                    "create",
-                    "--comment",
-                    "sinnix-snapshot-v1:" + stale_uuid,
-                    realm_repo + "::" + stale_name + "-coverage-v2",
-                    str(stale) + "/./",
-                ],
-                env=env,
-                check=True,
-            )
-            transient.unlink()
-            run()
-            self.assertTrue(stale.exists())
-            realm_archives = subprocess.check_output(
-                ["borg", "list", "--short", realm_repo], env=env, text=True
-            ).splitlines()
-            self.assertIn(stale_name, realm_archives)
-            self.assertIn(stale_name + "-coverage-v2", realm_archives)
-            self.assertIn(stale_name + "-coverage-v3", realm_archives)
-            self.assertEqual(
-                subprocess.check_output(
-                    [
-                        "borg",
-                        "extract",
-                        "--stdout",
-                        realm_repo + "::" + stale_name + "-coverage-v3",
-                        "inbox/download/media",
-                    ],
-                    env=env,
-                    text=True,
-                ),
-                "canonical download",
-            )
-
-            older_gap = snapshot("realm.20260406T023000+0000", {"same-name": "older"})
-            gap = snapshot(
-                "realm.20260406T030000+0000", {"project/build/precious": "canonical"}
-            )
-            gap_uuid = json.loads((root / "identities.json").read_text())[str(gap)]
-            for suffix in ("", "-coverage-v2"):
-                subprocess.run(
-                    [
-                        "borg",
-                        "create",
-                        "--comment",
-                        "sinnix-snapshot-v1:" + gap_uuid,
-                        "--exclude",
-                        str(gap / "project/build").lstrip("/"),
-                        realm_repo + "::realm-" + gap.name + suffix,
-                        str(gap) + "/./",
-                    ],
-                    env=env,
-                    check=True,
-                )
-            (root / "fail-create").touch()
-            result = run(ok=False)
-            self.assertIn("borg create failed", result.stderr)
-            self.assertTrue(gap.exists())
-            self.assertTrue(older_gap.exists())
-            gap_archives = subprocess.check_output(
-                ["borg", "list", "--short", realm_repo], env=env, text=True
-            ).splitlines()
-            self.assertIn("realm-" + gap.name, gap_archives)
-            self.assertIn("realm-" + gap.name + "-coverage-v2", gap_archives)
-            self.assertNotIn("realm-" + gap.name + "-coverage-v3", gap_archives)
-            (root / "fail-create").unlink()
-            run()
-            self.assertTrue(gap.exists())
-            self.assertFalse(older_gap.exists())
-
-            collision = snapshot(
-                "realm.20260406T033000+0000", {"same-name": "collision"}
-            )
-            repo = str(root / "repos/borg-realm-v2")
-            subprocess.run(
-                [
-                    "borg",
-                    "create",
-                    repo + "::realm-" + collision.name,
-                    str(collision) + "/./",
-                ],
-                env=env,
-                check=True,
-            )
-            subprocess.run(
-                [
-                    "borg",
-                    "create",
-                    repo + "::realm-" + collision.name + "-coverage-v2",
-                    str(collision) + "/./",
-                ],
-                env=env,
-                check=True,
-            )
-            run()
-            self.assertTrue(collision.exists())
-            collision_archives = subprocess.check_output(
-                ["borg", "list", "--short", repo], env=env, text=True
-            ).splitlines()
-            self.assertIn("realm-" + collision.name, collision_archives)
-            self.assertIn(
-                "realm-" + collision.name + "-coverage-v2", collision_archives
-            )
-            self.assertIn(
-                "realm-" + collision.name + "-coverage-v3", collision_archives
-            )
-            run("persist")
-            chrome = "home/sinity/.config/chrome-ws"
-            persist = snapshot(
-                "persist.20260402T040000+0000",
-                {
-                    f"{chrome}/Default/Shared Dictionary/cache/derived": "rebuildable",
-                    f"{chrome}/Default/WebStorage/7/CacheStorage/site-entry": "site data",
-                },
-                lane="persist",
-            )
-            persist_repo = str(root / "repos/borg-persist-v1")
-            old_name = "persist-" + persist.name
-            snapshot_uuid = json.loads((root / "identities.json").read_text())[
-                str(persist)
-            ]
-            tagged = persist / chrome / "Default/WebStorage/7/CacheStorage/.nobackup"
-            tagged.write_text("")
-            subprocess.run(
-                [
-                    "borg",
-                    "create",
-                    "--comment",
-                    "sinnix-snapshot-v1:" + snapshot_uuid,
-                    "--exclude",
-                    str(persist / chrome / "Default/WebStorage/7/CacheStorage").lstrip(
-                        "/"
-                    ),
-                    persist_repo + "::" + old_name,
-                    str(persist) + "/./",
-                ],
-                env=env,
-                check=True,
-            )
-            subprocess.run(
-                [
-                    "borg",
-                    "create",
-                    "--comment",
-                    "sinnix-snapshot-v1:" + snapshot_uuid,
-                    "--exclude-if-present",
-                    ".nobackup",
-                    persist_repo + "::" + old_name + "-coverage-v2",
-                    str(persist) + "/./",
-                ],
-                env=env,
-                check=True,
-            )
-            (root / "fail-create").touch()
-            run("persist", ok=False)
-            self.assertTrue(persist.exists())
-            self.assertFalse(
-                (root / "state/borg-drain/persist.latest-archived").exists()
-            )
-            self.assertEqual(
-                subprocess.check_output(
-                    ["borg", "list", "--short", persist_repo], env=env, text=True
-                ).splitlines(),
-                [old_name, old_name + "-coverage-v2"],
-            )
-            (root / "fail-create").unlink()
-            run("persist")
-            self.assertTrue(persist.exists())
-            archived = subprocess.check_output(
-                ["borg", "list", "--short", persist_repo], env=env, text=True
-            ).splitlines()
-            self.assertIn(old_name, archived)
-            self.assertIn(old_name + "-coverage-v2", archived)
-            self.assertIn(old_name + "-coverage-v3", archived)
-            self.assertEqual(
-                COVERAGE.read_marker_fields(
-                    root / "state/borg-drain/persist.latest-archived"
-                )["archive"],
-                old_name + "-coverage-v3",
-            )
-            # If verification had completed but the marker write was lost,
-            # the next run must recheck v3 instead of creating v4.
-            (root / "state/borg-drain/persist.latest-archived").unlink()
-            run("persist")
-            self.assertEqual(
-                subprocess.check_output(
-                    ["borg", "list", "--short", persist_repo], env=env, text=True
-                ).splitlines(),
-                archived,
-            )
-            commands = [
-                json.loads(line)
-                for line in (root / "logs/commands").read_text().splitlines()
-            ]
-            self.assertFalse(
-                any(
-                    command[:3] == ["borg", "debug", "dump-archive"]
-                    and command[3] == "::" + old_name
-                    for command in commands
-                )
-            )
-            canonical = f"{chrome}/Default/WebStorage/7/CacheStorage/site-entry"
-            self.assertEqual(
-                subprocess.check_output(
-                    [
-                        "borg",
-                        "extract",
-                        "--stdout",
-                        persist_repo + "::" + old_name + "-coverage-v3",
-                        canonical,
-                    ],
-                    env=env,
-                    text=True,
-                ),
-                "site data",
-            )
-            marker_path = root / "state/borg-drain/realm.latest-archived"
-            marker_before = marker_path.read_bytes()
-            snapshots_before = sorted((root / "realm-snapshots").iterdir())
-            refused = run("missing", ok=False)
-            self.assertIn(
-                "verified acknowledgement snapshot is unavailable", refused.stderr
-            )
-            self.assertEqual(marker_path.read_bytes(), marker_before)
-            self.assertEqual(
-                sorted((root / "realm-snapshots").iterdir()), snapshots_before
-            )
-            # A separate HDD source shares the repository's data chunks but
-            # owns its own receipts and immutable source lifetime.
-            genome_old = snapshot(
-                "genome.20260401T010000+0000",
-                {
-                    "genotype/original": "supplied input",
-                    "outputs/analysis": "historical result",
-                    "cache/reference": "downloaded cache",
-                    "cache/personal-derived": "retained private derived data",
-                    ".direnv/environment": "rebuildable environment",
-                },
-                lane="genome",
-            )
-            run("genome")
-            genome_new = snapshot(
-                "genome.20260402T010000+0000",
-                {
-                    "genotype/original": "supplied input",
-                    "outputs/analysis": "updated result",
-                    "vendor/report": "irreplaceable report",
-                    "unfetchable/retained": "unavailable upstream",
-                },
-                lane="genome",
-            )
-            run("genome")
-            self.assertFalse(genome_old.exists())
-            self.assertTrue(genome_new.exists())
-            repo = str(root / "repos/borg-realm-v2")
-            for cut, expected in [
-                (genome_old, "historical result"),
-                (genome_new, "updated result"),
-            ]:
-                archive = repo + "::genome-" + cut.name
-                self.assertEqual(
-                    subprocess.check_output(
-                        ["borg", "extract", "--stdout", archive, "outputs/analysis"],
-                        env=env,
-                        text=True,
-                    ),
-                    expected,
-                )
-            members = subprocess.check_output(
-                ["borg", "list", "--short", repo + "::genome-" + genome_old.name],
-                env=env,
-                text=True,
-            ).splitlines()
-            self.assertIn("genotype/original", members)
-            self.assertIn("cache/personal-derived", members)
-            self.assertNotIn("cache/reference", members)
-            self.assertFalse(any(x.startswith(".direnv/") for x in members))
-            run("genome")
-            self.assertTrue(
-                genome_new.exists(),
-                "latest HDD audit source must survive no-work retries",
-            )
-            daily_receipts = {}
-            for name in ("polylogue-state", "sinex-blobs", "local-dumps"):
-                policy = re.search(
-                    rf"daily_marker=[^\n]*{name}\.last-success\n\s*daily_policy=([0-9a-f]+)",
-                    scripts["coordinator"],
-                ).group(1)
-                daily_receipts[name] = (
-                    f"archive=synthetic\nepoch={int(time.time())}\npolicy_sha256={policy}\n"
-                )
-            for name in ("polylogue-state", "sinex-blobs", "local-dumps"):
-                (root / f"state/borg-drain/{name}.last-success").unlink(missing_ok=True)
-            coordinator_steps = [
-                "machine-telemetry-sqlite-backup.service",
-                "polylogue-sqlite-backup.service",
-                "btrbk.service",
-                "borgbackup-job-polylogue-state.service",
-                "borgbackup-job-sinex-blobs.service",
-                "borgbackup-job-realm.service",
-                "borgbackup-job-genome.service",
-                "borgbackup-job-persist.service",
-                "borgbackup-root-snapshots.service",
-                "borgbackup-maintenance.service",
-                "borgbackup-coverage-audit-realm.service",
-                "borgbackup-local-dumps.service",
-            ]
-            expected_starts = [["start", unit] for unit in coordinator_steps]
-            archive_starts = expected_starts[3:]
-            expected_calls = [
-                ["systemctl", *call]
-                for call in expected_starts[:3]
-                + [["stop", "borgbackup-verify.service"]]
-                + archive_starts
-            ]
-            queued_persist = snapshot(
-                "persist.20260406T010000+0000",
-                {"unique": "persist after retry"},
-                lane="persist",
-            )
-            queued_realm = snapshot(
-                "realm.20260407T010000+0000",
-                {"unique": "realm after persist failure"},
-            )
-            queued_genome = snapshot(
-                "genome.20260407T010000+0000",
-                {"outputs/retained": "genome after retry"},
-                lane="genome",
-            )
-            (root / "fail-genome-unit").touch()
-            (root / "fail-persist-unit").touch()
-            result = run("coordinator", ok=False)
-            self.assertTrue(queued_persist.exists())
-            self.assertTrue(queued_realm.exists())
-            self.assertTrue(queued_genome.exists())
-            calls = [
-                json.loads(line)
-                for line in (root / "logs/commands").read_text().splitlines()
-                if '"systemctl"' in line
-            ]
-            self.assertEqual(
-                calls[-len(expected_calls) :],
-                expected_calls,
-                "failed native lanes must not suppress later independent jobs",
-            )
-            self.assertFalse(
-                any(
-                    call[1] == "stop"
-                    and "borgbackup-coverage-audit-realm.service" in call
-                    for call in calls
-                )
-            )
-            (root / "fail-persist-unit").unlink()
-            (root / "fail-genome-unit").unlink()
-            previous_calls = len(calls)
-            run("coordinator")
-            self.assertTrue(queued_persist.exists())
-            restarted_calls = [
-                json.loads(line)
-                for line in (root / "logs/commands").read_text().splitlines()
-                if '"systemctl"' in line
-            ][previous_calls:]
-            self.assertFalse(
-                any(call[-1] in coordinator_steps[:3] for call in restarted_calls)
-            )
-            self.assertEqual(
-                restarted_calls[-len(archive_starts) :],
-                [["systemctl", *call] for call in archive_starts],
-                "boot catch-up after an interrupted archive must reuse the completed dump/cut",
-            )
-
-            empty = root / "empty-coordinator"
-            (empty / "mock-bin").mkdir(parents=True)
-            (empty / "realm-snapshots").mkdir()
-            (empty / "persist-snapshots").mkdir()
-            (empty / "genome-snapshots").mkdir()
-            control = empty / "mock-bin/systemctl"
-            control.write_text(
-                f"#!{sys.executable}\nimport fcntl, json, os, pathlib, sys\n"
-                "with open(os.environ['TMPDIR']+'/commands', 'a') as log:\n"
-                " log.write(json.dumps(sys.argv[1:])+'\\n')\n"
-                "with open(os.environ['TMPDIR']+'/coordinator-borg.lock', 'a') as lock:\n"
-                " fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)\n"
-                "if sys.argv[1:] == ['start', 'polylogue-sqlite-backup.service'] and pathlib.Path(os.environ['TMPDIR']+'/fail-dump').exists(): sys.exit(1)\n"
-            )
-            control.chmod(0o755)
-            result = subprocess.run(
-                ["bash", str(root / "coordinator.sh")],
-                env=dict(env, TMPDIR=str(empty)),
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertEqual(
-                [
-                    json.loads(line)
-                    for line in (empty / "commands").read_text().splitlines()
-                ],
-                expected_starts,
-                "empty retries must leave an ongoing integrity check alone",
-            )
-            acquisition_receipt = (
-                empty / "state/borg-drain/coordinator.acquisition"
-            ).read_text()
-            # A local receipt routes scheduling without repository credentials.
-            # The real children, tested above, still qualify their archives.
-            admitted = "realm.20260403T070000+0000"
-            (empty / "realm-snapshots" / admitted).mkdir()
-            state = empty / "state/borg-drain"
-            state.mkdir(parents=True, exist_ok=True)
-            latest = state / "realm.latest-archived"
-            latest.write_text(f"snapshot={admitted}\n")
-            receipts = Path(str(latest) + ".by-snapshot")
-            receipts.mkdir()
-            (receipts / admitted).write_bytes(latest.read_bytes())
-            (empty / "commands").unlink()
-            result = subprocess.run(
-                ["bash", str(root / "coordinator.sh")],
-                env=dict(env, TMPDIR=str(empty)),
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertEqual(
-                [
-                    json.loads(line)
-                    for line in (empty / "commands").read_text().splitlines()
-                ],
-                expected_starts[3:],
-                "acknowledged cuts must not preempt checks or open Borg from the coordinator",
-            )
-            # A pending HDD cut alone must preempt the resumable integrity
-            # check and receive an attempt in the same coordinator cycle.
-            (empty / "genome-snapshots/genome.20260404T070000+0000").mkdir()
-            (empty / "commands").unlink()
-            result = subprocess.run(
-                ["bash", str(root / "coordinator.sh")],
-                env=dict(env, TMPDIR=str(empty)),
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertEqual(
-                [
-                    json.loads(line)
-                    for line in (empty / "commands").read_text().splitlines()
-                ],
-                [["stop", "borgbackup-verify.service"]] + expected_starts[3:],
-            )
-
-            (empty / "state/borg-drain/coordinator.acquisition").unlink()
-            (empty / "fail-dump").touch()
-            (empty / "commands").unlink()
-            result = subprocess.run(
-                ["bash", str(root / "coordinator.sh")],
-                env=dict(env, TMPDIR=str(empty)),
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-            calls = [
-                json.loads(line)
-                for line in (empty / "commands").read_text().splitlines()
-            ]
-            self.assertNotIn(["start", "btrbk.service"], calls)
-            self.assertEqual(calls[-len(archive_starts) :], archive_starts)
-            self.assertIn("reason=dump-failure", result.stderr)
-
-            # Eligibility is checked at each phase, not against a scheduler
-            # timestamp that can precede a long archive backlog by a full day.
-            (empty / "fail-dump").unlink()
-            (empty / "state/borg-drain/coordinator.acquisition").write_text(
-                acquisition_receipt
-            )
-            for name, payload in daily_receipts.items():
-                (empty / f"state/borg-drain/{name}.last-success").write_text(payload)
-            clock = empty / "mock-bin/date"
-            clock.write_text(
-                f"#!{sys.executable}\nimport os, pathlib\n"
-                "p=pathlib.Path(os.environ['TMPDIR'])/'clock-calls'\n"
-                "n=int(p.read_text()) if p.exists() else 0\n"
-                "p.write_text(str(n+1))\n"
-                f"print({int(time.time())}+(90000 if n else 0))\n"
-            )
-            clock.chmod(0o755)
-            (empty / "commands").unlink()
-            result = subprocess.run(
-                ["bash", str(root / "coordinator.sh")],
-                env=dict(
-                    env,
-                    TMPDIR=str(empty),
-                    PATH=str(empty / "mock-bin") + os.pathsep + env["PATH"],
-                ),
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            calls = [
-                json.loads(line)
-                for line in (empty / "commands").read_text().splitlines()
-            ]
-            self.assertNotIn(["start", "btrbk.service"], calls)
-            for unit in (
-                "borgbackup-job-polylogue-state.service",
-                "borgbackup-job-sinex-blobs.service",
-            ):
-                self.assertIn(["start", unit], calls)
-
-
-if __name__ == "__main__":
-    os.environ.setdefault("BORG_HOST_ID", "backup-fixture@stable")
-    unittest.main(argv=[sys.argv[0]])

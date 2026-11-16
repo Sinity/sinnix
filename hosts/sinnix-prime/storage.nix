@@ -241,7 +241,7 @@ in
 
     # Retained Sinex cache mount. Its retirement belongs to the product's
     # storage migration. /realm/state/cache is excluded from backups
-    # (regenerable caches, see modules/backup.nix realmExcludes).
+    # (regenerable caches, see modules/backup.nix realmExclusions).
     "/var/cache/sinex" = {
       device = "/realm/state/cache/sinex";
       fsType = "none";

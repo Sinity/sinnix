@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Archive hooks directly from a read-only native cut; retain failed cuts."""
 
 from __future__ import annotations
@@ -7,7 +6,6 @@ import os
 import shutil
 import stat
 import subprocess
-import sys
 import tempfile
 import uuid
 from pathlib import Path
@@ -113,23 +111,3 @@ def archive(state: Path, cuts: Path, command: list[str]) -> int:
             raise OSError(f"private archive view replaced, refusing cleanup: {view}")
         shutil.rmtree(view)
 
-
-def main() -> int:
-    if len(sys.argv) < 5 or sys.argv[3] != "--":
-        print(
-            "usage: cut-polylogue-hooks.py STATE CUT_DIRECTORY -- COMMAND [ARG ...]",
-            file=sys.stderr,
-        )
-        return 64
-    try:
-        return archive(Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[4:])
-    except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
-        print(
-            f"could not archive Polylogue hooks from native cut: {error}",
-            file=sys.stderr,
-        )
-        return 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

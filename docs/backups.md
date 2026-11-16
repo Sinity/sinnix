@@ -3,6 +3,32 @@
 Backups are Borg repositories on the HDD at `/outer-realm/backup/`. Nothing
 is stored off-site. The running Sinex store is the exception (see "Sinex").
 
+## How the jobs run
+
+Every backup unit runs one command of `sinnix-backup`, the Python package in
+`pkgs/sinnix-backup/`: `drain persist|realm|genome`, `nightly`,
+`take-snapshots`, `root-snapshots`, `sinex-stores`, `polylogue-dumps`,
+`polylogue-state`, `hourly-persist`, `hourly-live`, `maintain`,
+`expire-dumps`, `check-repositories`, `audit-realm` and
+`check-beads-restore`. The capacity record runs its own
+`sinnix-backup-capacity` script. Every command reads its paths, repositories,
+exclusions and settings from `/etc/sinnix/backup.json`, which
+`modules/backup.nix` builds; `modules/lib/backup/units.nix` declares the
+units, their dependencies, deadlines and timers.
+
+`sinnix-backup plan <label>` (`persist`, `realm` or `genome`) shows what the
+drain would do, without taking the Borg lock or changing anything: the policy
+hash, each queued snapshot with the archive name and complete `borg create`
+arguments it would get, and the snapshots the drain would then delete.
+`sinnix-backup maintain --dry-run` previews retention. The health probes run
+`sinnix-backup freshness <label>`, `acquisition-freshness` and
+`audit-status`.
+
+The package's pytest suite (`pkgs/sinnix-backup/tests`, the `backup-suite`
+check) runs each job against real Borg with `mount`, `btrfs` and `systemctl`
+replaced by fakes, reading the policy file evaluated for a test host.
+`backup-genome-files-cache` runs its files-cache test alone.
+
 ## Sinex
 
 The running Sinex store (`/var/lib/sinex`, the `state/sinex` subvolume on
@@ -44,8 +70,10 @@ Each pass records archive names and IDs before and after pruning under
 `/persist/root/.cache/borg-drain/retention/`. Compaction, which releases
 unreferenced chunks, runs on the first pass at least 6.5 days after the last
 one: at every pass it rewrote hundreds of gigabytes of segments a week to
-return space. Shared chunks remain until their last reference is removed. `agentctl job start sinnix backup_retention_plan` previews the
-installed policy; `agentctl job start sinnix backup_maintenance` runs it when due.
+return space. Shared chunks remain until their last reference is removed.
+`agentctl job start sinnix backup_retention_plan` previews the installed policy
+(`borgbackup-retention-plan` runs `sinnix-backup maintain --dry-run`);
+`agentctl job start sinnix backup_maintenance` runs it when due.
 Both run the systemd service, so inspect its journal for archive
 selection and statistics. A deferred run does not mean pruning completed.
 
@@ -87,23 +115,15 @@ paths. Neither measurement establishes that a directory is disposable.
 | Running Sinex                                 | `sinex-backup`: a backup Sinex prepares at one held boundary (database, keys, segments, producer state), archived by two Borg jobs (see "Sinex" above)                                   | by hand only, until the backup disk has room     | `borg-sinex-core-v1`, `borg-sinex-keys-v1`  |
 | Retained Sinex deployments                    | the whole stopped deployment read in place, its PostgreSQL cluster included                                                                                                              | nightly coordinator                              | `borg-sinex-blobs-v1`                       |
 | Polylogue state                               | hooks archived directly from a read-only snapshot of its subvolume                                                                                                                       | nightly coordinator                              | `borg-polylogue-state-v1`                   |
-| Purchased embedding vectors                   | the 2026-07-10 stores on `/neo-outer-realm/archive/polylogue/embeddings`, in the same archive as Polylogue state; they never change, so Borg stores them once                            | nightly coordinator                              | `borg-polylogue-state-v1`                   |
+| Purchased embedding vectors                   | the purchased stores on `/neo-outer-realm/archive/polylogue/embeddings`, in the same archive as Polylogue state; they never change, so Borg stores them once                             | nightly coordinator                              | `borg-polylogue-state-v1`                   |
 | Polylogue live archive                        | `state/polylogue-live` (except `index.db`) inside the `/realm` btrbk snapshot; an atomic snapshot is consistent for Polylogue                                                            | same as `/realm`                                 | `borg-realm-v2`                             |
 | Polylogue live spools                         | `~/.local/state/polylogue` (hook, browser and collector spools; the AI Studio Drive token), persisted on `/persist`                                                                      | same as `/persist`                               | `borg-persist-v1`                           |
 | Polylogue archive database, hourly            | `.dump` of the whole `archive.db` in one read transaction, streamed into a `polylogue-archive-*` archive; it follows whatever schema is deployed, so no table list exists to fall behind | hourly at :47                                    | `borg-live-small-v1`                        |
 | Beads task databases and Sinex spools, hourly | the `state/tasks` tree (minus migration backups) and the producer spools, read in place                                                                                                  | hourly at :47                                    | `borg-live-small-v1`, `live-small-*` series |
 | Telemetry database dumps                      | `--rsyncable` zstd copies in `state/db-dumps/`, archived with `/realm`                                                                                                                   | dumps before nightly cut, seal Sunday            | `borg-realm-v2`                             |
 
-Left out of the `/realm` archive (`realmExcludes` in `modules/backup.nix`):
-downloaded model weights (including embeddings), Steam libraries and runtimes,
-`state/cache`, `state/containers`, `tmp`, worktrees, Cargo `target/` and
-project `.venv` directories, Stash's caches and generated media, the ComfyUI
-virtualenv, pytest caches and the trash. `/persist` leaves out user caches and
-agent CLI installs (npm, `~/.codex/packages`). Every exclusion is an exact path
-also listed for the coverage check; `--exclude-caches` and globs are not used,
-because coverage cannot waive what they drop. Root snapshots leave out
-`~/.cache`, `/root/.cache`, `/var/cache`, `/tmp` and every other mounted
-filesystem (`rootSnapshotExcludes` in `modules/lib/backup/acknowledgement.nix`).
+Each archive leaves out regenerable and re-acquirable paths; "Exclusions and
+why" below lists them with their reasons.
 
 The coordinator runs nightly at 03:05 and once 45 minutes after boot. The
 persistent calendar catches a missed nightly window; the independent boot
@@ -146,7 +166,7 @@ The normal boot trigger is scheduled when the timer starts before 45 minutes.
 Use the declared `backup_drain` operation for deployment recovery when no
 automatic start is pending. Sequence activation and recovery with other
 IO-heavy jobs and inspect the retained queue first.
-The coordinator is not restarted merely because its script changes.
+Activation does not restart the coordinator or any other backup unit.
 Polylogue state keeps its 90-minute deadline; Sinex blobs have a six-hour
 start deadline instead of an infinite one. A timeout keeps canonical input
 and failed hook cuts for recovery. Its overall deadline is 56h15m, or
@@ -211,8 +231,9 @@ snapshot does not cross that mount. The genome subvolume therefore has its
 own immutable cuts, archive receipts and freshness check. Its `genome-*`
 archives (`genome-genome.*`) share the Realm repository for deduplication and have independent
 retention, so a Realm recovery point cannot displace a genome recovery point
-from the same day. Genome uses Borg's `BORG_FILES_CACHE_SUFFIX=genome` to
-keep its files metadata cache independent of Realm create-count aging. The
+from the same day. Genome uses Borg's `BORG_FILES_CACHE_SUFFIX=genome`
+(`sources.genome.files_cache_suffix` in the policy file) to keep its files
+metadata cache independent of Realm create-count aging. The
 repository and chunk index stay shared, and `ctime,size,inode` validation
 remains unchanged. This namespace starts cold; its first create can reread
 the source before later unchanged cuts can benefit. No live cache is migrated.
@@ -264,9 +285,7 @@ run; it does not recursively change receipt files. Borg repositories, key
 material and chunk caches remain root-private.
 
 Realm and Persist freshness alerts allow 30 hours from the accepted source
-cut: the approved 24-hour archival cadence plus 6 hours of grace. The former
-eight-hour check described a six-hour archive schedule that no longer exists.
-The broader coordinator timeout does not extend this alert budget or establish
+cut: the approved 24-hour archival cadence plus 6 hours of grace. The broader coordinator timeout does not extend this alert budget or establish
 an eight-hour recovery-point objective.
 
 Genome acquisition is `onchange`, so an old accepted cut can remain current.
@@ -288,6 +307,97 @@ archive accepted after inventory publication can be recognized immediately
 without waiting for another acquisition. This describes the latest observed
 acquired generation, not instantaneous live contents, a repository integrity
 check or a claim that every write between acquisitions is already archived.
+
+## Exclusions and why
+
+`modules/backup.nix` declares each snapshot source's exclusions once
+(`persistExclusions`, `realmExclusions`, `genomeExclusions`): exact paths
+relative to the snapshot root, each marked `mayBeMissing` or not. From them
+Nix derives Borg's `--exclude` patterns and the coverage policy's
+`noncanonical` roots, the paths whose absence from an archive the coverage
+check accepts. The policy goes into `/etc/sinnix/backup.json`, and its JSON,
+entries and order included, is hashed into every archive record. Changing an
+entry therefore makes the next archive of that source a new policy: Persist
+runs a full content comparison, the Realm audit reports stale until it runs
+again, and local dump expiry and genome freshness wait for an archive under
+the new policy.
+
+Borg matches an exclusion against the full path it walks, which begins with
+the snapshot's bind mount, so plain entries are qualified with that path and
+`**` patterns stay match-anywhere. Patterns keep Borg's default fnmatch style,
+because `pp:` prefixes cannot express the Chrome extension wildcards.
+`--exclude-caches`, `--exclude-if-present` and broad globs are not used: a tag
+file or a directory name does not show that the contents beside it can be
+recreated, and the coverage check waives only roots listed here. Borg stops
+at an excluded directory, so a child cannot be included again under it; an
+exclusion names the regenerable child itself, such as Steam's `steamapps`
+rather than the whole Steam tree.
+
+`/realm` leaves out, all marked `mayBeMissing`:
+
+- Re-acquirable downloads. Model weight stores under `library/model`
+  (`ollama`, `gguf`, `sherpa`, `photoprism`, `sd-checkpoints`, `tts`,
+  `embedding`); the model directory itself stays covered, so authored control
+  vectors and new, unclassified children are archived. Steam's games,
+  runtimes and client package, which the client downloads again; `userdata`
+  beside them (cloud saves and recordings) stays covered. The public genome
+  reference downloads in `health/genome/cache`; the raw reads in `genotype/`
+  cannot be regenerated and stay covered. Container image layers in
+  `state/containers`, pulled again by the digests the modules pin; the
+  containers keep their data on bind mounts under `library/` and `state/`,
+  so a named volume created in `state/containers` would not be archived.
+  Codex's downloaded app-server releases.
+- `library/games/steam/steamapps` and `library/models`, earlier locations
+  that older snapshots still hold.
+- Caches and scratch: `state/cache`, and the top-level `tmp`, `worktree` and
+  `worktrees`, which `/realm/INVENTORY.md` declares unbacked (agent checkouts'
+  commits live in their origin repositories). A `tmp/` inside a dataset stays
+  covered, and so does `inbox/`, where downloads land and exist nowhere else.
+  The pytest caches at `/realm` and `/realm/project`, and the trash
+  `.Trash-1000`.
+- Build and environment trees that hold only rebuildable content: the named
+  Cargo `target/` and project `.venv` directories, Stash's analysis cache,
+  generated media and GPU virtualenv, and the ComfyUI virtualenv.
+- Polylogue's `index.db` with its WAL and SHM files, in the live archive and
+  in every directory of `sinnix.services.polylogue.retainedArchives`; it is
+  rebuilt from `archive.db`. The rest of `state/polylogue-live` comes from
+  the atomic snapshot, which Polylogue accepts as a consistent backup.
+
+Evaluation asserts that the exact scratch roots in
+`modules/lib/storage/scratch-roots.nix` are among these, and that no
+exclusion covers a Beads task store, the ranking domains or
+`library/model/control-vector`, or any of their parents.
+
+`/persist` leaves out, marked `mayBeMissing`: user caches (`~/.cache`, Hugging
+Face, Spotify) and Borg's cache in `/root/.cache`; package registries and
+environments fetched again on demand (Cargo's registry and git checkouts,
+npm's cache and `npx`, `uv`, the Hermes agent's virtualenvs, Mason); agent CLI
+installs the bootstrap reinstalls, while their ledgers stay covered; Hyprland
+logs and systemd core dumps; AgentCTL launch inputs, transient launch
+documents that do not belong in an archive, while job results and logs stay
+covered; and Chrome's GPU, shader, dictionary and component caches. Two
+exclusions are not marked: the Steam directory and `/var/lib/sinex` (Sinex
+state, which Sinex's own tooling backs up) are left out of the archive, but
+the check does not excuse them, so content there that an archive lacks keeps
+the snapshot. The Chrome extension cache wildcards are excused only through
+`chrome_extension_caches`, which accepts a wildcard that is a Chrome
+extension ID (32 lowercase letters a to p) ending in one of the listed caches.
+
+The genome source leaves out its public reference and catalogue caches,
+downloaded tools, Python libraries, snpEff data, GWAS summary statistics and
+`.direnv`; raw reads, alignments, vendor files, manifests, work in progress
+and results stay covered.
+
+Root snapshots leave out `rootSnapshotExcludes` (`modules/backup.nix`): other
+mounted filesystems, `/nix`, the pseudo-filesystems, `/tmp`, `~/.cache`,
+`/root/.cache` and `/var/cache`. The same list is the root coverage policy,
+so an excluded path is never reported missing.
+
+The Polylogue state archive leaves out the live databases the dump job copies
+and their WAL and SHM files, so it never copies a database mid-write, plus the
+live hook tree, which it reads from a read-only cut; retired database files
+beside them stay covered. The hourly live-small archive leaves out
+`migration-backups` and Dolt server logs under `state/tasks`.
 
 ## Is it healthy?
 

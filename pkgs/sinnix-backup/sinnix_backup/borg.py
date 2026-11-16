@@ -7,9 +7,10 @@ import os
 import re
 import subprocess
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 from .config import BackupConfig, Repository
 
@@ -62,9 +63,26 @@ def borg_environment(
     return environment
 
 
+@contextmanager
+def exported(env: dict[str, str]) -> Iterator[None]:
+    """Make `env` this process's environment for the block, then restore it.
+
+    The coverage and snapshot checks call Borg and Btrfs through plain
+    subprocesses, so one command's repository settings apply to all of them.
+    """
+    saved = dict(os.environ)
+    os.environ.clear()
+    os.environ.update(env)
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
+
+
 def run_borg(
     args: list[str],
-    env: dict[str, str],
+    env: dict[str, str] | None = None,
     *,
     accepted: Iterable[int] = (0,),
     capture: bool = False,
@@ -73,7 +91,7 @@ def run_borg(
     """Run `borg <args>`; a status outside `accepted` raises BorgError.
 
     With `capture`, stdout is returned as text; stderr always goes to the
-    journal.
+    journal. Without `env`, the process environment applies.
     """
     result = subprocess.run(
         ["borg", *args],
