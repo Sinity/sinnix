@@ -244,7 +244,6 @@ in
         homeFiles = laneWrapperFiles ++ [
           ".local/bin/hermes"
           ".local/bin/mcp-firecrawl"
-          ".local/bin/mcp-chrome-devtools"
           ".local/bin/mcp-polylogue"
           ".local/bin/mcp-sinex"
           ".config/hermes/skills"

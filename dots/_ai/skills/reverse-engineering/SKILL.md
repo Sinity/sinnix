@@ -7,8 +7,7 @@ description: Analyze firmware, updater packages, native binaries, encryption rou
 
 Sinnix supplies `rea`, `ghidra`, `ghidra-analyzeHeadless`, `binwalk`,
 `unblob`, `7z`, and binutils. REA's wrapper selects the Nix Ghidra/JDK and
-absolute extraction-tool paths. Use the CLI in an existing session; the
-managed `full` MCP profile exposes `rea mcp` to new agent sessions.
+absolute extraction-tool paths. Use the CLI.
 
 ## Establish the artifact
 

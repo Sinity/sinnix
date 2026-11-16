@@ -271,15 +271,6 @@ let
       npmDepsHash = "sha256-bz3EVlVQNOeS5g9qvO1+5OIcMNxVQ+oLrwA9j9ZmqEY=";
     };
 
-    mcp-chrome-devtools = mkNodeCliPackage {
-      pname = "mcp-chrome-devtools";
-      version = "0.25.0";
-      src = ./npm/chrome-devtools-mcp;
-      packagePath = "chrome-devtools-mcp";
-      entrypoint = "build/src/bin/chrome-devtools-mcp.js";
-      npmDepsHash = "sha256-yGbzAtsbFBilXwTBL+dXkH2NM6tzOu7wnowE/z9WwQo=";
-    };
-
     ccusage = mkNodeCliPackage {
       pname = "ccusage";
       version = "18.0.10";

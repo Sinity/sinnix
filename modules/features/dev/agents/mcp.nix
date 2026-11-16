@@ -3,7 +3,7 @@
 #
 # Domain pieces live in sibling plain-nix helpers, imported below:
 # mcp-tools.nix (generic MCP wrappers), client-profiles.nix
-# (registry-driven Codex config), browser.nix, hooks.nix.
+# (registry-driven Codex config), hooks.nix.
 {
   mkFeatureModule,
   lib,
@@ -55,15 +55,13 @@ mkFeatureModule {
       # activation text cannot accidentally resolve the Home Manager config.
       dotsRoot = config.sinnix.paths.dotsRoot;
       inherit (helpers.data) mcpRegistry;
-      browser = import ./browser.nix {
-        inherit
-          lib
-          pkgs
-          scriptPkgs
-          inputs
-          ;
-        inherit dotsRoot;
-      };
+      # Browser control goes through sinnix-chrome-control, which attaches
+      # to the operator's running Chrome and opens its own agent window.
+      # Live dots path, not `inputs.self + ...`: a store copy would mean a
+      # rebuild before any edit to these control scripts could be exercised.
+      # Consumers reference it via mkOutOfStoreSymlink rather than string
+      # interpolation, or Nix copies the directory into the store.
+      desktopControlScripts = dotsRoot + "/_ai/skills/desktop-control/scripts";
       mcpTools = import ./mcp-tools.nix {
         inherit
           lib
@@ -128,10 +126,6 @@ mkFeatureModule {
         os.chmod(temporary, 0o600)
         os.replace(temporary, user_path)
       '';
-      inherit (browser)
-        mcpChromeDevtoolsBin
-        desktopControlScripts
-        ;
       inherit (mcpTools)
         mcpFirecrawlBin
         mcpLynchpinText
@@ -393,10 +387,6 @@ mkFeatureModule {
               };
               ".local/bin/mcp-firecrawl" = {
                 source = "${mcpFirecrawlBin}/bin/mcp-firecrawl";
-                force = true;
-              };
-              ".local/bin/mcp-chrome-devtools" = {
-                source = "${mcpChromeDevtoolsBin}/bin/mcp-chrome-devtools";
                 force = true;
               };
               ".local/bin/sinnix-chrome-control" = {

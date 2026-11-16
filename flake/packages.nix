@@ -17,7 +17,6 @@
         "ccusage"
         "lynchpin-cli"
         "lynchpin-python"
-        "mcp-chrome-devtools"
         "mcp-firecrawl"
         "mcp-github"
         "sinnix"

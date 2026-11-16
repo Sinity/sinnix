@@ -23,19 +23,6 @@ let
   ) rawRegistry;
 
   rawRegistry = {
-    rea = {
-      description = "Local firmware extraction and native binary analysis with Ghidra";
-      transport = "stdio";
-      tier = "binary-analysis";
-      command = "rea";
-      args = [ "mcp" ];
-      clients = [
-        "claude"
-        "codex"
-        "hermes"
-      ];
-      codex.startup_timeout_sec = 30;
-    };
     context7 = {
       description = "Current third-party library and API documentation, resolved by library id";
       transport = "http";
@@ -151,18 +138,6 @@ let
         "hermes"
       ];
     };
-
-    chrome-devtools = {
-      description = "Chrome DevTools control of the operator's own browser";
-      transport = "stdio";
-      tier = "browser-mcp";
-      command = "mcp-chrome-devtools";
-      clients = [
-        "claude"
-        "codex"
-      ];
-    };
-
   };
 
   profileTiers = {

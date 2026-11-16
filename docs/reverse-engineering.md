@@ -6,9 +6,8 @@ and extractors. Known gaps: Partclone is built without its NILFS copier, and
 Unblob's Btrfs-stream extraction is untested here (its upstream test fails in
 the build sandbox and is skipped).
 
-The `reverse-engineering` skill owns the investigation workflow. REA is
-registered in the `full` MCP profile; existing sessions can use its CLI.
-Restart an agent using that profile to obtain its MCP tools.
+The `reverse-engineering` skill owns the investigation workflow and drives
+REA through its CLI.
 
 Run bounded analysis as declared work:
 

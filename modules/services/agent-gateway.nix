@@ -58,9 +58,7 @@ let
     }
     // lib.optionalAttrs (!brokered) {
       reason =
-        if name == "chrome-devtools" then
-          "excluded to preserve gateway-owned browser-target isolation"
-        else if server.transport != "stdio" then
+        if server.transport != "stdio" then
           "transport requires an explicit remote credential contract"
         else
           "not admitted to the initial broker route";
