@@ -69,8 +69,14 @@ def safe(value):
 # the scheduled service's memory boundary. That boundary is 3G with no swap
 # (MemoryMax in modules/services/fs-index.nix); the buffer manager gets two
 # thirds of it, which leaves the rest for DuckDB's allocations outside the
-# buffer manager, the scanning Python process and file metadata. 512MiB was
-# too little to materialize a full scan: not all of its working set spills.
+# buffer manager, the scanning Python process and file metadata.
+#
+# This limit does not make a full scan fit. scan_generation feeds the scan
+# rows through pipes, and DuckDB keeps everything it has read from a pipe in
+# memory, outside what it can spill: the file rows of a full scan are about
+# 2GB of JSON, so the read fails at 512MiB and at 2GiB alike. The same rows
+# read from a regular file load within this limit (measured on the retained
+# scan of 25 October 2026: pipe fails after 1.9GiB, file completes).
 DUCKDB_MEMORY_LIMIT = "2GiB"
 DUCKDB_SETTINGS = f"SET memory_limit='{DUCKDB_MEMORY_LIMIT}'; SET threads=2; SET preserve_insertion_order=false;"
 # Writers spill here, on the scratch volume, not beside a generation's
