@@ -26,7 +26,7 @@ from sinnix_agent_gateway import shell_pools
             ["env", "FOO=1", "nohup", "codex", "exec", "task"],
             ("long", "agent-cli:codex"),
         ),
-        (["nice", "-n", "5", "gemini", "-p", "x"], ("long", "agent-cli:gemini")),
+        (["nice", "-n", "5", "pi", "-p", "x"], ("long", "agent-cli:pi")),
         (["env", "-i", "codex", "exec", "x"], ("long", "agent-cli:codex")),
         (["env", "--unset", "X", "claude", "-p", "x"], ("long", "agent-cli:claude")),
         (["env", "-C", "/fixture", "codex", "exec", "x"], ("long", "agent-cli:codex")),

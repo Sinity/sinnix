@@ -194,8 +194,8 @@ that survives queue reordering; each
 retry is a separate attempt with its own logs and result.
 
 `shell.run` picks a pool: `shell-quick` (width 8) for reads and short commands,
-or `shell-long` (width 4) for agent CLIs (`claude`, `codex`, `gemini`,
-`opencode`, `pi`, `cursor-agent`). `pool=auto`, the default,
+or `shell-long` (width 4) for agent CLIs (`claude`, `codex`, `pi`).
+`pool=auto`, the default,
 detects them past `env`, `nohup`, `timeout` and `sh -c`. A quick-pool command
 still running after 20 s stops counting against the width, so long work never
 blocks the quick pool. `timeout_seconds` is an optional kill ceiling.

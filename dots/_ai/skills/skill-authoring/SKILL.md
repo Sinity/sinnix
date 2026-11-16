@@ -27,7 +27,7 @@ craft is in `writing-for-agents`; this skill covers the package.
    parses; read the advice itself for correctness.
 5. When the name or description changes, check routing with a trigger and
    near miss. The live skill list and descriptions are what agents load; the
-   capability index (`/etc/sinnix/capability-index.json`, `sinnix-capabilities`)
+   capability index (`/etc/sinnix/capability-index.json`, `sinnix capabilities`)
    lists MCP servers and tools.
 
 ## Retiring or merging

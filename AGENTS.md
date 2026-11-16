@@ -97,7 +97,7 @@ Instruction and skill text is live through symlinks; Codex's per-skill links
 change at activation when a skill is added, renamed, or removed.
 
 The MCP registry and capability index (`/etc/sinnix/capability-index.json`,
-read with `sinnix-capabilities`) list servers and tools; skill frontmatter is
+read with `sinnix capabilities`) list servers and tools; skill frontmatter is
 the skill list.
 
 ## Workflow and verification

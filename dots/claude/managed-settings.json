@@ -32,13 +32,7 @@
       "CronList",
       "RemoteTrigger",
       "EnterWorktree",
-      "ExitWorktree",
-      "mcp__plugin_context7_context7__resolve-library-id",
-      "mcp__plugin_context7_context7__query-docs",
-      "mcp__claude_ai_Gmail__*",
-      "mcp__claude_ai_Google_Calendar__*",
-      "mcp__claude_ai_SimpleScraper__*",
-      "mcp__claude_ai_Mermaid_Chart__*"
+      "ExitWorktree"
     ],
     "deny": ["Bash(rm -rf /:*)"],
     "ask": [],
