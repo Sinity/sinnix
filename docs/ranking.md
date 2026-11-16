@@ -58,6 +58,12 @@ sinnix rank list                               # every domain
 `next`/`record` exist for agents, which hold the conversation instead of a
 terminal; `compare` is the interactive loop.
 
+`next --json` carries each item's metadata and the evidence so far. `record`
+and `retract` take `--next`: they then print one JSON object with what was
+done, the next set and the evidence, so a front end that runs its own loop
+needs one process per answer. Pi's `/compare <domain>` command and
+`rank_options` tool (`dots/pi/extensions/compare.ts`) are such a front end.
+
 `add` takes a JSON array or JSONL of `{id, label, ...}`; every other field
 (`image`, `description`, `features`) is kept on the item. It refuses to reuse
 an id with a different label (`--revise` relabels the same option) and

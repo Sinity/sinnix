@@ -343,6 +343,41 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def next_payload(domain: str, store: Store, grid: int, seed: int | None) -> dict | None:
+    """The next set plus what the evidence supports so far, from one fit.
+
+    A front end that drives a comparison loop needs both after every answer;
+    returning them together keeps that loop at one process per answer. Item
+    metadata rides along so the front end can show more than the label.
+    """
+    items, comparisons, result = _fit_domain(store)
+    if len(items) < grid:
+        return None
+    selector = build_selector(
+        list(items),
+        comparisons,
+        result,
+        grid_n=grid,
+        rng=random.Random(seed),
+    )
+    seen = set(selector.seen_sets)
+    chosen, strategy = selector.pick_set()
+    stability = top_k_stability(result, k=1, seed=seed)
+    return {
+        "domain": domain,
+        "strategy": strategy,
+        "already_judged": frozenset(chosen) in seen,
+        "set": [
+            {"id": item_id, "label": items[item_id].label}
+            | ({"meta": items[item_id].meta} if items[item_id].meta else {})
+            for item_id in chosen
+        ],
+        "evidence": evidence_report(
+            items, comparisons, result, stability, DEFAULT_STOP_AT
+        ),
+    }
+
+
 def cmd_next(args: argparse.Namespace) -> int:
     """The next set to put in front of the operator, without owning a TTY.
 
@@ -351,31 +386,26 @@ def cmd_next(args: argparse.Namespace) -> int:
     recording as two separate non-interactive calls.
     """
     store = Store(domain_dir(args.domain))
-    items, comparisons, result = _fit_domain(store)
-    if not require_items(args, items, args.grid):
+    if not require_items(args, store.load_items(), args.grid):
         return 1
-    selector = build_selector(
-        list(items),
-        comparisons,
-        result,
-        grid_n=args.grid,
-        rng=random.Random(args.seed),
-    )
-    seen = set(selector.seen_sets)
-    chosen, strategy = selector.pick_set()
-    payload = {
-        "domain": args.domain,
-        "strategy": strategy,
-        "already_judged": frozenset(chosen) in seen,
-        "set": [{"id": item_id, "label": items[item_id].label} for item_id in chosen],
-    }
+    payload = next_payload(args.domain, store, args.grid, args.seed)
     if args.json:
         print(json.dumps(payload, indent=2))
         return 0
-    print(f"({strategy})")
-    for i, item_id in enumerate(chosen, start=1):
-        print(f"  {i}. {items[item_id].label}  [{item_id}]")
+    print(f"({payload['strategy']})")
+    for i, item in enumerate(payload["set"], start=1):
+        print(f"  {i}. {item['label']}  [{item['id']}]")
     return 0
+
+
+def print_with_next(args: argparse.Namespace, store: Store, done: dict) -> None:
+    """`--next`: one JSON object naming what was done and what to ask next."""
+    print(
+        json.dumps(
+            done | {"next": next_payload(args.domain, store, args.grid, None)},
+            indent=2,
+        )
+    )
 
 
 def cmd_record(args: argparse.Namespace) -> int:
@@ -413,6 +443,9 @@ def cmd_record(args: argparse.Namespace) -> int:
         kind=kind,
         context=args.context,
     )
+    if args.next:
+        print_with_next(args, store, {"comparison": comparison_id})
+        return 0
     print(comparison_id)
     return 0
 
@@ -427,6 +460,9 @@ def cmd_retract(args: argparse.Namespace) -> int:
         )
         return 2
     store.undo(args.comparison)
+    if args.next:
+        print_with_next(args, store, {"retracted": args.comparison})
+        return 0
     print(f"tombstoned {args.comparison}")
     return 0
 
@@ -1402,6 +1438,17 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def add_next_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--next",
+        action="store_true",
+        help="print JSON: what was done, then the next set and the evidence so far",
+    )
+    parser.add_argument(
+        "--grid", type=int, default=2, help="items per set for --next (2 = pairwise)"
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Preference ranking over any item domain"
@@ -1460,11 +1507,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="pair/choice-set need a winner (or --tie for a pair); skip and incomparable do not",
     )
     record.add_argument("--context", default=None)
+    add_next_arguments(record)
     record.set_defaults(func=cmd_record)
 
     retract = sub.add_parser("retract", help="tombstone one recorded comparison")
     retract.add_argument("domain")
     retract.add_argument("--comparison", required=True)
+    add_next_arguments(retract)
     retract.set_defaults(func=cmd_retract)
 
     compare = sub.add_parser(
