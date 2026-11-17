@@ -260,7 +260,7 @@ let
         sudo ${pkgs.systemd}/bin/systemd-run \
           --quiet --collect --pipe --service-type=exec --wait --unit="$_rebuild_unit" --description="Sinnix rebuild" \
           --property="ConditionPathExists=$_rebuild_condition" \
-          --setenv=PATH="${rebuildServicePath}:$PATH" \
+          --setenv=PATH="/run/wrappers/bin:${rebuildServicePath}:$PATH" \
           ${rebuildContainmentFlags}
           ${rebuildGuard} \
             --owner-pid "$$" --owner-start-ticks "$_rebuild_start_ticks" -- \
@@ -288,7 +288,7 @@ let
           --user \
           --quiet --collect --pipe --service-type=exec --wait --unit="$_rebuild_unit" --description="Sinnix rebuild" \
           --property="ConditionPathExists=$_rebuild_condition" \
-          --setenv=PATH="${rebuildServicePath}:$PATH" \
+          --setenv=PATH="/run/wrappers/bin:${rebuildServicePath}:$PATH" \
           ${rebuildContainmentFlags}
           ${rebuildGuard} \
             --owner-pid "$$" --owner-start-ticks "$_rebuild_start_ticks" -- \
@@ -318,7 +318,7 @@ let
           --user \
           --quiet --collect --pipe --service-type=exec --wait --unit="$_rebuild_unit" --description="Sinnix rebuild" \
           --property="ConditionPathExists=$_rebuild_condition" \
-          --setenv=PATH="${rebuildServicePath}:$PATH" \
+          --setenv=PATH="/run/wrappers/bin:${rebuildServicePath}:$PATH" \
           ${rebuildContainmentFlags}
           ${rebuildGuard} \
             --owner-pid "$$" --owner-start-ticks "$_rebuild_start_ticks" -- \
@@ -372,7 +372,7 @@ let
           --quiet --collect --pipe --service-type=exec --wait --unit="$_rebuild_unit" --description="Sinnix rebuild" \
           --property="ConditionPathExists=$_rebuild_condition" \
           --setenv="SINNIX_ACTIVATION_SOURCE_REV=''${SINNIX_DEV_SHELL_REV:-}" \
-          --setenv=PATH="${rebuildServicePath}:$PATH" \
+          --setenv=PATH="/run/wrappers/bin:${rebuildServicePath}:$PATH" \
           ${rebuildContainmentFlags}
           ${rebuildGuard} \
             --owner-pid "$$" --owner-start-ticks "$_rebuild_start_ticks" -- \

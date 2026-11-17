@@ -320,6 +320,10 @@
               echo 'rebuild registered after wrapper exit' >&2
               exit 1
             fi
+            # AgentCTL jobs do not inherit /run/wrappers/bin.
+            # nh needs the NixOS setuid sudo wrapper for privileged actions.
+            grep -Fq '/run/wrappers/bin:' "${activationExecutables.switch}"
+            grep -Fq '/run/wrappers/bin:' "${activationExecutables.boot}"
             test -x "${activationExecutables.test-system}"
             test ! -e "${activationRegistry.activationPackages.test-system}/bin/test"
 
