@@ -1,7 +1,7 @@
 name = "implementer"
 description = "Implementation worker for one coherent task group in its own worktree: writes the whole change, verifies it, and publishes it through the repository's normal route."
 
-model = "gpt-6.1-sol"
+model = "gpt-6.2-sol"
 model_reasoning_effort = "high"
 
 developer_instructions = """

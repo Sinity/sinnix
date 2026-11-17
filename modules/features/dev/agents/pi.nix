@@ -54,7 +54,7 @@ let
   # hand.
   settings = {
     defaultProvider = "openai";
-    defaultModel = "gpt-6.1-sol";
+    defaultModel = "gpt-6.2-sol";
     # No install or update reports; the launcher also skips the version check.
     enableInstallTelemetry = false;
     # Local paths: pi loads them in place and installs nothing. Sinnix's own

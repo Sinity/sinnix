@@ -13,7 +13,7 @@ if [ $# -lt 4 ]; then
   echo "usage: codex-worker <effort> <prompt-file> <output-schema> <output-dir> [model]" >&2
   exit 2
 fi
-effort=$1 prompt=$2 schema=$3 out=$4 model=${5:-gpt-6.1-sol}
+effort=$1 prompt=$2 schema=$3 out=$4 model=${5:-gpt-6.2-sol}
 mkdir -p "$out"
 date -Is >"$out/started"
 common=(-m "$model" -c model_reasoning_effort="$effort"

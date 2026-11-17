@@ -1,7 +1,7 @@
 name = "review"
 description = "Read-only adversarial reviewer that cites exact evidence and tests the strongest counterclaim."
 
-model = "gpt-6.1-sol"
+model = "gpt-6.2-sol"
 model_reasoning_effort = "high"
 
 # A role file cannot narrow the sandbox: Codex applies only the model,
