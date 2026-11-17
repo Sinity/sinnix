@@ -101,3 +101,19 @@ its behavior is tested against the pinned class. This is an audited
 compatibility seam, not a claim of stable public API. The command is
 interactive; a prompt passed through noninteractive pi cannot present a
 branch picker.
+
+## Inquiry prompt commands (installed with the same local Pi package)
+
+Pi discovers these prompt templates from dots/pi/prompts/ through the package
+manifest: /inquire, /scene, /worldview, /arrow, /grid, /ambivalence, /values,
+/challenge, /map and /debrief. Each accepts an optional topic. Their entire
+source is available for review and live reload; they call no tools on their
+own and add no session store. In pi-inquire they inherit the constrained
+read/question-only preset; in pi-explore, pi-learn or general pi they inherit
+those active tool permissions. The templates guide prompts; they do not
+isolate model access, prevent the model from improvising or ensure truth.
+
+The previous standalone starter-kit journal directory is deliberately not
+installed as another authority. Pi already keeps native sessions in its user
+state; the user's existing journal retains authorship and ownership.
+Nothing auto-publishes inferred beliefs as stable personal facts.

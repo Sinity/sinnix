@@ -8,7 +8,10 @@
     "extensions": [
       "./extensions/*.ts"
     ],
-    "changelogPath": ""
+    "changelogPath": "",
+    "prompts": [
+      "./prompts/*.md"
+    ]
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

@@ -588,6 +588,30 @@ test("Loom command is installed in Pi and rejects noninteractive sessions", asyn
 });
 
 
+
+test("Pi loads all ten inquiry templates and substitutes topics through its actual parser", async () => {
+  const provider = new URL("./core/prompt-templates.js", import.meta.resolve("@earendil-works/pi-coding-agent"));
+  const { loadPromptTemplates, expandPromptTemplate } = await import(provider);
+  const root = new URL("../", import.meta.url).pathname;
+  const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+  assert.deepEqual(manifest.pi.prompts, ["./prompts/*.md"]);
+  const loaded = loadPromptTemplates({
+    cwd: root, agentDir: join(root, "test-private-agent"), promptPaths: [join(root,"prompts")],
+    includeDefaults: false,
+  });
+  assert.deepEqual(loaded.diagnostics, []);
+  assert.deepEqual(loaded.templates.map(p => p.name).sort(),
+    ["ambivalence","arrow","challenge","debrief","grid","inquire","map","scene","values","worldview"]);
+  assert.ok(loaded.templates.every(p => p.description?.trim()));
+  const expanded = expandPromptTemplate("/scene trouble beginning a project", loaded.templates);
+  assert.ok(expanded.includes("trouble beginning a project"));
+  assert.ok(!expanded.includes(String.fromCharCode(36) + "{@:-"));
+  const defaulted = expandPromptTemplate("/worldview", loaded.templates);
+  assert.ok(defaulted.includes("one interesting concrete dilemma"));
+  assert.equal(expandPromptTemplate("/not-a-template", loaded.templates), "/not-a-template");
+});
+
+
 if (process.argv.includes("--schemas")) {
 	const { pi, state } = fakePi();
 	ask(pi);
