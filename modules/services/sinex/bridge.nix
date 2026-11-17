@@ -146,6 +146,8 @@ in
       max_wal_size = "16GB";
       checkpoint_timeout = "30min";
       log_temp_files = "16MB";
+      # Release query work and its transaction when the owning client exits.
+      client_connection_check_interval = "1s";
     };
 
     boot.kernelParams = [ "hugepages=${toString hugePages}" ];
