@@ -1,0 +1,14 @@
+{
+  "description": "Open-ended thought, research and making; capable tools, no required self-improvement",
+  "instructions": "explore.md",
+  "tools": [
+    "read",
+    "bash",
+    "edit",
+    "write",
+    "grep",
+    "find",
+    "ls",
+    "ask_operator"
+  ]
+}

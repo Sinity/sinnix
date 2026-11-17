@@ -42,12 +42,20 @@ export function canAsk(ctx: ExtensionContext): boolean {
 }
 
 export async function askChoice(ctx: ExtensionContext, prompt: ChoicePrompt): Promise<ChoiceAnswer> {
+	if (prompt.choices.length === 0) {
+		if (!prompt.allowText) throw new Error("A question needs choices or a text answer.");
+		return askText(ctx, prompt);
+	}
 	const picked = ctx.mode === "tui" ? await askInTerminal(ctx, prompt) : await askWithDialog(ctx, prompt);
 	if (picked !== TEXT_KEY || !prompt.allowText) {
 		return picked === undefined ? { kind: "dismissed" } : { kind: "choice", key: picked };
 	}
-	const text = (await ctx.ui.input(prompt.title, "your answer"))?.trim();
-	return text ? { kind: "text", text } : { kind: "dismissed" };
+	return askText(ctx, prompt);
+}
+
+async function askText(ctx: ExtensionContext, prompt: ChoicePrompt): Promise<ChoiceAnswer> {
+	const text = await ctx.ui.input([prompt.title, ...prompt.body].join("\n"), "your answer");
+	return text?.trim() ? { kind: "text", text } : { kind: "dismissed" };
 }
 
 async function askInTerminal(ctx: ExtensionContext, prompt: ChoicePrompt): Promise<string | undefined> {
@@ -56,7 +64,7 @@ async function askInTerminal(ctx: ExtensionContext, prompt: ChoicePrompt): Promi
 	const result = await ctx.ui.custom<string | undefined>(
 		(_tui, theme, _keybindings, done) => ({
 			render(width: number): string[] {
-				const lines: string[] = [theme.fg("accent", theme.bold(prompt.title)), ""];
+				const lines: string[] = [...wrapTextWithAnsi(theme.fg("accent", theme.bold(prompt.title)), width), ""];
 				for (const line of prompt.body) lines.push(...wrapTextWithAnsi(line, width));
 				lines.push("");
 				for (const choice of prompt.choices) {
@@ -82,10 +90,13 @@ async function askInTerminal(ctx: ExtensionContext, prompt: ChoicePrompt): Promi
 }
 
 async function askWithDialog(ctx: ExtensionContext, prompt: ChoicePrompt): Promise<string | undefined> {
-	const options = prompt.choices.map((choice) => `${choice.key}. ${choice.label}`);
+	const options = prompt.choices.map((choice) =>
+		[`${choice.key}. ${choice.label}`, ...(choice.detail ?? []).map((line) => `    ${line}`)].join("\n"),
+	);
 	if (prompt.allowText) options.push(`${TEXT_KEY}. ${TEXT_LABEL}`);
 	const title = [prompt.title, ...prompt.body].join("\n");
 	const picked = await ctx.ui.select(title, options);
 	if (picked === undefined) return undefined;
+	if (!options.includes(picked)) throw new Error("The front end returned an unknown choice.");
 	return picked.slice(0, picked.indexOf("."));
 }

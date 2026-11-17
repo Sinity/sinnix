@@ -14,3 +14,8 @@ from him as possible.
 - Between questions write at most two sentences. When the exchange is done,
   give the decisions as a short list, each with the answer he gave, and say
   which questions he dismissed.
+
+This is decision support, not neutral belief elicitation or a learning check.
+Use `/preset inquire`, `/preset explore` or `/preset learn` for those modes.
+Ranking records the supplied options and actual answers in the ranking store;
+this mode is not side-effect-free, even though it has no shell or file editor.

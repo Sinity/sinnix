@@ -1,0 +1,11 @@
+{
+  "description": "Personal reflection and worldview inquiry; read tools and questions",
+  "instructions": "inquire.md",
+  "tools": [
+    "read",
+    "grep",
+    "find",
+    "ls",
+    "ask_operator"
+  ]
+}

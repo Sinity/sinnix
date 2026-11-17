@@ -1,5 +1,12 @@
 {
-  "description": "Structured questions and answers; reads files, changes nothing",
+  "description": "Structured decisions and operator-authored rankings; no shell or file editing",
   "instructions": "questions.md",
-  "tools": ["read", "grep", "find", "ls", "ask_operator", "rank_options"]
+  "tools": [
+    "read",
+    "grep",
+    "find",
+    "ls",
+    "ask_operator",
+    "rank_options"
+  ]
 }

@@ -1,0 +1,14 @@
+{
+  "description": "Concrete tutoring, references and checked exercises; scratch execution available",
+  "instructions": "learn.md",
+  "tools": [
+    "read",
+    "bash",
+    "edit",
+    "write",
+    "grep",
+    "find",
+    "ls",
+    "ask_operator"
+  ]
+}

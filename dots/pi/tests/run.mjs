@@ -18,6 +18,7 @@ import guard, { checkCommand } from "../extensions/guard.ts";
 import planBilling, { chargedToUsageCredits } from "../extensions/plan-billing.ts";
 import presets, { loadPresets } from "../extensions/presets.ts";
 import { describeItem, fileDisplay } from "../lib/item-display.ts";
+import { askChoice } from "../lib/choice.ts";
 import { RankEngine, Sitting } from "../lib/rank.ts";
 
 const rankArgv = JSON.parse(process.env.SINNIX_RANK_ARGV ?? '["sinnix-rank"]');
@@ -69,7 +70,7 @@ function fakePi(flagValues = {}) {
 
 /** A front end that answers dialogs from a script, the way an RPC client would. */
 function fakeContext(state, answers = [], overrides = {}) {
-	const seen = { selects: [], notes: [], status: {} };
+	const seen = { selects: [], inputs: [], notes: [], status: {} };
 	const ctx = {
 		mode: "rpc",
 		hasUI: true,
@@ -84,7 +85,10 @@ function fakeContext(state, answers = [], overrides = {}) {
 				const answer = answers.shift();
 				return typeof answer === "function" ? answer(options) : answer;
 			},
-			input: async () => answers.shift(),
+			input: async (title, placeholder) => {
+				seen.inputs.push({ title, placeholder });
+				return answers.shift();
+			},
 			notify: (message, type) => seen.notes.push({ message, type }),
 			setStatus: (key, value) => (seen.status[key] = value),
 		},
@@ -130,20 +134,20 @@ test("ask_operator returns the picked choice, a typed answer, or a dismissal as 
 	const { pi, state } = fakePi();
 	ask(pi);
 	const tool = state.tools.get("ask_operator");
-	assert.deepEqual(tool.parameters.required, ["deciding", "why", "recommendation", "choices"]);
+	assert.deepEqual(tool.parameters.required, ["question"]);
 	const question = {
-		deciding: "Which store holds the notes?",
+		question: "Which store holds the notes?",
 		why: "It fixes the backup route.",
 		recommendation: "The local store, because it needs no network.",
 		choices: [{ label: "Local store" }, { label: "Remote store", consequence: "Needs a token." }],
 		recommended: 1,
 	};
-	const picked = fakeContext(state, ["2. Remote store"]);
+	const picked = fakeContext(state, [(options) => options[1]]);
 	const first = await tool.execute("1", question, undefined, undefined, picked.ctx);
 	assert.deepEqual(first.structuredContent, { answered: true, choice: 2, label: "Remote store" });
 	const shown = picked.seen.selects[0];
-	assert.match(shown.title, /Which store holds the notes\?\nWhy it matters: .*\nRecommendation: /);
-	assert.deepEqual(shown.options, ["1. Local store (recommended)", "2. Remote store", "t. Type an answer"]);
+	assert.match(shown.title, /Which store holds the notes\?\nIt fixes the backup route\.\nRecommendation: /);
+	assert.deepEqual(shown.options, ["1. Local store (recommended)", "2. Remote store\n    Needs a token.", "t. Type an answer"]);
 
 	const typed = fakeContext(state, ["t. Type an answer", "neither, use paper"]);
 	const second = await tool.execute("2", question, undefined, undefined, typed.ctx);
@@ -336,6 +340,67 @@ test("a Claude Code reply charged to usage credits stops the run", async () => {
 	await fire("message_end", { message: reply({ rateLimitType: "overage" }) }, ctx);
 	assert.equal(seen.aborted, true);
 	assert.match(seen.notes[0].message, /usage credits/);
+});
+
+
+test("neutral questions go straight to text, preserve wording and do not recommend", async () => {
+	const { pi, state } = fakePi();
+	ask(pi);
+	const tool = state.tools.get("ask_operator");
+	const raw = "  My distinction.\nNot the model's.  ";
+	const { ctx, seen } = fakeContext(state, [raw]);
+	const result = await tool.execute("neutral", { question: "What distinguishes these two cases?", why: "Use your own terms." }, undefined, undefined, ctx);
+	assert.deepEqual(result.structuredContent, { answered: true, text: raw });
+	assert.equal(seen.selects.length, 0);
+	assert.equal(seen.inputs[0].title, "What distinguishes these two cases?\nUse your own terms.");
+	assert.ok(!seen.inputs[0].title.includes("Recommendation"));
+	for (const answer of [undefined, "   "]) {
+		const dismissed = fakeContext(state, [answer]);
+		const output = await tool.execute("dismiss", { question: "Continue?" }, undefined, undefined, dismissed.ctx);
+		assert.deepEqual(output.structuredContent, { answered: false });
+	}
+});
+
+test("invalid recommendation and RPC answers cannot manufacture a choice", async () => {
+	const { pi, state } = fakePi();
+	ask(pi);
+	const tool = state.tools.get("ask_operator");
+	const request = { question: "Choose", choices: [{ label: "One" }, { label: "Two" }] };
+	await assert.rejects(tool.execute("bad", { ...request, recommendation: "One", recommended: 3 }, undefined, undefined, fakeContext(state).ctx), /existing choice/);
+	await assert.rejects(tool.execute("bad", { ...request, recommended: 1 }, undefined, undefined, fakeContext(state).ctx), /recommendation/);
+	await assert.rejects(tool.execute("bad", request, undefined, undefined, fakeContext(state, ["9. invented"]).ctx), /unknown choice/);
+});
+
+test("narrow terminal wraps the full question and keeps option details", async () => {
+	const title = "Which concrete distinction would you like to examine without losing the end of this question?";
+	let rendered;
+	const ctx = { mode: "tui", hasUI: true, ui: { custom: async (factory) => new Promise((resolve) => {
+		const theme = { fg: (_color, text) => text, bold: (text) => text };
+		const component = factory({}, theme, {}, resolve);
+		rendered = component.render(24);
+		component.handleInput("1");
+	}) } };
+	const result = await askChoice(ctx, { title, body: [], choices: [{ key: "1", label: "First", detail: ["A visible consequence."] }] });
+	assert.deepEqual(result, { kind: "choice", key: "1" });
+	const text = rendered.join(" ").replace(/\s+/g, " ");
+	assert.ok(text.includes(title));
+	assert.ok(text.includes("A visible consequence."));
+	assert.ok(rendered.every((line) => line.length <= 24));
+});
+
+test("inquiry, exploration and learning are separate supported modes", async () => {
+	const available = loadPresets();
+	for (const name of ["inquire", "explore", "learn"]) {
+		const { pi, state, fire } = fakePi({ preset: name });
+		ask(pi); presets(pi);
+		await fire("session_start", { reason: "startup" }, fakeContext(state).ctx);
+		assert.deepEqual(state.active, available.get(name).tools);
+		assert.ok(state.active.includes("ask_operator"));
+	}
+	assert.ok(!available.get("inquire").tools.includes("bash"));
+	assert.ok(!available.get("inquire").tools.includes("rank_options"));
+	assert.ok(available.get("explore").tools.includes("write"));
+	assert.ok(available.get("learn").tools.includes("bash"));
 });
 
 if (process.argv.includes("--schemas")) {
