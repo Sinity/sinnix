@@ -143,7 +143,7 @@ let
       # keeps bursts below the rate that stalls the desktop.
       exec systemd-run --user --scope --quiet --collect --unit="app-chatgpt-$$" \
         --property=IOWriteBandwidthMax="$state 30M" \
-        "$state/current/ChatGPT" --ozone-platform=wayland --user-data-dir="$state/profile" "''${proxy_args[@]}" "$@"
+        "$state/current/ChatGPT" --ozone-platform=wayland --disable-features=PersistentHistograms --user-data-dir="$state/profile" "''${proxy_args[@]}" "$@"
     '';
   };
   desktop = runCommand "chatgpt-desktop" { } ''
