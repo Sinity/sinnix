@@ -195,6 +195,9 @@
       # under earlier roots (sinex-v3 and before) are left as they were;
       # changing the value moves every producer to new, empty streams.
       nats.subjectRoot = "sinex-v4";
+      # Downloaded Ollama blobs retain file facts and locations; authored
+      # control vectors and other library files retain their complete bytes.
+      sources."library.scan".options.ollama_blobs_metadata = [ "model/ollama/blobs" ];
       # Reading of terminal recordings is paused: the parser keeps inline-image
       # data in its stored text and the text is indexed for search. The
       # recordings stay on disk, and reading resumes from its saved positions
