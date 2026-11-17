@@ -442,6 +442,9 @@ mkFeatureModule {
                   extraPrelude = hermesWrapperExtraPrelude name profile;
                 })
               ) agentProfiles.hermesProfiles)
+              // (lib.mapAttrs' (
+                name: launcher: lib.nameValuePair ".local/bin/pi-${name}" launcher
+              ) pi.presetLaunchers)
               // {
 
                 ".local/bin/pi" = pi.wrapper;

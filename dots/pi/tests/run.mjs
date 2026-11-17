@@ -17,6 +17,9 @@ import compare, { actionForKey, sideBySide } from "../extensions/compare.ts";
 import guard, { checkCommand } from "../extensions/guard.ts";
 import planBilling, { chargedToUsageCredits } from "../extensions/plan-billing.ts";
 import presets, { loadPresets } from "../extensions/presets.ts";
+import loom, { parseLoomRequest, loomModels, collectLoomCandidates, insertLoomBranches } from "../extensions/loom.ts";
+import { chooseLoomBranch } from "../lib/loom-picker.ts";
+import { SessionManager, initTheme } from "@earendil-works/pi-coding-agent";
 import { describeItem, fileDisplay } from "../lib/item-display.ts";
 import { askChoice } from "../lib/choice.ts";
 import { RankEngine, Sitting } from "../lib/rank.ts";
@@ -403,10 +406,193 @@ test("inquiry, exploration and learning are separate supported modes", async () 
 	assert.ok(available.get("learn").tools.includes("bash"));
 });
 
+
+const planModel = (id) => ({ provider: "openai", id, name: id, reasoning: true });
+const sampleMessage = (model, text, attrs = {}) => ({
+  role: "assistant",
+  provider: "openai",
+  api: "openai-responses",
+  model: model.id,
+  responseId: "native-" + model.id,
+  content: [{ type: "text", text }],
+  usage: {
+    input: 12, output: 18, cacheRead: 0, cacheWrite: 0, totalTokens: 30,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  },
+  stopReason: "stop",
+  timestamp: Date.now(),
+  ...attrs,
+});
+
+test("Loom parses bounded fan-out and explicit model sets", () => {
+  assert.deepEqual(parseLoomRequest("What if?"), { kind: "single", count: 3, prompt: "What if?" });
+  assert.deepEqual(parseLoomRequest("2 same context"), { kind: "single", count: 2, prompt: "same context" });
+  assert.deepEqual(parseLoomRequest("--models a,b explore"), { kind: "models", specs: ["a","b"], prompt: "explore" });
+  for (const s of ["", "1 wrong", "7 too many", "--models", "--models a,b,c,d,e,f,g explore"]) {
+    assert.throws(() => parseLoomRequest(s));
+  }
+});
+
+test("Loom accepts only configured ChatGPT OAuth models, never metered fallback", () => {
+  const a = planModel("gpt-a"), b = planModel("gpt-b"), other = { ...planModel("claude"), provider:"claude-code" };
+  const ctx = {
+    model: a,
+    modelRegistry: { getAvailable: () => [a,b,other], isUsingOAuth: m => m.provider === "openai" },
+  };
+  assert.deepEqual(loomModels(ctx, parseLoomRequest("3 explore")), [a,a,a]);
+  assert.deepEqual(loomModels(ctx, parseLoomRequest("--models gpt-a,gpt-b explore")), [a,b]);
+  assert.throws(() => loomModels(ctx, parseLoomRequest("--models claude,gpt-b explore")), /matched 0/);
+  assert.throws(() => loomModels(ctx, parseLoomRequest("--models gpt-a,gpt-a explore")), /at least two/);
+  assert.throws(() => loomModels({ ...ctx, model: other }, parseLoomRequest("3 explore")), /OAuth/);
+});
+
+test("Loom samples sequentially from a compaction-aware context without tool use or keys", async () => {
+  const a = planModel("gpt-a");
+  let calls = 0, contextSeen;
+  const sm = {
+    buildSessionContext: () => ({ messages: [{ role:"user", content: [{ type:"text", text:"compacted context" }], timestamp:1 }] }),
+    getBranch: () => { throw new Error("Raw branch would omit compaction"); },
+  };
+  const ctx = {
+    getSystemPrompt: () => "resolved system",
+    sessionManager: sm,
+    modelRegistry: {
+      streamSimple: (_model, context, options) => {
+        calls++; contextSeen = context;
+        assert.equal(options.maxTokens, 1200);
+        assert.equal(options.toolChoice, "none");
+        assert.equal(options.reasoning, "medium");
+        assert.equal(options.maxRetries, 0);
+        return { result: async () => sampleMessage(a, "Alternative " + calls) };
+      },
+    },
+  };
+  const { pi } = fakePi();
+  const result = await collectLoomCandidates(
+    ctx, pi, parseLoomRequest("3 explore"), [a,a,a], new AbortController().signal);
+  assert.equal(result.failures.length, 0);
+  assert.deepEqual(result.candidates.map(x => x.text), ["Alternative 1","Alternative 2","Alternative 3"]);
+  assert.equal(calls, 3);
+  assert.equal(contextSeen.systemPrompt, "resolved system");
+  assert.equal(contextSeen.tools.length, 0);
+  assert.equal(contextSeen.messages.at(-1).content[0].text, "explore");
+});
+
+test("Loom aborts on failure or usage-credit fallback and preserves current history", async () => {
+  const a = planModel("gpt-a");
+  const { pi } = fakePi();
+  const sm = SessionManager.inMemory("/fixture");
+  sm.appendMessage({ role:"user", content:"seed", timestamp:1 });
+  let calls = 0;
+  const ctx = {
+    getSystemPrompt: () => "resolved",
+    sessionManager: sm,
+    modelRegistry: { streamSimple: () => ({
+      result: async () => {
+        calls++;
+        if (calls===2) return sampleMessage(a, "unexpected", { diagnostics:[{ type:"claude-code.rate-limit", details:{ rateLimitType:"overage" } }] });
+        return sampleMessage(a, "First");
+      },
+    }) },
+  };
+  const before = sm.getEntries().length;
+  const data = await collectLoomCandidates(ctx, pi, parseLoomRequest("3 propose"), [a,a,a], new AbortController().signal);
+  assert.equal(data.candidates.length, 1);
+  assert.equal(data.failures.length, 1);
+  assert.equal(calls, 2);
+  assert.equal(sm.getEntries().length, before);
+});
+
+test("Loom inserts native user/assistant pairs with real metadata and alternative leaves", () => {
+  const a = planModel("gpt-a"), b = planModel("gpt-b");
+  const sm = SessionManager.inMemory("/fixture");
+  sm.appendMessage({ role:"user", content:"hello", timestamp:1 });
+  const branchPoint = sm.appendMessage(sampleMessage(a,"parent"));
+  const before = sm.getEntries().length;
+  const candidates = [
+    { model:a, text:"left", response:sampleMessage(a,"left") },
+    { model:b, text:"right", response:sampleMessage(b,"right", {responseId:"right-native"}) },
+    { model:a, text:"third", response:sampleMessage(a,"third") },
+  ];
+  assert.throws(() => insertLoomBranches(sm, "Fork", candidates, 3), /Invalid selection/);
+  assert.equal(sm.getEntries().length, before);
+  const saved = insertLoomBranches(sm, "Fork", candidates, 1);
+  assert.equal(sm.getEntries().length, before + 6);
+  assert.equal(saved.branchPoint, branchPoint);
+  assert.equal(sm.getLeafId(), saved.selectedLeaf);
+  assert.equal(sm.buildSessionContext().messages.at(-1).responseId, "right-native");
+  for (let i=0;i<3;i++){
+    const chain = sm.getBranch(saved.leaves[i]);
+    assert.equal(chain.at(-1).message.content.find(x=>x.type==="text").text, candidates[i].text);
+    assert.equal(chain.at(-1).message.provider, "openai");
+    assert.equal(chain.at(-2).message.content[0].text, "Fork");
+    assert.equal(chain.at(-2).parentId, branchPoint);
+  }
+  sm.branch(saved.leaves[0]);
+  assert.equal(sm.buildSessionContext().messages.at(-1).content[0].text, "left");
+});
+
+test("RPC Loom picker includes full candidate texts and does not invent a selection", async () => {
+  const a = planModel("gpt-a");
+  const candidates = [
+    { model:a, text:"This whole alternative must be visible, including details.", response:sampleMessage(a,"A") },
+    { model:a, text:"Another complete alternative that differs in framing.", response:sampleMessage(a,"B") },
+  ];
+  const { ctx, seen } = fakeContext({}, [(options)=>options[1]]);
+  const choice = await chooseLoomBranch(ctx, "explore", candidates);
+  assert.equal(choice, 1);
+  assert.ok(seen.selects[0].options[0].includes(candidates[0].text));
+  assert.ok(seen.selects[0].options[1].includes(candidates[1].text));
+  const dismissed = await chooseLoomBranch(fakeContext({}, [undefined]).ctx, "explore", candidates);
+  assert.equal(dismissed, null);
+});
+
+
+test("TUI Loom picker displays both alternatives, navigates and accepts a choice", async () => {
+  initTheme("dark");
+  const m = planModel("gpt-a");
+  const candidates = [
+    { model:m, text:"This is **branch one** with enough words to render.", response:sampleMessage(m,"one") },
+    { model:m, text:"This is **branch two** with a distinct answer.", response:sampleMessage(m,"two") },
+  ];
+  let before="", after="", refresh=0;
+  const ctx = {
+    mode:"tui",
+    ui:{
+      custom: async (factory) => new Promise(resolve=>{
+        const tui={ terminal:{ rows:24, columns:70 }, requestRender:()=>{refresh++;} };
+        const theme={ fg:(_token,value)=>value, bold:value=>value };
+        const component=factory(tui,theme,{},resolve);
+        before=component.render(70).join(" ");
+        component.handleInput("l");
+        after=component.render(70).join(" ");
+        component.handleInput("\r");
+      }),
+    },
+  };
+  const selected=await chooseLoomBranch(ctx,"Compare these approaches",candidates);
+  assert.equal(selected,1);
+  assert.match(before,/branch one/);
+  assert.match(after,/branch two/);
+  assert.equal(refresh,1);
+});
+
+test("Loom command is installed in Pi and rejects noninteractive sessions", async () => {
+  const { pi, state } = fakePi();
+  loom(pi);
+  const command = state.commands.get("loom");
+  assert.ok(command && command.description.includes("tree"));
+  const { ctx, seen } = fakeContext(state, [], { hasUI:false, mode:"print" });
+  await command.handler("2 explore", ctx);
+  assert.match(seen.notes[0].message, /TUI/);
+});
+
+
 if (process.argv.includes("--schemas")) {
 	const { pi, state } = fakePi();
 	ask(pi);
 	compare(pi);
+	loom(pi);
 	const tools = [...state.tools.values()].map(({ name, description, parameters }) => ({
 		name,
 		description,
@@ -417,7 +603,7 @@ if (process.argv.includes("--schemas")) {
 		description,
 		tools: names,
 	}));
-	console.log(JSON.stringify({ tools, presets: listed }, null, 2));
+	console.log(JSON.stringify({ tools, presets: listed, commands: [...state.commands.keys()] }, null, 2));
 } else {
 	let failed = 0;
 	for (const [name, body] of tests) {

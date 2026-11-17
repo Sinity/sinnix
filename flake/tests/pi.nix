@@ -38,7 +38,8 @@
             node tests/run.mjs --schemas > "$TMPDIR/schemas.json"
             ${pkgs.jq}/bin/jq -e '
               ([.tools[].name] == ["ask_operator", "rank_options"]) and
-              ([.presets[].name] == ["explore", "inquire", "learn", "questions"])
+              ([.presets[].name] == ["explore", "inquire", "learn", "questions"]) and
+              (.commands | index("loom") != null)
             ' "$TMPDIR/schemas.json" >/dev/null
             test "$(${piPackage}/bin/pi --version)" = 1.5.2
             touch "$out"

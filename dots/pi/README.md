@@ -10,6 +10,7 @@ in pi's settings). Pi runs the TypeScript directly, so an edit is live after
 | `extensions/ask.ts`          | `ask_operator`: the model asks one question in a fixed shape and gets the answer back as data.                   |
 | `extensions/compare.ts`      | `/compare <domain>` and `rank_options`: pairwise comparison over `sinnix-rank`.                                  |
 | `extensions/presets.ts`      | `--preset <name>` and `/preset`: named modes read from `presets/`.                                               |
+| `extensions/loom.ts`         | `/loom` creates and compares real Pi session-tree branches from configured ChatGPT OAuth models (interactive only).                  |
 | `extensions/plan-billing.ts` | Stops a Claude Code turn that was charged to usage credits instead of the plan.                                  |
 
 ## Front ends
@@ -74,3 +75,29 @@ sandbox. Project AGENTS.md still loads. Sessions persist in Pi's normal store;
 keep private conversations out of public repositories and published reports.
 The local package is live: a new session or `/reload` picks up source changes;
 no npm install, system activation or provider request is needed for this edit.
+
+## Loom-style branching
+
+Use /loom followed by a prompt for three sampled answers from the same state,
+or /loom 2 through /loom 6 to choose a bounded count. The /loom --models
+form compares up to three available ChatGPT OAuth models; give comma-separated
+unambiguous selectors to choose models explicitly. Use /tree to revisit the
+branches. A picker dismissal writes nothing, while choosing retains all
+alternatives in Pi's own append-only session tree. First send a regular turn.
+
+This is a local port of the Loom concept described by Janus (@repligate),
+and the MIT-licensed sigilmakes/pi-loom reference (upstream ca741273).
+Its older @mariozechner/pi runtime dependency cannot be installed directly
+on Sinnix's @earendil-works/pi 1.5.2. The local port uses the existing
+ModelRegistry and real response metadata, preserves compaction-aware context,
+does not create another session database, limits fan-out, and forbids tool
+calls. Claude Code and metered API routes are excluded, because the direct
+multi-completion path would bypass the installed per-turn billing guard.
+Only the ChatGPT OAuth subscription provider is used.
+
+Pi's current extension API does not support silent insertion of native
+user/assistant pairs, so one private SessionManager method pair is required;
+its behavior is tested against the pinned class. This is an audited
+compatibility seam, not a claim of stable public API. The command is
+interactive; a prompt passed through noninteractive pi cannot present a
+branch picker.

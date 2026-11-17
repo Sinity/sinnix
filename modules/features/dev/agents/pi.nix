@@ -31,6 +31,22 @@
 let
   jsonFormat = pkgs.formats.json { };
 
+  # The files in dots/pi/presets are the sole launcher-name registry.
+  presetNames = map (name: lib.removeSuffix ".json" name) (
+    lib.filter (name: lib.hasSuffix ".json" name) (
+      lib.attrNames (builtins.readDir ../../../../dots/pi/presets)
+    )
+  );
+  presetLaunchers = lib.genAttrs presetNames (name: {
+    text = ''
+      #!/usr/bin/env bash
+      set -euo pipefail
+      exec "$HOME/.local/bin/pi" --preset ${lib.escapeShellArg name} "$@"
+    '';
+    executable = true;
+    force = true;
+  });
+
   # The settings Sinnix declares. Pi writes its own keys into the same file
   # (a device id for the ChatGPT sign-in, what it last showed), so activation
   # merges these over the file instead of replacing it: declared keys win,
@@ -158,6 +174,7 @@ in
     mcpConfigFile
     unsetProviderKeys
     wrapper
+    presetLaunchers
     activation
     ;
 }

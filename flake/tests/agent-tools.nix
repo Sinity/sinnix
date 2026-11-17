@@ -59,11 +59,17 @@ in
       # Derived from the profile registry rather than hand-listed: every declared
       # profile must produce an installed wrapper, and adding or retiring a profile
       # must not require editing this file in several places.
+      piPresetNames = map (name: lib.removeSuffix ".json" name) (
+        lib.filter (name: lib.hasSuffix ".json" name) (
+          lib.attrNames (builtins.readDir ../../dots/pi/presets)
+        )
+      );
       laneWrapperFiles = map (binName: ".local/bin/${binName}") (
         (map (profile: profile.binName) (lib.attrValues agentProfiles.claudeProfiles))
         ++ (map (profile: profile.binName) (lib.attrValues agentProfiles.codexProfiles))
         ++ (map (name: "hermes-${name}") (lib.attrNames agentProfiles.hermesProfiles))
         ++ [ "pi" ]
+        ++ (map (name: "pi-${name}") piPresetNames)
       );
       # Each profile's wrapper must honour the registry entry it was rendered
       # from: the MCP config file its profile selects and the profile marker
