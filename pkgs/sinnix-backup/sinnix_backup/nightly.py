@@ -23,8 +23,8 @@ from .drain import CHECK_FAILURES
 SNAPSHOT_UNIT = "btrbk.service"
 
 
-def _now() -> int:
-    return int(time.time())
+def _now() -> float:
+    return time.time()
 
 
 def _print(line: str, *, error: bool = False) -> None:
@@ -52,7 +52,7 @@ def _drain_has_work(config: BackupConfig) -> bool:
     return False
 
 
-def _sinex_backup_fresh(path: Path | None, now: int) -> bool:
+def _sinex_backup_fresh(path: Path | None, now: float) -> bool:
     """Reuse Sinex's completed pair on boot catch-up, for the daily window."""
     if path is None:
         return False
@@ -113,7 +113,7 @@ def run_nightly(config: BackupConfig) -> int:
                         acquisition_marker,
                         markers.marker_text(
                             {
-                                "epoch": _now(),
+                                "epoch": int(_now()),
                                 "policy_sha256": nightly.acquisition_policy,
                             }
                         ),

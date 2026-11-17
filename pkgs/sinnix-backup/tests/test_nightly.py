@@ -199,3 +199,24 @@ def test_sinex_boot_retry_uses_completed_pair(
     assert (["start", "sinex-backup.service"] not in calls) == (condition == "fresh")
     # No success marker replaces the native paired-archive receipt.
     assert not (fixture.config.state_directory / "sinex-backup.last-success").exists()
+
+
+@pytest.mark.parametrize(
+    "completed, fresh", [(1700000000.5, True), (1700000000.9, False)]
+)
+def test_native_completion_uses_the_precise_clock(tmp_path, monkeypatch, completed, fresh):
+    receipt = tmp_path / "complete.json"
+    hold = "00000000-0000-0000-0000-000000000001"
+    receipt.write_text(
+        json.dumps(
+            {
+                "hold": hold,
+                "producers_complete": True,
+                "main": {"name": f"sinex-core-{hold}", "id": "1" * 64},
+                "keys": {"name": f"sinex-core-{hold}", "id": "2" * 64},
+            }
+        )
+    )
+    os.utime(receipt, (completed, completed))
+    monkeypatch.setattr(nightly.time, "time", lambda: 1700000000.75)
+    assert nightly._sinex_backup_fresh(receipt, nightly._now()) is fresh
