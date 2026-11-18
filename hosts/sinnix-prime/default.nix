@@ -198,7 +198,10 @@
       # Downloaded Ollama blobs retain file facts and locations; authored
       # control vectors and other library files retain their complete bytes.
       sources."library.scan".options.ollama_blobs_metadata = [ "model/ollama/blobs" ];
-      sources."library.scan".options.metadata_only_roots = [ "game/steam/steamapps/common" ];
+      sources."library.scan".options.metadata_only_roots = [
+        "game/steam/steamapps/common"
+        "model/gguf"
+      ];
       exclude."library.scan".reason =
         "Paused while Realm is near full: downloaded models and installed game files need a location-only policy before scanning resumes.";
       # Reading of terminal recordings is paused: the parser keeps inline-image

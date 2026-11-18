@@ -370,6 +370,10 @@ Evaluation asserts that the exact scratch roots in
 `modules/lib/storage/scratch-roots.nix` are among these, and that no
 exclusion covers a Beads task store, the ranking domains or
 `library/model/control-vector`, or any of their parents.
+The boot migration puts downloaded GGUF weights in a nested subvolume.
+New Realm snapshots then stop holding their blocks after model removal.
+Existing snapshots retain their original contents until the backup drain
+retires them.
 
 `/persist` leaves out, marked `mayBeMissing`: user caches (`~/.cache`, Hugging
 Face, Spotify) and Borg's cache in `/root/.cache`; package registries and
