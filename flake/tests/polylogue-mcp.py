@@ -42,20 +42,18 @@ def main():
         send(process, {"jsonrpc": "2.0", "method": "notifications/initialized"})
         send(process, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         tools = {tool["name"]: tool for tool in response(process, 2)["tools"]}
-        assert {
+        assert set(tools) == {
             "polylogue_read",
-            "polylogue_context",
-            "polylogue_note",
-            "polylogue_chat",
+            "polylogue_write",
             "polylogue_act",
-        } <= tools.keys()
+        }, tools.keys()
         read = tools["polylogue_read"]["inputSchema"]
-        assert {"query", "read", "status"} <= set(read["properties"]["operation"]["enum"])
+        operations = read["properties"]["operation"]
+        assert {"rows", "status"} <= set(operations["enum"]), operations
         arguments = read["properties"]["arguments"]["properties"]
-        assert {"query", "session"} <= arguments.keys()
-        assert {"operation", "arguments", "request_id"} <= set(read["required"])
-        context = tools["polylogue_context"]["inputSchema"]["properties"]
-        assert {"brief", "recall", "takeover"} <= set(context["operation"]["enum"])
+        assert {"selection", "steps"} <= arguments.keys(), arguments.keys()
+        assert set(read["required"]) == {"arguments"}, read["required"]
+        assert "request_id" in read["properties"], read["properties"].keys()
         process.stdin.close()
         assert process.wait(timeout=30) == 0
     finally:

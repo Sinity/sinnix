@@ -2,7 +2,7 @@
 # SessionStart hook for Claude Code and Codex: one context block, most useful
 # first.
 #
-#   1. Polylogue's session-start brief (`polylogue hook SessionStart`, which
+#   1. Polylogue's session-start brief (`polylogue internal hook SessionStart`, which
 #      also records the event in Polylogue's hook spool). After compaction it
 #      is Polylogue's compaction recipe.
 #   2. What on the machine needs attention (`sinnix status --attention`):
@@ -39,7 +39,7 @@ work=$(mktemp -d) || exit 0
 trap 'rm -rf "$work"' EXIT
 
 if command -v polylogue >/dev/null 2>&1; then
-  printf '%s' "$payload" | polylogue hook SessionStart --harness "$harness" >"$work/brief" 2>/dev/null &
+  printf '%s' "$payload" | polylogue internal hook SessionStart --harness "$harness" >"$work/brief" 2>/dev/null &
 fi
 
 if [ "$source" = startup ] || [ "$source" = clear ]; then

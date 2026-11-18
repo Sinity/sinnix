@@ -187,7 +187,7 @@ mkServiceModule {
           # Completion asks the daemon for a query's fields, values seen and
           # recent session IDs while one is typed.
           programs.zsh.initContent = lib.mkAfter ''
-            source <(${cli}/bin/polylogue completions zsh --program polylogue)
+            source <(${cli}/bin/polylogue install zsh --dry-run --program polylogue)
           '';
 
           # Without this file the archive is standalone.

@@ -52,11 +52,13 @@ in
         nativeBuildInputs = [ pkgs.gnugrep ];
         script = ''
           polylogue --help > help
-          grep -q 'Usage: polylogue' help
-          polylogue read --help > read-help
-          grep -q 'Read one session' read-help
+          grep -q '^polylogue SELECTION' help
+          polylogue help read > read-help
+          grep -q '^read(view?' read-help
           polylogue mcp --help > mcp-help
           grep -q 'MCP' mcp-help
+          polylogue install zsh --dry-run --program polylogue > completion
+          grep -q '^#compdef polylogue' completion
         '';
       };
       # Provably fails when: the rendered ssh config stops isolating the

@@ -750,7 +750,7 @@ in
               ([.hooks.SessionStart[].hooks[].command]
                 | any(contains("sessionstart-context.sh"))) and
               ([.hooks.Stop[].hooks[].command]
-                | any(. == "polylogue hook Stop"))
+                | any(. == "polylogue internal hook Stop"))
             ' ${
               agentToolsRuntimeEvaluated.config.environment.etc."claude-code/managed-settings.json".source
             } >/dev/null
@@ -791,7 +791,7 @@ in
 
             jq -e '
               [.hooks.Stop[].hooks[].command]
-              | any(. == "polylogue hook Stop --harness codex")
+              | any(. == "polylogue internal hook Stop --harness codex")
             ' ${agentToolsRuntimeEvaluated.config.environment.etc."codex/hooks.json".source} >/dev/null
             jq -e '
               [.hooks.SessionStart[].hooks[].command] | any(contains("sessionstart-context.sh"))

@@ -67,10 +67,12 @@
 
     # The live application, CLI and MCP server. It keeps its
     # own nixpkgs: its shared crates need a newer rustc than Sinnix's.
-    # flake.lock alone holds the deployed revision; moving it is a deploy,
-    # done with `update polylogue-rewrite`, which first fetches the package
-    # Polylogue's CI published to sinity.cachix.org.
-    polylogue-rewrite.url = "github:Sinity/polylogue";
+    # The selected source revision and its lock move together with
+    # `update polylogue-rewrite`, which first fetches the package
+    # Polylogue's CI published to sinity.cachix.org. Resolve the update wrapper
+    # in the old-pin devshell before editing an exact source revision: entering
+    # a new shell afterwards can rewrite the lock before the cache-first update.
+    polylogue-rewrite.url = "github:Sinity/polylogue/a548c4e667ac2dfe4bf601fedfc9b6fb6299e26d";
 
     # Private repo — fetch via HTTPS through the local gh/git credential helper.
     yt-polisher = {
