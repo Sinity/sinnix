@@ -81,6 +81,40 @@ def borg_output(*args: str) -> str:
     ).stdout
 
 
+def test_retire_verified_snapshot_before_older_backlog(backup_root, monkeypatch):
+    config_path, config = write_fixture_config(backup_root)
+    host = FakeHost(backup_root, config.lock_path)
+    host.apply(monkeypatch)
+    monkeypatch.setenv("TMPDIR", str(config.scratch_directory))
+    pressure = backup_root / "io-pressure"
+    pressure.write_text(SETTLED)
+    monkeypatch.setattr(drain, "IO_PRESSURE", pressure)
+    source = config.source("realm")
+    repo = config.repository("realm").path
+    repo.parent.mkdir(parents=True, exist_ok=True)
+    borg_output("init", "--encryption=none", str(repo))
+    source.snapshot_directory.mkdir(parents=True)
+    dates = ("20260401", "20260402", "20260403", "20260404")
+    cuts = [f"realm.{date}T000000+0000" for date in dates]
+    previous = host.snapshot(source.snapshot_directory, cuts[0], {"file": "previous"})
+    assert cli.main(["drain", "realm", "--config", str(config_path)]) == 0
+    for name in cuts[1:]:
+        host.snapshot(source.snapshot_directory, name, {"file": name})
+    assert cli.main(["drain", "realm", "--config", str(config_path)]) == 0
+    commands = host.commands()
+    newest = next(
+        i for i, cmd in enumerate(commands)
+        if cmd[:2] == ["borg", "create"] and "::realm-" + cuts[-1] in cmd
+    )
+    older = next(
+        i for i, cmd in enumerate(commands)
+        if cmd[:2] == ["borg", "create"] and "::realm-" + cuts[1] in cmd
+    )
+    retired = commands.index(["btrfs", "subvolume", "delete", str(previous)])
+    assert newest < retired < older
+    assert (source.snapshot_directory / cuts[-1]).exists()
+
+
 def test_backlog_restart_collision_and_exclusions(backup_root, monkeypatch, capfd):
     root = backup_root
     data = fixture_config_data(root)

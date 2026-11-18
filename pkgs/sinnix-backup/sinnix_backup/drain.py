@@ -161,42 +161,51 @@ def drain(config: BackupConfig, label: str) -> int:
 
             # The lock is taken per snapshot, so maintenance and checks queued
             # behind it run between snapshots and between deletions.
-            for snapshot in queue:
+            for index, snapshot in enumerate(queue):
                 lock.wait()
                 archive_snapshot(config, source, snapshot, lock)
                 lock.release()
 
-            # Every acknowledged snapshot except the newest is deleted; the
-            # newest stays for the independent audit.
-            if latest.is_file():
-                lock.wait()
-                prune_plan = snapshots.verified_prune_plan(
-                    *_queue_arguments(config, source)
-                )
-                lock.release()
-                for row in prune_plan:
-                    lock.wait()
-                    retired = retire_snapshot(config, source, row, lock)
-                    lock.release()
-                    if not retired:
-                        continue
-                    # Cleaner completion and pressure settling do not use Borg,
-                    # so they run without the lock before the next deletion.
-                    subprocess.run(
-                        [
-                            "btrfs",
-                            "subvolume",
-                            "sync",
-                            str(source.snapshot_directory),
-                            str(row[3]),
-                        ],
-                        check=True,
-                    )
-                    wait_for_io_settle()
+                # The newest pending cut goes first. Release earlier verified
+                # cuts before the rest of a potentially long backlog.
+                if index == 0 and len(queue) > 1:
+                    retire_acknowledged_snapshots(config, source, latest, lock)
+
+            retire_acknowledged_snapshots(config, source, latest, lock)
         finally:
             _unmount(bind_path)
             lock.release()
     return 0
+
+
+def retire_acknowledged_snapshots(
+    config: BackupConfig, source: SnapshotSource, latest: Path, lock: BorgLock
+) -> None:
+    """Release verified cuts while retaining the newest for independent audit."""
+    if not latest.is_file():
+        return
+    lock.wait()
+    prune_plan = snapshots.verified_prune_plan(*_queue_arguments(config, source))
+    lock.release()
+    for row in prune_plan:
+        lock.wait()
+        retired = retire_snapshot(config, source, row, lock)
+        lock.release()
+        if not retired:
+            continue
+        # Cleaner completion and pressure settling do not use Borg,
+        # so they run without the lock before the next deletion.
+        subprocess.run(
+            [
+                "btrfs",
+                "subvolume",
+                "sync",
+                str(source.snapshot_directory),
+                str(row[3]),
+            ],
+            check=True,
+        )
+        wait_for_io_settle()
 
 
 def plan(config: BackupConfig, label: str) -> dict[str, Any]:

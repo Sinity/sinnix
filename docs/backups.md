@@ -188,7 +188,10 @@ cut is dropped, and each drain still processes its whole finite queue.
 The Realm, Persist and genome drains take the global Borg lock once per
 snapshot: for one cut's create, verification and acknowledgement, and again
 for each snapshot deletion, which first rechecks that snapshot's archive and
-identity because maintenance may have changed archives in between. Other Borg
+identity because maintenance may have changed archives in between. After the
+newest queued cut is verified, the drain can release older acknowledged cuts
+before archiving the rest of the backlog. The newest verified cut stays for
+the independent audit. Other Borg
 jobs waiting for the lock run between those steps, including while the drain
 waits for the Btrfs cleaner and for I/O pressure to settle after a deletion.
 Markers are written to a temporary file, fsynced, renamed into place, and the
