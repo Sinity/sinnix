@@ -11,6 +11,7 @@ import copy
 import fcntl
 import json
 import os
+import select
 import shutil
 import subprocess
 import sys
@@ -97,7 +98,33 @@ def test_retire_verified_snapshot_before_older_backlog(backup_root, monkeypatch)
     dates = ("20260401", "20260402", "20260403", "20260404")
     cuts = [f"realm.{date}T000000+0000" for date in dates]
     previous = host.snapshot(source.snapshot_directory, cuts[0], {"file": "previous"})
-    assert cli.main(["drain", "realm", "--config", str(config_path)]) == 0
+    package_parent = str(Path(sinnix_backup.__file__).resolve().parent.parent)
+    monkeypatch.setenv(
+        "PYTHONPATH",
+        os.pathsep.join(filter(None, [package_parent, os.environ.get("PYTHONPATH")])),
+    )
+    command = [
+        sys.executable, "-c", CHILD_DRAIN, str(pressure),
+        "drain", "realm", "--config", str(config_path),
+    ]
+    lock = borg.BorgLock(config.lock_path)
+    with lock:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, text=True)
+        try:
+            assert process.stdout is not None
+            ready, _, _ = select.select([process.stdout], [], [], 15)
+            assert ready
+            assert "waiting to drain realm" in process.stdout.readline()
+            assert process.poll() is None
+        finally:
+            lock.release()
+            try:
+                output, _ = process.communicate(timeout=60)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate()
+                raise
+    assert process.returncode == 0, output
     for name in cuts[1:]:
         host.snapshot(source.snapshot_directory, name, {"file": name})
     assert cli.main(["drain", "realm", "--config", str(config_path)]) == 0

@@ -134,10 +134,10 @@ def drain(config: BackupConfig, label: str) -> int:
     lock = BorgLock(config.lock_path)
     if not lock.try_take():
         print(
-            f"Another Borg operation is active; skipping {label} Borg drain and keeping work queued",
+            f"Another Borg operation is active; waiting to drain {label}",
             flush=True,
         )
-        return 0
+        lock.wait()
     bind_path = source.bind_path
     with borg.exported(env):
         try:
