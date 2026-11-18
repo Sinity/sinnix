@@ -1547,17 +1547,17 @@
       },
       "locked": {
         "exportIgnore": true,
-        "lastModified": 1794977235,
-        "narHash": "sha256-OlcHE+LCmklVn0poHkzXC0fVoM7rA+2SMlzGJJpX7y4=",
+        "lastModified": 1794980927,
+        "narHash": "sha256-1vPCcIVARfVdpZzb6cxzWE6Yp0GEha66j0NganjdacM=",
         "ref": "refs/heads/master",
-        "rev": "49ad29f3f16432a89fb6f81cae0da860370dd927",
+        "rev": "52b19891e0112de55435a1540ced529ef8cf2fa4",
         "shallow": true,
         "type": "git",
         "url": "https://github.com/Sinity/sinex"
       },
       "original": {
         "exportIgnore": true,
-        "rev": "49ad29f3f16432a89fb6f81cae0da860370dd927",
+        "rev": "52b19891e0112de55435a1540ced529ef8cf2fa4",
         "shallow": true,
         "type": "git",
         "url": "https://github.com/Sinity/sinex"
