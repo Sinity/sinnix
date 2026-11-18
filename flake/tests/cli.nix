@@ -257,7 +257,7 @@ in
               assert sys.version_info[:2] == (3, 14)
               assert "site-packages" in lynchpin.__file__
               assert Path(shutil.which("polylogue")).resolve() == Path(os.environ["EXPECTED_POLYLOGUE"]).resolve()
-              subprocess.run(["polylogue", "read", "--help"], check=True, stdout=subprocess.DEVNULL)
+              subprocess.run(["polylogue", "help", "read"], check=True, stdout=subprocess.DEVNULL)
               assert not any(name in os.environ for name in (
                   "PYTHONPATH", "_PYTHON_SYSCONFIGDATA_NAME", "_PYTHON_HOST_PLATFORM"
               ))
