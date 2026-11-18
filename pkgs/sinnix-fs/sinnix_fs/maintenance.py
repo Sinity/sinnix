@@ -264,14 +264,37 @@ def account(roots: list[Path], *, run=subprocess.run) -> dict:
     for root in roots:
         if not root.is_absolute():
             raise ValueError("accounting roots must be absolute")
-        resolved = root.resolve(strict=True)
-        info = resolved.stat()
+        try:
+            resolved = root.resolve(strict=True)
+            info = resolved.stat()
+            device, inode = info.st_dev, info.st_ino
+        except PermissionError:
+            # The native accounting tools already use read-only root access.
+            # Resolve protected paths with the same access.
+            canonical = run(
+                ["sudo", "-n", "realpath", "-ez", "--", str(root)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if canonical.returncode != 0 or not canonical.stdout.endswith("\0"):
+                raise ValueError(f"cannot resolve accounting root: {root}")
+            resolved = Path(canonical.stdout.removesuffix("\0"))
+            metadata = run(
+                ["sudo", "-n", "stat", "-L", "-c", "%d %i", "--", str(resolved)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if metadata.returncode != 0:
+                raise ValueError(f"cannot inspect accounting root: {root}")
+            device, inode = map(int, metadata.stdout.split())
         observed.append(
             {
                 "requested": str(root),
                 "path": str(resolved),
-                "device": info.st_dev,
-                "inode": info.st_ino,
+                "device": device,
+                "inode": inode,
             }
         )
     reports = []

@@ -114,6 +114,39 @@ def test_accounting_refuses_missing_or_relative_roots_before_native_call(tmp_pat
         m.account([tmp_path / "absent"], run=native)
 
 
+def test_accounting_resolves_protected_roots_with_native_read_access(tmp_path, monkeypatch):
+    requested = tmp_path / "protected-link"
+    resolved = tmp_path / "protected" / "segment"
+    original_resolve = Path.resolve
+
+    def denied(self, strict=False):
+        if self == requested:
+            assert strict
+            raise PermissionError("protected directory")
+        return original_resolve(self, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", denied)
+    monkeypatch.setattr(m.shutil, "which", lambda name: "/synthetic/bin/" + name)
+    calls = []
+
+    def native(command, **kwargs):
+        calls.append(command)
+        if command[2] == "realpath":
+            return SimpleNamespace(returncode=0, stdout=str(resolved) + "\0")
+        if command[2] == "stat":
+            return SimpleNamespace(returncode=0, stdout="123 456\n")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    result = m.account([requested], run=native)
+    assert result["complete"]
+    assert result["roots"] == [
+        {"requested": str(requested), "path": str(resolved), "device": 123, "inode": 456}
+    ]
+    assert calls[0] == ["sudo", "-n", "realpath", "-ez", "--", str(requested)]
+    assert calls[1] == ["sudo", "-n", "stat", "-L", "-c", "%d %i", "--", str(resolved)]
+    assert all(command[-2:] == ["--", str(resolved)] for command in calls[2:])
+
+
 @pytest.mark.parametrize("floor", [5, 10])
 def test_exact_floor_admits_and_one_byte_below_defers(floor):
     for available, expected in [(floor, "admit"), (floor - 1, "defer")]:

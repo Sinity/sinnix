@@ -200,6 +200,7 @@ It invokes the packaged native `compsize` and `btrfs filesystem du` tools with
 noninteractive read-only root access, retains their complete output and exit
 statuses, and returns incomplete on either failure. Physical roots and native
 output distinguish requested addresses from current extent observations.
+Protected paths are resolved and inspected with the same read-only root access.
 `compsize` counts referenced extents once, including compression; those
 extents can also belong to files outside the selected set. Reported bytes
 therefore do not equal reclaimable bytes. Neither measurement is a backup
