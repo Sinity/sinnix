@@ -1106,6 +1106,7 @@ class CoverageFixture(unittest.TestCase):
         # reject the type outright, which made the realm lane unprovable over
         # a single netdata timer FIFO.
         os.mkfifo(self.source / "timer.fifo")
+        os.chmod(self.source / "timer.fifo", 0o644)
         self.archive()
         before = coverage.verify(self.source, "snapshot", [])
         # It is covered, not exempted: the socket exemption must not have
