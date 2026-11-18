@@ -625,10 +625,11 @@ in
         {
           assertions = [
             {
-              assertion = lib.all (path: builtins.elem path realmCoverage.noncanonical) (
-                import ./lib/storage/scratch-roots.nix
-              );
-              message = "Realm scratch subvolumes must name exact Borg-excluded regenerable roots.";
+              assertion = lib.all (
+                path:
+                lib.any (excluded: path == excluded || lib.hasPrefix "${excluded}/" path) realmCoverage.noncanonical
+              ) (import ./lib/storage/scratch-roots.nix);
+              message = "Realm scratch subvolumes must stay within named Borg-excluded roots.";
             }
             {
               assertion = lib.all (exclude: !realmExcludeMatchesProtectedPath exclude) realmExcludes;

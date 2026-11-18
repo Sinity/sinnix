@@ -62,8 +62,20 @@ assert not list(root.glob("*.subvol-new"))
 
 # Snapshot exclusion means an empty boundary, not the absence of the directory.
 (root / "retained").write_text("canonical")
+steamapps = root / "library/game/steam/steamapps"
+common = steamapps / "common"
+common.mkdir(parents=True)
+(common / "game").write_text("downloaded binary")
+compatdata = steamapps / "compatdata"
+compatdata.mkdir()
+(compatdata / "save").write_text("user data")
+migration.migrate(common)
+assert (common / "game").read_text() == "downloaded binary"
 run("btrfs", "subvolume", "snapshot", "-r", str(root), str(root / "cut"))
 assert not list((root / "cut" / "scratch").iterdir())
+cut_steamapps = root / "cut" / steamapps.relative_to(root)
+assert not list((cut_steamapps / "common").iterdir())
+assert (cut_steamapps / "compatdata/save").read_text() == "user data"
 assert (root / "cut" / "retained").read_text() == "canonical"
 
 # A mandatory reflink failure must never change the original or leave staging.

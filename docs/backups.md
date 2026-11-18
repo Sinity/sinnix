@@ -367,14 +367,14 @@ rather than the whole Steam tree.
   rebuilt from `archive.db`. The rest of `state/polylogue-live` comes from
   the atomic snapshot, which Polylogue accepts as a consistent backup.
 
-Evaluation asserts that the exact scratch roots in
-`modules/lib/storage/scratch-roots.nix` are among these, and that no
+Evaluation asserts that the scratch roots in
+`modules/lib/storage/scratch-roots.nix` stay within these exclusions, and that no
 exclusion covers a Beads task store, the ranking domains or
 `library/model/control-vector`, or any of their parents.
-The boot migration puts downloaded GGUF weights in a nested subvolume.
-New Realm snapshots then stop holding their blocks after model removal.
-Existing snapshots retain their original contents until the backup drain
-retires them.
+The boot migration puts downloaded GGUF weights and Steam's installed game
+files in nested subvolumes. New Realm snapshots then stop holding their
+blocks after removal. Steam's Proton data stays in the Realm snapshot.
+Existing snapshots retain their original contents until the backup drain retires them.
 
 `/persist` leaves out, marked `mayBeMissing`: user caches (`~/.cache`, Hugging
 Face, Spotify) and Borg's cache in `/root/.cache`; package registries and

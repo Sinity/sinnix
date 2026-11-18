@@ -31,7 +31,7 @@
           !lib.any (
             entry:
             !entry.assertion
-            && entry.message == "Realm scratch subvolumes must name exact Borg-excluded regenerable roots."
+            && entry.message == "Realm scratch subvolumes must stay within named Borg-excluded roots."
           ) host.assertions;
         assert service.unitConfig.DefaultDependencies == false;
         assert service.unitConfig.RefuseManualStart;
@@ -52,6 +52,9 @@
           "var-cache-sinex.mount"
         ];
         assert lib.hasInfix "--boot-only" service.serviceConfig.ExecStart;
+        assert lib.hasInfix "/realm/library/game/steam/steamapps/common" service.serviceConfig.ExecStart;
+        assert
+          !lib.hasInfix "/realm/library/game/steam/steamapps/compatdata" service.serviceConfig.ExecStart;
         vm.runInLinuxVM (
           pkgs.runCommand "realm-scratch-subvolumes-check"
             {
