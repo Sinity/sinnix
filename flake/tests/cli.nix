@@ -49,8 +49,17 @@ in
         name = "cli-polylogue-runtime-check";
         evaluated = evalTestSpec system cliPolylogueRuntimeSpec;
         homePackages = [ "polylogue" ];
-        nativeBuildInputs = [ pkgs.gnugrep ];
+        nativeBuildInputs = [
+          pkgs.gnugrep
+          pkgs.util-linux
+        ];
         script = ''
+          # The sandbox has no host identity; give the actual CLI a fixture.
+          mkdir etc
+          cp -r /etc/. etc/
+          echo 00000000000000000000000000000001 > etc/machine-id
+          unshare --user --map-root-user --mount sh -eu <<'CLI'
+          mount --bind "$PWD/etc" /etc
           polylogue --help > help
           grep -q '^polylogue SELECTION' help
           polylogue help read > read-help
@@ -59,6 +68,7 @@ in
           grep -q 'MCP' mcp-help
           polylogue install zsh --dry-run --program polylogue > completion
           grep -q '^#compdef polylogue' completion
+          CLI
         '';
       };
       # Provably fails when: the rendered ssh config stops isolating the
@@ -234,7 +244,10 @@ in
           in
           pkgs.runCommand "cli-lynchpin-python-runtime"
             {
-              nativeBuildInputs = [ cli ];
+              nativeBuildInputs = [
+                cli
+                pkgs.util-linux
+              ];
               EXPECTED_POLYLOGUE = "${cli}/bin/polylogue";
             }
             ''
@@ -244,7 +257,12 @@ in
               export PYTHONPATH="$PWD/poisoned"
               export _PYTHON_SYSCONFIGDATA_NAME=foreign_sysconfig
               export _PYTHON_HOST_PLATFORM=foreign_platform
-              ${sinnixScriptRegistry.packageSet.lynchpin-python}/bin/lynchpin-python - <<'EOF'
+              mkdir etc
+              cp -r /etc/. etc/
+              echo 00000000000000000000000000000001 > etc/machine-id
+              unshare --user --map-root-user --mount sh -c \
+                'mount --bind "$PWD/etc" /etc && exec "$@"' sh \
+                ${sinnixScriptRegistry.packageSet.lynchpin-python}/bin/lynchpin-python - <<'EOF'
               import os
               import sys
               import shutil
