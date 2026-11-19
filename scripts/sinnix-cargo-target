@@ -4,6 +4,52 @@
 # runtimeInputs: bash coreutils findutils gawk git gnused util-linux
 set -euo pipefail
 
+# Cargo aliases and external commands can compile. Skip preparation only for
+# known introspection commands; arguments are Cargo's own argv, never a parent
+# process command line.
+cargo_needs_target() {
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+    --) break ;;
+    --target-dir | --target-dir=*) return 1 ;;
+    esac
+  done
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+    +* | -v | -vv | -vvv | --verbose | -q | --quiet | --locked | --offline | --frozen) shift ;;
+    --color | --config | -C | -Z)
+      [ "$#" -ge 2 ] || return 0
+      shift 2
+      ;;
+    --color=* | --config=* | -C?* | -Z?*) shift ;;
+    --help | -h | --version | -V | --list | help | version | metadata | locate-project | read-manifest | pkgid | tree | verify-project) return 1 ;;
+    *) return 0 ;;
+    esac
+  done
+  return 1
+}
+
+populate=1
+case "${1:-}" in
+--select-only)
+  [ "$#" -eq 1 ] || {
+    echo "usage: sinnix-cargo-target [--select-only | --cargo ARGS...]" >&2
+    exit 2
+  }
+  populate=0
+  ;;
+--cargo)
+  shift
+  if ! cargo_needs_target "$@"; then populate=0; fi
+  ;;
+"") ;;
+*)
+  echo "usage: sinnix-cargo-target [--select-only | --cargo ARGS...]" >&2
+  exit 2
+  ;;
+esac
+
 if [ -n "${CARGO_TARGET_DIR:-}" ]; then
   printf '%s\n' "$CARGO_TARGET_DIR"
   exit 0
@@ -12,9 +58,9 @@ fi
 cache_root="${SINNIX_CARGO_CACHE_ROOT:-/realm/state/cache/cargo}"
 # Btrfs subvolume roots have inode 256. `subvolume show` also searches trees
 # that require privileges unavailable to the developer process.
-if [ -L "$cache_root" ] || [ ! -d "$cache_root" ] \
-  || [ "$(stat -f -c %T "$cache_root")" != btrfs ] \
-  || [ "$(stat -c %i "$cache_root")" != 256 ]; then
+if [ -L "$cache_root" ] || [ ! -d "$cache_root" ] ||
+  [ "$(stat -f -c %T "$cache_root")" != btrfs ] ||
+  [ "$(stat -c %i "$cache_root")" != 256 ]; then
   echo "Cargo cache subvolume is not provisioned: $cache_root" >&2
   exit 1
 fi
@@ -27,6 +73,10 @@ checkout="$(git rev-parse --show-toplevel)"
 checkout="$(realpath "$checkout")"
 # Different checkouts keep independent writable targets, even on one branch.
 target="$(target_of "$checkout")"
+if [ "$populate" -eq 0 ]; then
+  printf '%s\n' "$target"
+  exit 0
+fi
 mkdir -p "$target"
 
 # Artifact filenames are not content hashes: two builds can use the same
@@ -99,8 +149,8 @@ path_packages() {
   done | sort -u
 }
 
-if [ -f "$checkout/Cargo.lock" ] \
-  && [ -z "$(find "$target" -type f ! -name .cargo-lock ! -name CACHEDIR.TAG \
+if [ -f "$checkout/Cargo.lock" ] &&
+  [ -z "$(find "$target" -type f ! -name .cargo-lock ! -name CACHEDIR.TAG \
     ! -name .sinnix-seed.lock -print -quit)" ]; then
   sources=()
   recent=()

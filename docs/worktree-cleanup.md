@@ -46,6 +46,17 @@ target across checkouts is unsafe: Cargo's relative dep-info paths and source
 mtimes can make another checkout's stale path-package build appear current.
 Dependency-only seeding below preserves independent writable targets.
 
+`--select-only` resolves the same checkout target without creating directories,
+markers or compiler units. Product shell entry can use it before the requested
+command is known. Immediately before invoking Cargo, `--cargo ARGS...` prepares
+that target only when the direct arguments may build. Known metadata, project
+location, package/tree inspection, version and help commands only select it;
+unknown commands, aliases and `xtask` retain normal preparation. An explicit
+`CARGO_TARGET_DIR` is returned unchanged, and Cargo's `--target-dir` override
+never populates the unused managed target. These modes do not infer commands
+from process ancestry. The no-argument selector keeps its existing preparation
+behavior for callers that already know they need a build target.
+
 An empty target is seeded once, by reflink, from one idle target: the selector
 tries the three most recently built targets of other worktrees and uses the
 first idle one. Once the target contains build artifacts, Cargo owns

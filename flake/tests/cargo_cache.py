@@ -69,8 +69,15 @@ class CargoCache(unittest.TestCase):
     def provision(self, *, check=True):
         return self.run_bash(f'bash "{PROVISION}"', check=check)
 
-    def select(self, *, env=None, check=True):
-        return self.run_bash(f'bash "{SELECTOR}"', env=env, check=check)
+    def select(self, *args, env=None, check=True):
+        return subprocess.run(
+            ["bash", str(SELECTOR), *args],
+            cwd=self.checkout,
+            env=env or self.env,
+            text=True,
+            capture_output=True,
+            check=check,
+        )
 
     def test_provisioning_is_repeatable_and_refuses_existing_ordinary_paths(self):
         self.cache.mkdir()
@@ -150,6 +157,22 @@ class CargoCache(unittest.TestCase):
         )
         self.assertFalse(Path(explicit["CARGO_TARGET_DIR"]).exists())
 
+    def test_explicit_target_is_not_prepared_by_any_command_mode(self):
+        explicit = dict(self.env, CARGO_TARGET_DIR=str(self.root / "explicit"))
+        for args in [
+            [],
+            ["--select-only"],
+            ["--cargo", "build"],
+            ["--cargo", "metadata"],
+        ]:
+            with self.subTest(args=args):
+                self.assertEqual(
+                    self.select(*args, env=explicit).stdout.strip(),
+                    explicit["CARGO_TARGET_DIR"],
+                )
+                self.assertFalse(self.cache.exists())
+                self.assertFalse(Path(explicit["CARGO_TARGET_DIR"]).exists())
+
     LOCK = (
         "[[package]]\n"
         'name = "dep"\n'
@@ -192,9 +215,9 @@ class CargoCache(unittest.TestCase):
             )
             return path
 
-        def select_in(path, **extra):
+        def select_in(path, *args, **extra):
             result = subprocess.run(
-                ["timeout", "10s", "bash", str(SELECTOR)],
+                ["timeout", "10s", "bash", str(SELECTOR), *args],
                 cwd=path,
                 env=dict(self.env, **extra),
                 capture_output=True,
@@ -225,6 +248,67 @@ class CargoCache(unittest.TestCase):
         os.utime(root / ".fingerprint", None)
         return [p.relative_to(target) for p in outputs]
 
+    def test_shell_selection_and_cargo_introspection_do_not_populate_targets(self):
+        worktree, select_in = self.lanes()
+        seed = select_in(worktree("warm"))
+        dep = "dep-0123456789abcdef"
+        outputs = self.build_unit(seed, dep)
+        requests = [
+            ["--select-only"],
+            ["--cargo"],
+            [
+                "--cargo",
+                "metadata",
+                "--locked",
+                "--offline",
+                "--no-deps",
+                "--format-version",
+                "1",
+            ],
+            ["--cargo", "+stable", "--offline", "--color", "never", "metadata"],
+            ["--cargo", "locate-project"],
+            ["--cargo", "pkgid"],
+            ["--cargo", "tree"],
+            ["--cargo", "read-manifest"],
+            ["--cargo", "verify-project"],
+            ["--cargo", "--version"],
+            ["--cargo", "help", "xtask"],
+            ["--cargo", "--list"],
+            ["--cargo", "build", "--target-dir", str(self.root / "explicit target")],
+        ]
+        for index, args in enumerate(requests):
+            with self.subTest(args=args):
+                checkout = worktree(f"inspect-{index}")
+                before = {p.relative_to(self.cache) for p in self.cache.rglob("*")}
+                target = select_in(checkout, *args)
+                self.assertFalse(target.exists())
+                self.assertEqual(
+                    {p.relative_to(self.cache) for p in self.cache.rglob("*")}, before
+                )
+                prepared = select_in(checkout, "--cargo", "build", "--locked")
+                self.assertEqual(prepared, target)
+                for path in outputs:
+                    self.assertEqual((target / path).read_bytes(), b"compiled")
+
+    def test_build_aliases_and_xtask_keep_dependency_preparation(self):
+        worktree, select_in = self.lanes()
+        seed = select_in(worktree("warm"))
+        outputs = self.build_unit(seed, "dep-0123456789abcdef")
+        for index, args in enumerate(
+            [
+                ["build"],
+                ["check", "--all-targets"],
+                ["test", "--no-run"],
+                ["xtask", "--help"],
+                ["custom-alias"],
+                ["run", "--", "--target-dir", "application"],
+            ]
+        ):
+            with self.subTest(args=args):
+                target = select_in(worktree(f"build-{index}"), "--cargo", *args)
+                for path in outputs:
+                    self.assertEqual((target / path).read_bytes(), b"compiled")
+
     def test_a_new_checkout_gets_the_dependency_units_of_warm_targets(self):
         worktree, select_in = self.lanes()
         master = worktree("master")
@@ -239,7 +323,8 @@ class CargoCache(unittest.TestCase):
         script = seed / "debug" / "build" / "dep-2222222222222222"
         (script / "out").mkdir(parents=True)
         (script / "out" / "generated.rs").write_text("generated")
-        (script / "empty").mkdir(mode=0o750)
+        (script / "empty").mkdir()
+        (script / "empty").chmod(0o750)
         (seed / "debug" / ".fingerprint" / "dep-2222222222222222").mkdir()
         # Path packages are fresh by mtime, so another checkout's build of
         # them is never offered; neither is state outside the units.
@@ -330,14 +415,14 @@ class CargoCache(unittest.TestCase):
         lane = worktree("lane")
         with (seed / "debug" / ".cargo-lock").open("w") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
-            target = select_in(lane)
+            target = select_in(lane, "--cargo", "build")
             self.assertTrue((target / "CACHEDIR.TAG").exists())
             self.assertFalse((target / outputs[0]).exists())
         with (target / "debug" / ".cargo-lock").open("w") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
-            select_in(lane)
+            select_in(lane, "--cargo", "xtask", "check")
             self.assertFalse((target / outputs[0]).exists())
-        self.assertEqual(select_in(lane), target)
+        self.assertEqual(select_in(lane, "--cargo", "build"), target)
         self.assertTrue((target / outputs[0]).exists())
 
     def test_selection_needs_no_privileged_tree_search(self):
