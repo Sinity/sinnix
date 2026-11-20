@@ -101,7 +101,7 @@
     # sinity.cachix.org, and `update sinex` moves the pin only after fetching
     # that package, so a switch downloads Sinex instead of compiling it.
     # Export-ignore is explicit so the source tree matches the package build.
-    sinex.url = "git+https://github.com/Sinity/sinex?rev=b65fbd6ab2c1fcbc7e716d15adfe8ed94474b44a&shallow=1&exportIgnore=1";
+    sinex.url = "git+https://github.com/Sinity/sinex?rev=c149bf72ac3622c724a46a90aa8281ff6f41c10c&shallow=1&exportIgnore=1";
 
     # BTRFS rollback impermanence (see modules/persistence.nix)
     impermanence = {
