@@ -36,16 +36,20 @@ The running Sinex store (`/var/lib/sinex`, the `state/sinex` subvolume on
 archive. `sinex-backup.service` is started by hand: its first archive needs
 about 400 GB free on the backup disk, because the segment log does not
 compress and the database dump is large, and running it with less would leave
-the other repositories no room. When started, it asks the running Sinex to
-prepare one backup under
-`/neo-outer-realm/state/sinex/backup/<run>`: its database and key dumps,
-content segments and producer state, taken at one held boundary. Two Borg jobs
-archive that copy into `borg-sinex-core-v1` and its keys into
-`borg-sinex-keys-v1`; both repositories must be initialized by hand before the
-first run. The service releases the boundary only after reading back both
-archives by name. A failed run keeps its copy and the open boundary for
-diagnosis, and fails the unit. `latest-complete.json` in that directory, owned
-by the `sinex` user, names the last complete run.
+the other repositories no room. Each start prepares a new run under
+`/var/lib/sinex/daemon/backups/<run>`. The database and key dumps, committed
+segment prefixes and producer state come from one held boundary. Staging
+shares the segment's filesystem so Sinex can clone its extents without
+writing a second copy of the segment. Sinex still hashes the staged prefixes
+and verifies the held extents.
+
+Two Borg jobs archive the main data into `borg-sinex-core-v1` and the keys
+into `borg-sinex-keys-v1`. Both repositories must be initialized by hand
+before the first run. The service releases the boundary only after reading
+back both archives by name. If archival fails, the unit retains the staging
+directory and hold for diagnosis. A retry prepares a fresh run.
+`latest-complete.json` in the staging root points to the last pair completed
+there. For earlier pairs, use the `complete.json` kept with each run.
 
 Stopped Sinex deployments listed in `sinnix.services.sinex.retainedStores`
 (today `/var/lib/sinex/old-2026-10-26`) are archived whole by the

@@ -116,9 +116,6 @@ in
         passwordFile = secrets.sinex-nats-session;
       };
       backup = {
-        # Immutable segment prefixes exceed the live NVMe's staging headroom.
-        # Keep staging on a different disk from the paired Borg repositories.
-        artifactDir = "${config.sinnix.paths.neoOuterRealm}/state/sinex/backup";
         repo = "${backupRoot}/borg-sinex-core-v1";
         keysRepo = "${backupRoot}/borg-sinex-keys-v1";
         passCommand = "${pkgs.coreutils}/bin/cat ${secrets.borg-passphrase}";
