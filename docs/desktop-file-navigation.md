@@ -39,6 +39,10 @@ video-projection set grid_LR_180.mp4 --projection equirect --layout sbs --hfov 1
 video-projection clear grid_LR_180.mp4
 ```
 
+In mpv, use Alt+arrow keys to look around, Alt+Page Up and Alt+Page Down
+to zoom, and Alt+Home to recenter. Ctrl+Alt+O toggles the original video
+and Ctrl+Alt+V opens projection and eye layout settings.
+
 ## Verification
 
 ```bash

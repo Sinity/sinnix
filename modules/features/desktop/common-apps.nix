@@ -84,6 +84,10 @@ mkFeatureModule {
       source = "yazi/keymap.toml";
       force = true;
     };
+    "yazi/plugins/compare.yazi/main.lua" = {
+      source = "yazi/plugins/compare.yazi/main.lua";
+      force = true;
+    };
     "yazi/plugins/sinnix-video-preview.yazi/main.lua" = {
       source = "yazi/plugins/sinnix-video-preview.yazi/main.lua";
       force = true;
@@ -162,6 +166,7 @@ mkFeatureModule {
             libnotify
             scriptPkgs.chatgpt-app
             scriptPkgs.learnharness
+            scriptPkgs.sinnix-rank-desktop
             scriptPkgs.media-preview-cache
             scriptPkgs.video-projection
           ]);

@@ -112,3 +112,14 @@ CLI above: register options with stable semantic ids, run a bounded pass,
 report the fitted order with its uncertainty and the domain needed to resume.
 Agent-generated suggestions may seed the item set; they are never recorded as
 comparisons.
+
+### Desktop comparison
+
+Open **Compare** in the application launcher or run `sinnix rank desktop`.
+Pass a domain name for saved image or text options, or `--files` followed
+by media files or a folder. In Yazi, `g R` compares the selection or opens
+the current directory. A connected library can supply additional sources.
+
+Choose a video frame to play from that moment. Preference buttons and the
+1 and 2 keys record the judgment. Largest first keeps the preferred item
+on its side. Most informative draws the next pair from the current evidence.

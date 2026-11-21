@@ -24,6 +24,7 @@
         "sinnix-agent-gateway"
         "agentctl"
         "sinnix-hub-server"
+        "sinnix-rank-desktop"
         "sinnix-phone-app"
         "sinnix-phone-app-install"
         "tunnel-client"

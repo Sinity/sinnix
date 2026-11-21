@@ -1,4 +1,5 @@
 [mgr]
 append_keymap = [
+  { on = ["g", "R"], run = "plugin compare", desc = "Compare files" },
   { on = ["right"], run = "open" }
 ]

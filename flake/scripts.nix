@@ -19,6 +19,10 @@ let
 
   externalPackages = import ./package-set.nix {
     inherit inputs pkgs;
+    rankDesktopTools = map (name: discovered.registry.${name}.package) [
+      "media-preview-cache"
+      "video-projection"
+    ];
     scorePackage = discovered.registry.sinnix-score.package;
     backupScriptPackages = lib.genAttrs [
       "sinnix-borg-check"
@@ -56,6 +60,13 @@ let
   discovered = discovery.discover (inputs.self + "/scripts");
 
   registry = discovered.registry // {
+    sinnix-rank-desktop = {
+      description = "Desktop pairwise comparison";
+      package = externalPackages.sinnix-rank-desktop;
+      runtimeInputs = [ ];
+      owner = "pkgs/sinnix-rank-desktop";
+      docs = "docs/ranking.md";
+    };
     sinnix-backup = {
       description = "Archive snapshots into Borg, run the nightly backup sequence, checks and maintenance";
       package = externalPackages.sinnix-backup;

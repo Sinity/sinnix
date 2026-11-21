@@ -1455,6 +1455,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
+    sub.add_parser("desktop", help="open the desktop comparison workspace")
     add = sub.add_parser("add", help="register items into a domain")
     add.add_argument("domain")
     add.add_argument(
@@ -1608,6 +1609,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     os.umask(0o077)
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["desktop"]:
+        os.execvp("sinnix-rank-desktop", ["sinnix-rank-desktop", *argv[1:]])
     parser = build_parser()
     args = parser.parse_args(argv)
     for name in [getattr(args, "domain", None), *getattr(args, "domains", [])]:

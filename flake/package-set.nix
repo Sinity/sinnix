@@ -5,6 +5,7 @@
   inputs,
   pkgs,
   scorePackage,
+  rankDesktopTools,
   backupScriptPackages,
 }:
 let
@@ -305,6 +306,10 @@ let
     # a CLI): Plackett-Luce fit, stopping statistic, selection, draw
     # policies. scripts/sinnix-rank is its text frontend.
     sinnix-rank-core = pkgs.callPackage ../pkgs/sinnix-rank-core/pkg.nix { inherit sinnix-lib; };
+
+    sinnix-rank-desktop = pkgs.callPackage ../pkgs/sinnix-rank-desktop/pkg.nix {
+      inherit sinnix-rank-core rankDesktopTools;
+    };
 
     sinnix-capture = sinnixCaptureLib;
 
