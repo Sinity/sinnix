@@ -1,8 +1,11 @@
 {
   lib,
-  stdenvNoCC,
+  stdenv,
   python3,
   qt6,
+  cmake,
+  pkg-config,
+  mpv-unwrapped,
   ffmpeg,
   rankDesktopTools,
   makeDesktopItem,
@@ -15,17 +18,20 @@ let
     sinnix-rank-core
   ]);
 in
-stdenvNoCC.mkDerivation {
+stdenv.mkDerivation {
   pname = "sinnix-rank-desktop";
   version = "0.1.0";
   src = lib.cleanSource ./.;
   nativeBuildInputs = [
+    cmake
+    pkg-config
     qt6.wrapQtAppsHook
     copyDesktopItems
   ];
   buildInputs = [
     qt6.qtdeclarative
-    qt6.qtmultimedia
+    mpv-unwrapped
+    qt6.qtbase
     qt6.qtwayland
   ];
   desktopItems = [
@@ -38,19 +44,20 @@ stdenvNoCC.mkDerivation {
       categories = [ "Utility" ];
     })
   ];
-  dontBuild = true;
-  installPhase = ''
-    runHook preInstall
+  postInstall = ''
     mkdir -p "$out/share/sinnix-rank" "$out/bin"
-    cp -r . "$out/share/sinnix-rank/"
+    cp "$src"/*.py "$src"/*.qml "$out/share/sinnix-rank/"
+    cp -r "$src/shaders" "$out/share/sinnix-rank/"
     for shader in "$out/share/sinnix-rank"/shaders/*.frag; do
       ${qt6.qtshadertools}/bin/qsb --glsl '100 es,300 es,120,150' -o "$shader.qsb" "$shader"
     done
     makeWrapper ${python}/bin/python3 "$out/bin/sinnix-rank-desktop" \
-      --set-default QSG_RHI_BACKEND opengl \
+      --set LC_NUMERIC C \
+      --suffix LD_LIBRARY_PATH : /run/opengl-driver/lib \
+      --set QSG_RHI_BACKEND opengl \
+      --prefix QML_IMPORT_PATH : "$out/lib/qt-6/qml" \
       --prefix PATH : ${lib.makeBinPath ([ ffmpeg ] ++ rankDesktopTools)} \
       --add-flags "$out/share/sinnix-rank/main.py" "''${qtWrapperArgs[@]}"
-    runHook postInstall
   '';
   dontWrapQtApps = true;
 }

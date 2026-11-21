@@ -1,37 +1,29 @@
 import QtQuick
-import QtMultimedia
+import Sinnix.Video
 
 Item {
     id: pane
 
-    property alias source: player.source
-    property alias volume: audio.volume
-    property alias muted: audio.muted
+    property alias source: video.source
+    property alias volume: video.volume
+    property alias muted: video.muted
     property var projection: ({})
     property real yaw: 0
     property real pitch: 0
     property real fov: 90
     property bool original: false
 
-    readonly property int position: player.position
-    readonly property int duration: player.duration
-    readonly property bool playing: player.playbackState === MediaPlayer.PlayingState
-    readonly property string playbackError: player.errorString
+    readonly property int position: video.position
+    readonly property int duration: video.duration
+    readonly property bool playing: video.playing
+    readonly property string playbackError: video.playbackError
     readonly property bool perspective: !original
         && (projection?.projection === "equirect" || projection?.projection === "fisheye")
 
-    function play() { player.play() }
-    function pause() { player.pause() }
-    function stop() {
-        player.pendingPosition = -1
-        player.stop()
-    }
-    function seek(ms) {
-        if (!Number.isFinite(ms))
-            return
-        player.pendingPosition = Math.max(0, ms)
-        player.applySeek()
-    }
+    function play() { video.play() }
+    function pause() { video.pause() }
+    function stop() { video.stop() }
+    function seek(ms) { video.seek(ms) }
     function recenter() {
         yaw = 0
         pitch = 0
@@ -45,34 +37,13 @@ Item {
         color: "black"
     }
 
-    MediaPlayer {
-        id: player
-
-        property real pendingPosition: -1
-
-        function applySeek() {
-            if (!seekable || duration <= 0 || pendingPosition < 0)
-                return
-            const next = pendingPosition
-            pendingPosition = -1
-            position = Math.min(duration, next)
-        }
-
-        onDurationChanged: applySeek()
-        onSeekableChanged: applySeek()
-        onSourceChanged: pendingPosition = -1
-
-        videoOutput: video
-        audioOutput: AudioOutput {
-            id: audio
-            muted: true
-        }
-    }
-
-    VideoOutput {
+    MpvOutput {
         id: video
         anchors.fill: parent
-        fillMode: pane.perspective ? VideoOutput.Stretch : VideoOutput.PreserveAspectFit
+        stretch: pane.perspective
+        // Retain detail after cropping to one eye without extending the
+        // rendering pass to the full size of an 8K source.
+        renderSize: pane.perspective ? Qt.size(4096, 2048) : Qt.size(-1, -1)
     }
 
     ShaderEffectSource {
@@ -81,13 +52,7 @@ Item {
         hideSource: pane.perspective
         visible: false
         smooth: true
-        // Retain enough texture detail for a single-eye crop and zoom, using
-        // one bounded offscreen texture per pane.
-        readonly property real sourceWidth: Math.max(1, video.sourceRect.width)
-        readonly property real sourceHeight: Math.max(1, video.sourceRect.height)
-        readonly property real scaleFactor: Math.min(1, 4096 / Math.max(sourceWidth, sourceHeight))
-        textureSize: Qt.size(Math.max(1, Math.round(sourceWidth * scaleFactor)),
-                             Math.max(1, Math.round(sourceHeight * scaleFactor)))
+        textureSize: video.renderSize
     }
 
     ShaderEffect {
