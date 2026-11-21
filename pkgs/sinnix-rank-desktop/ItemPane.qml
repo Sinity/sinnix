@@ -310,57 +310,64 @@ Rectangle {
                         pane.pendingFraction = -1;
                     }
                 }
-                }
+            }
         }
 
-        RowLayout {
+        GridLayout {
             Layout.fillWidth: true
             visible: pane.info.kind === "video"
-
-            ToolButton {
-                text: video.playing ? "Pause" : "Play"
-                onClicked: { pane.activated(); pane.toggle(); }
-            }
-            Slider {
-                id: timeline
+            columns: width >= 540 ? 2 : 1
+            rowSpacing: 3
+            RowLayout {
                 Layout.fillWidth: true
-                enabled: pane.videoVisible && video.duration > 0
-                from: 0
-                to: Math.max(video.duration, 1)
-                value: video.position
-                onMoved: video.seek(value)
-            }
-            Label {
-                text: pane.clock(pane.videoVisible ? video.position : 0) + " / "
-                      + pane.clock((pane.videoVisible ? video.duration : 0) || pane.info.duration || 0)
-                color: pane.mutedText
-            }
-            ToolButton {
-                text: "Frames"
-                visible: pane.videoVisible
-                onClicked: { video.pause(); pane.videoVisible = false; }
-            }
-            ToolButton {
-                text: video.original ? "Flatten" : "Original"
-                visible: pane.videoVisible && ["equirect", "fisheye"].includes(pane.info.projection?.projection)
-                onClicked: video.original = !video.original
-            }
-            ToolButton {
-                text: "Projection"
-                enabled: !!pane.info.path && !pane.rankController.busy
-                onClicked: {
-                    const projection = pane.info.projection || {};
-                    projectionMode.currentIndex = Math.max(0, projectionMode.indexOfValue(projection.projection));
-                    stereoMode.currentIndex = Math.max(0, stereoMode.indexOfValue(projection.layout));
-                    inputFov.value = projection.hfov || 180;
-                    swap.checked = !!projection.swap;
-                    correction.open();
+                ToolButton {
+                    text: video.playing ? "Pause" : "Play"
+                    onClicked: { pane.activated(); pane.toggle(); }
+                }
+                Slider {
+                    id: timeline
+                    Layout.fillWidth: true
+                    enabled: pane.videoVisible && video.duration > 0
+                    from: 0
+                    to: Math.max(video.duration, 1)
+                    value: video.position
+                    onMoved: video.seek(value)
+                }
+                Label {
+                    text: pane.clock(pane.videoVisible ? video.position : 0) + " / "
+                          + pane.clock((pane.videoVisible ? video.duration : 0) || pane.info.duration || 0)
+                    color: pane.mutedText
                 }
             }
-            ToolButton {
-                text: "Recenter"
-                visible: pane.videoVisible && ["equirect", "fisheye"].includes(pane.info.projection?.projection) && !video.original
-                onClicked: video.recenter()
+            RowLayout {
+                Layout.alignment: Qt.AlignRight
+                ToolButton {
+                    text: "Frames"
+                    visible: pane.videoVisible
+                    onClicked: { video.pause(); pane.videoVisible = false; }
+                }
+                ToolButton {
+                    text: video.original ? "Flatten" : "Original"
+                    visible: pane.videoVisible && ["equirect", "fisheye"].includes(pane.info.projection?.projection)
+                    onClicked: video.original = !video.original
+                }
+                ToolButton {
+                    text: "Projection"
+                    enabled: !!pane.info.path && !pane.rankController.busy
+                    onClicked: {
+                        const projection = pane.info.projection || {};
+                        projectionMode.currentIndex = Math.max(0, projectionMode.indexOfValue(projection.projection));
+                        stereoMode.currentIndex = Math.max(0, stereoMode.indexOfValue(projection.layout));
+                        inputFov.value = projection.hfov || 180;
+                        swap.checked = !!projection.swap;
+                        correction.open();
+                    }
+                }
+                ToolButton {
+                    text: "Recenter"
+                    visible: pane.videoVisible && ["equirect", "fisheye"].includes(pane.info.projection?.projection) && !video.original
+                    onClicked: video.recenter()
+                }
             }
         }
 
