@@ -28,6 +28,8 @@ its window with an empty Wayland app-id that Hyprland rules cannot target.
 Yazi uses `media-preview-cache` for video previews. It projects spherical and
 fisheye video into a centered, 90° horizontal view from one eye. Scrolling
 changes the preview time. Ordinary video uses the existing thumbnailer.
+Yazi requests thumbnails for the selected video. To precompute thumbnails
+for a directory, run `media-preview-cache warm DIR`.
 
 Use `video-projection inspect FILE` to see how a local file was identified.
 If a video is missing projection or eye layout information, save the correction

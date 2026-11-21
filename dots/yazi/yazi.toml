@@ -6,7 +6,8 @@ image_delay = 0
 
 [plugin]
 prepend_preloaders = [
-  { mime = "video/*", run = "sinnix-video-preview" },
+  # Probe and decode only the video selected for preview.
+  { mime = "video/*", run = "noop" },
 ]
 prepend_previewers = [
   { mime = "video/*", run = "sinnix-video-preview" },
