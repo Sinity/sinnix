@@ -208,7 +208,7 @@ class StashSource:
         self.key = json.dumps(
             [
                 "stash",
-                self.command,
+                self.command[-1],
                 os.environ.get("STASHBOX_DIR"),
                 os.environ.get("STASH_URL"),
             ]
