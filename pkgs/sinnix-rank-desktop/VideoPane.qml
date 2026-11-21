@@ -22,10 +22,15 @@ Item {
 
     function play() { player.play() }
     function pause() { player.pause() }
-    function stop() { player.stop() }
+    function stop() {
+        player.pendingPosition = -1
+        player.stop()
+    }
     function seek(ms) {
-        if (player.seekable)
-            player.position = Math.max(0, Math.min(duration, ms))
+        if (!Number.isFinite(ms))
+            return
+        player.pendingPosition = Math.max(0, ms)
+        player.applySeek()
     }
     function recenter() {
         yaw = 0
@@ -42,6 +47,21 @@ Item {
 
     MediaPlayer {
         id: player
+
+        property real pendingPosition: -1
+
+        function applySeek() {
+            if (!seekable || duration <= 0 || pendingPosition < 0)
+                return
+            const next = pendingPosition
+            pendingPosition = -1
+            position = Math.min(duration, next)
+        }
+
+        onDurationChanged: applySeek()
+        onSeekableChanged: applySeek()
+        onSourceChanged: pendingPosition = -1
+
         videoOutput: video
         audioOutput: AudioOutput {
             id: audio
