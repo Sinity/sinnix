@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Precompute and query cached media preview thumbnails
-# runtimeInputs: bash coreutils fd ffmpegthumbnailer findutils util-linux
+# runtimeInputs: bash coreutils fd ffmpeg ffmpegthumbnailer findutils gawk util-linux @video-projection
 set -euo pipefail
 
 cache_root="${XDG_CACHE_HOME:-$HOME/.cache}/media-preview-cache/v1"
@@ -27,25 +27,41 @@ canonical_file() {
 }
 
 thumb_path() {
-  local file="$1"
-  local percent="${2:-$default_percent}"
-  local resolved metadata key shard
+  local resolved="$1" percent="$2" filter="$3"
+  local metadata key shard
 
-  IFS= read -r -d '' resolved < <(canonical_file "$file") || return
   metadata="$(stat --printf='%s\t%Y\t%Z' -- "$resolved")" || return
-  key="$(printf '%s\t%s\t%s\n' "$resolved" "$metadata" "$percent" | sha256sum | cut -d' ' -f1)"
+  key="$(
+    {
+      printf '%s\t%s\t%s\n' "$resolved" "$metadata" "$percent"
+      if [[ -n "$filter" ]]; then
+        printf '%s\n' "$filter"
+      fi
+    } | sha256sum | cut -d' ' -f1
+  )"
   shard="${key:0:2}"
 
   printf '%s/%s/%s.jpg\n' "$video_cache_root" "$shard" "$key"
 }
 
-ensure_thumb() (
-  local file="$1"
-  local percent="${2:-$default_percent}"
-  local resolved output lock_dir lock_file tmp_file status
+projected_thumb() {
+  local source="$1" percent="$2" filter="$3" output="$4"
+  local duration seek
+  [[ "$percent" =~ ^[0-9]+$ ]] || return 2
+  duration="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$source")" || return
+  seek="$(awk -v duration="$duration" -v percent="$percent" 'BEGIN {
+    if (duration !~ /^[0-9]+([.][0-9]+)?$/) exit 1
+    printf "%.6f", duration * percent / 100
+  }')" || return
+  ffmpeg -nostdin -v error -y -filter_threads 2 -threads 4 -ss "$seek" -i "$source" \
+    -map 0:V:0 -frames:v 1 -vf "$filter" -f image2 -update 1 "$output"
+}
 
-  IFS= read -r -d '' resolved < <(canonical_file "$file") || return
-  output="$(thumb_path "$resolved" "$percent")" || return
+ensure_thumb() (
+  local resolved="$1" percent="$2" filter="$3"
+  local output lock_dir lock_file tmp_file status
+
+  output="$(thumb_path "$resolved" "$percent" "$filter")" || return
   lock_dir="$(dirname "$output")"
   lock_file="${output}.lock"
 
@@ -67,17 +83,17 @@ ensure_thumb() (
   tmp_file="$(mktemp "${output}.tmp.XXXXXX")"
   trap 'rm -f -- "$tmp_file"' EXIT
 
-  ffmpegthumbnailer \
-    -i "$resolved" \
-    -o "$tmp_file" \
-    -c jpeg \
-    -s 0 \
-    -t "$percent" \
-    -m >/dev/null 2>&1 || {
-      status=$?
-      printf 'media-preview-cache: thumbnail generation failed: %q\n' "$resolved" >&2
-      return "$status"
-    }
+  {
+    if [[ -n "$filter" ]]; then
+      projected_thumb "$resolved" "$percent" "$filter" "$tmp_file"
+    else
+      ffmpegthumbnailer -i "$resolved" -o "$tmp_file" -c jpeg -s 0 -t "$percent" -m
+    fi
+  } >/dev/null 2>&1 || {
+    status=$?
+    printf 'media-preview-cache: thumbnail generation failed: %q\n' "$resolved" >&2
+    return "$status"
+  }
 
   if [[ ! -s "$tmp_file" ]]; then
     printf 'media-preview-cache: thumbnail generator produced no image: %q\n' "$resolved" >&2
@@ -124,19 +140,19 @@ main() {
   local cmd="${1:-}"
 
   case "$cmd" in
-    thumb-path)
+    thumb-path|ensure)
       [[ $# -ge 2 ]] || {
         usage >&2
         exit 1
       }
-      thumb_path "$2" "${3:-$default_percent}"
-      ;;
-    ensure)
-      [[ $# -ge 2 ]] || {
-        usage >&2
-        exit 1
-      }
-      ensure_thumb "$2" "${3:-$default_percent}"
+      local resolved filter
+      IFS= read -r -d '' resolved < <(canonical_file "$2") || return
+      filter="$(video-projection thumbnail-filter "$resolved")" || return
+      if [[ "$cmd" == "thumb-path" ]]; then
+        thumb_path "$resolved" "${3:-$default_percent}" "$filter"
+      else
+        ensure_thumb "$resolved" "${3:-$default_percent}" "$filter"
+      fi
       ;;
     warm)
       [[ $# -ge 2 ]] || {

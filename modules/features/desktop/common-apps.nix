@@ -163,6 +163,7 @@ mkFeatureModule {
             scriptPkgs.chatgpt-app
             scriptPkgs.learnharness
             scriptPkgs.media-preview-cache
+            scriptPkgs.video-projection
           ]);
 
           # One bookmarks file serves the manager's sidebar and every GTK file

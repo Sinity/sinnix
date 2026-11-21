@@ -23,6 +23,22 @@ sidebar and closure size: all covered the same previews, Thunar adds a second
 thumbnail daemon, Nemo costs about ten times the closure, and PCManFM-Qt maps
 its window with an empty Wayland app-id that Hyprland rules cannot target.
 
+## Projected video previews
+
+Yazi uses `media-preview-cache` for video previews. It projects spherical and
+fisheye video into a centered, 90° horizontal view from one eye. Scrolling
+changes the preview time. Ordinary video uses the existing thumbnailer.
+
+Use `video-projection inspect FILE` to see how a local file was identified.
+If a video is missing projection or eye layout information, save the correction
+with `video-projection set`. Other local players using this command share the
+correction. The field of view describes the source image per eye.
+
+```bash
+video-projection set grid_LR_180.mp4 --projection equirect --layout sbs --hfov 180
+video-projection clear grid_LR_180.mp4
+```
+
 ## Verification
 
 ```bash

@@ -1,6 +1,7 @@
 """Exercise disposable thumbnail staging and actual warm failure propagation."""
 
 import hashlib
+import json
 import os
 import signal
 import subprocess
@@ -41,7 +42,7 @@ sys.exit(7 if mode == 'fail' else 0)
     for name in ("first.mp4", "second.mp4"):
         (videos / name).write_bytes(b"synthetic source")
     env = {
-        "PATH": f"{binary}:{os.environ['PATH']}",
+        "PATH": f"{binary}:{SCRIPT.parent}:{os.environ['PATH']}",
         "HOME": str(tmp_path),
         "XDG_CACHE_HOME": str(tmp_path / "cache"),
         "THUMBNAIL_MODE": "success",
@@ -180,3 +181,101 @@ def test_missing_input_does_not_invoke_generator(cache):
     assert result.returncode != 0
     assert not result.stdout
     assert not list(calls.iterdir())
+
+
+def projection(cache, *args):
+    _root, _videos, _calls, env = cache
+    return subprocess.run(
+        [str(SCRIPT.with_name("video-projection")), *map(str, args)],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    ).stdout
+
+
+def test_projected_preview_uses_single_eye_and_override_changes_cache(cache):
+    root, _videos, _calls, _env = cache
+    source = root / "grid_LR_180.mp4"
+    subprocess.run(
+        [
+            "ffmpeg", "-v", "error", "-f", "lavfi",
+            "-i", "color=red:s=128x128:d=1",
+            "-f", "lavfi", "-i", "color=blue:s=128x128:d=1",
+            "-filter_complex", "[0:v][1:v]hstack",
+            "-c:v", "libx264", str(source),
+        ],
+        check=True,
+        timeout=10,
+    )
+    first = run(cache, "ensure", source)
+    assert first.returncode == 0, first.stderr
+    projection(cache, "set", source, "--projection", "fisheye", "--layout", "sbs", "--hfov", 190, "--swap")
+    second = run(cache, "ensure", source)
+    assert second.returncode == 0, second.stderr
+    assert first.stdout != second.stdout
+
+    def center_pixel(path):
+        return subprocess.check_output(
+            [
+                "ffmpeg", "-v", "error", "-i", path,
+                "-vf", "scale=2:2,format=rgb24", "-frames:v", "1", "-f", "rawvideo", "-",
+            ],
+            timeout=10,
+        )[:3]
+
+    red = center_pixel(first.stdout.strip())
+    blue = center_pixel(second.stdout.strip())
+    assert red[0] > 230 and red[2] < 20
+    assert blue[2] > 230 and blue[0] < 20
+    projection(cache, "clear", source)
+    assert run(cache, "thumb-path", source).stdout == first.stdout
+
+
+@pytest.mark.parametrize(
+    ("filename", "settings"),
+    [
+        ("grid_180x180_3DH.mp4", ("equirect", "sbs", 180, "vr")),
+        ("grid_VR360_TB.mp4", ("equirect", "tb", 360, "vr")),
+        ("grid_mkx_200.mp4", ("fisheye", "sbs", 200, "vr")),
+        ("grid_fisheye190.mp4", ("fisheye", "sbs", 190, "vr")),
+        ("grid_VR.mp4", ("unknown", "mono", 180, "vr")),
+        ("grid_1920x960.mp4", ("flat", "mono", 180, "flat")),
+    ],
+)
+def test_filename_conventions(cache, filename, settings):
+    actual = json.loads(projection(cache, "inspect", "--quick", filename))
+    assert tuple(actual[key] for key in ("projection", "layout", "hfov", "kind")) == settings
+
+
+def test_embedded_projection_and_eye_order_merge_with_filename_span(cache):
+    root, videos, calls, _env = cache
+    probe = root / "bin/ffprobe"
+    probe.write_text(
+        f"#!{sys.executable}\n"
+        "import os, pathlib\n"
+        "(pathlib.Path(os.environ['CALLS']) / 'probe').touch()\n"
+        "print('{\"streams\": [{\"side_data_list\": ["
+        "{\"side_data_type\": \"Spherical Mapping\", \"projection\": \"equirectangular\"},"
+        "{\"side_data_type\": \"Stereo 3D\", \"type\": \"side by side\", \"inverted\": 1}"
+        "]}]}')\n"
+    )
+    probe.chmod(0o755)
+    source = videos / "grid_LR_180.mp4"
+    source.touch()
+    expected = {"projection": "equirect", "layout": "sbs", "swap": True, "hfov": 180, "kind": "vr"}
+    assert json.loads(projection(cache, "inspect", source)) == expected
+    (calls / "probe").unlink()
+    env = cache[3]
+    bulk = subprocess.run(
+        [str(SCRIPT.with_name("video-projection")), "inspect", "--quick", "--paths-from-stdin"],
+        env=env,
+        input=json.dumps([str(source)]),
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert json.loads(bulk.stdout)[str(source)] == expected
+    assert not (calls / "probe").exists()

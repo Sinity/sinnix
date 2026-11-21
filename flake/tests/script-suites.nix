@@ -82,11 +82,16 @@
         media-preview-cache-suite = mkScriptSuite {
           name = "media-preview-cache";
           suiteDir = ../../pkgs/media-preview-cache/tests;
-          scripts = [ "media-preview-cache" ];
+          scripts = [
+            "media-preview-cache"
+            "video-projection"
+          ];
           nativeBuildInputs = [
             pkgs.bash
             pkgs.fd
+            pkgs.ffmpeg
             pkgs.findutils
+            pkgs.gawk
             pkgs.util-linux
           ];
         };

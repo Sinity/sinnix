@@ -1,0 +1,235 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Detect and override video projection and stereo layout
+# runtimeInputs: ffmpeg
+
+import argparse
+import hashlib
+import json
+import math
+import os
+import re
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+
+PROJECTIONS = ("flat", "equirect", "fisheye", "unknown")
+LAYOUTS = ("mono", "sbs", "tb")
+
+
+def projection_data(projection, layout="mono", swap=False, hfov=180, known_vr=False):
+    kind = "vr" if known_vr or projection in ("equirect", "fisheye") else projection
+    return dict(projection=projection, layout=layout, swap=swap, hfov=hfov, kind=kind)
+
+
+def token(pattern, name):
+    return re.search(rf"(?:^|[^a-z0-9])(?:{pattern})(?=$|[^a-z0-9])", name)
+
+
+def filename_hints(path):
+    name = path.stem.casefold()
+    layout, swap = None, False
+    if token(r"lr|rl|sbs|3dh", name):
+        layout, swap = "sbs", bool(token("rl", name))
+    elif token(r"tb|bt|ou|overunder|3dv", name):
+        layout, swap = "tb", bool(token("bt", name))
+    elif token("mono", name):
+        layout = "mono"
+
+    if match := token(r"fisheye[ _-]?(180|190|200|220)", name):
+        return "fisheye", layout or "sbs", swap, int(match[1]), True
+    if match := token(r"(?:mkx[ _-]?(200|220)|vrca[ _-]?(220))", name):
+        return "fisheye", layout or "sbs", swap, int(match[1] or match[2]), True
+    if token("fisheye", name):
+        return "fisheye", layout or "sbs", swap, 180, True
+    # An explicit per-eye span wins when a name also contains a generic 360 label.
+    if token(r"180x180|vr[ _-]?180", name) or (layout and token("180", name)):
+        return "equirect", layout or "sbs", swap, 180, True
+    if token(r"vr[ _-]?360", name) or (layout and token("360", name)):
+        return "equirect", layout or "mono", swap, 360, True
+    if re.search(r"(?:^|[_. -])(180|360)$", name) or token(r"vr|xr|equirect(?:angular)?", name):
+        return "unknown", layout or "mono", swap, 180, True
+    if layout in ("sbs", "tb"):
+        # This could be ordinary stereoscopic video, or an unnamed VR projection.
+        return "unknown", layout, swap, 180, False
+    return "flat", "mono", False, 180, False
+
+
+def probe_stream(path):
+    try:
+        completed = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-select_streams", "V:0",
+                "-show_entries", "stream_side_data:stream_tags=stereo_mode,projection",
+                "-of", "json", str(path),
+            ],
+            check=True, capture_output=True, timeout=5,
+        )
+        return next(iter(json.loads(completed.stdout).get("streams", [])), {})
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def classify(path, stream):
+    projection, layout, swap, hfov, known_vr = filename_hints(path)
+    side_data = {item.get("side_data_type"): item for item in stream.get("side_data_list", [])}
+    tags = stream.get("tags", {})
+    stereo = side_data.get("Stereo 3D", {})
+    stereo_type = stereo.get("type", tags.get("stereo_mode", "")).lower().replace("_", " ")
+    if stereo_type in ("side by side", "left right", "right left"):
+        layout = "sbs"
+        swap = bool(stereo.get("inverted", False)) or stereo_type == "right left"
+    elif stereo_type in ("top and bottom", "top bottom", "bottom top"):
+        layout = "tb"
+        swap = bool(stereo.get("inverted", False)) or stereo_type == "bottom top"
+    elif stereo_type in ("2d", "mono"):
+        layout, swap = "mono", False
+    elif stereo_type:
+        return projection_data("unknown", known_vr=known_vr or "Spherical Mapping" in side_data)
+    if stereo.get("view") in ("left", "right"):
+        layout, swap = "mono", False
+
+    spherical = side_data.get("Spherical Mapping", {})
+    mapping = spherical.get("projection", tags.get("projection", "")).lower()
+    if mapping in ("half equirectangular", "hequirect", "equirectangular 180"):
+        projection, hfov = "equirect", 180
+    elif mapping in ("equirectangular", "equirect"):
+        # Generic equirectangular metadata leaves the angular span ambiguous.
+        hfov = hfov if projection == "equirect" else 360
+        projection = "equirect"
+    elif mapping == "fisheye":
+        projection = "fisheye" if projection == "fisheye" else "unknown"
+    elif mapping:
+        projection = "unknown"
+
+    if projection == "flat" and layout != "mono":
+        projection = "unknown"
+    return projection_data(projection, layout, swap, hfov, known_vr or bool(mapping))
+
+
+def storage_dir(variable, default):
+    return Path(os.environ.get(variable) or Path.home() / default) / "video-projection"
+
+
+def read_json(path):
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def write_json(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as file:
+        temporary = Path(file.name)
+        try:
+            json.dump(value, file)
+            file.flush()
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
+def path_key(path):
+    return hashlib.sha256(os.fsencode(path)).hexdigest()
+
+
+def override_path(path):
+    return storage_dir("XDG_STATE_HOME", ".local/state") / "overrides" / (path_key(path) + ".json")
+
+
+def inspect(path, quick=False):
+    path = path.resolve()
+    override = read_json(override_path(path))
+    if override is not None:
+        return override
+
+    cache = storage_dir("XDG_CACHE_HOME", ".cache") / "v1" / (path_key(path) + ".json")
+    try:
+        stat = path.stat()
+    except OSError:
+        return classify(path, {})
+    identity = [stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns]
+    cached = read_json(cache)
+    if isinstance(cached, dict) and cached.get("identity") == identity:
+        return cached.get("result") or classify(path, {})
+    if not quick and path.is_file() and (stream := probe_stream(path)) is not None:
+        result = classify(path, stream)
+        try:
+            write_json(cache, {"identity": identity, "result": result})
+        except OSError:
+            pass
+        return result
+    return classify(path, {})
+
+
+def thumbnail_filter(settings):
+    projection = settings["projection"]
+    if projection not in ("equirect", "fisheye"):
+        return ""
+    layout = settings["layout"]
+    offset = "iw/2" if settings["swap"] else "0"
+    crop = {
+        "mono": "",
+        "sbs": f"crop=iw/2:ih:{offset}:0:exact=1,",
+        "tb": f"crop=iw:ih/2:0:{'ih/2' if settings['swap'] else '0'}:exact=1,",
+    }[layout]
+    hfov = settings["hfov"]
+    vfov = 180 if projection == "equirect" else hfov
+    width, height = 960, 540
+    vertical = math.degrees(2 * math.atan(height / width))
+    return (
+        f"{crop}v360=input={projection}:output=flat:ih_fov={hfov}:iv_fov={vfov}"
+        f":h_fov=90:v_fov={vertical:.6f}:w={width}:h={height},setsar=1"
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    query = commands.add_parser("inspect", help="report projection and eye layout as JSON")
+    query.add_argument("path", type=Path, nargs="?")
+    query.add_argument("--quick", action="store_true", help="use overrides, cache and names without probing")
+    query.add_argument("--paths-from-stdin", action="store_true", help="read a JSON array of paths")
+    change = commands.add_parser("set", help="save a projection override for a file")
+    change.add_argument("path", type=Path)
+    change.add_argument("--projection", choices=PROJECTIONS, required=True)
+    change.add_argument("--layout", choices=LAYOUTS, default="mono")
+    change.add_argument("--hfov", type=float)
+    change.add_argument("--swap", action="store_true")
+    commands.add_parser("clear", help="remove a projection override").add_argument("path", type=Path)
+    commands.add_parser("thumbnail-filter", help="print the filter for a centered perspective still").add_argument("path", type=Path)
+    args = parser.parse_args()
+
+    if args.command == "inspect":
+        if args.paths_from_stdin == (args.path is not None):
+            query.error("specify PATH or --paths-from-stdin")
+        if args.paths_from_stdin:
+            paths = json.load(sys.stdin)
+            if not isinstance(paths, list) or not all(isinstance(path, str) for path in paths):
+                query.error("expected a JSON array of paths")
+            result = {path: inspect(Path(path), args.quick) for path in paths}
+        else:
+            result = inspect(args.path, args.quick)
+        print(json.dumps(result))
+    elif args.command == "thumbnail-filter":
+        print(thumbnail_filter(inspect(args.path)))
+    elif args.command == "clear":
+        override_path(args.path.resolve()).unlink(missing_ok=True)
+    else:
+        if not args.path.is_file():
+            change.error("PATH must be a local file")
+        settings = inspect(args.path, quick=True)
+        hfov = args.hfov if args.hfov is not None else settings["hfov"]
+        if not math.isfinite(hfov) or not 1 <= hfov <= 360:
+            change.error("--hfov must be between 1 and 360 degrees")
+        settings = projection_data(args.projection, args.layout, args.swap, hfov)
+        settings["source"] = "override"
+        write_json(override_path(args.path.resolve()), settings)
+        print(json.dumps(settings))
+
+
+if __name__ == "__main__":
+    main()
