@@ -1,41 +1,19 @@
 ---
 name: plannotator-inbox
-description: Open the Plannotator Inbox in the browser (starting it if needed), tell the person its address, and learn how to use the Inbox for the rest of the session.
-disable-model-invocation: true
+description: Use the private review Inbox for decisions, visual comparisons, important changes, completed reports, guided code reviews, and replies across continuing work.
 ---
 
 # Plannotator Inbox
 
-Use this skill when the person wants their Plannotator Inbox (they closed its tab, or ask where it is), or wants you to use it.
+Use the existing thread for the project and work stream. List threads first. On resumption read the latest reply, apply the operator’s choices and explain the change there. A worker reports to its coordinating agent, which owns the operator conversation.
 
-Run:
+For a decision, give enough context to understand what would change. Compare viable alternatives with current behavior, show an example when the difference is experiential, and say which you recommend and why. Put a single coherent decision in a `:::question` block with selectable options, or use `:::question-text` for an open design question. Use an annotated screenshot, short motion study or interactive HTML comparison when it helps the operator discover a preference. Readers can answer later. Continue work that does not depend on their choice.
 
-```bash
-plannotator inbox --open
-```
+Post an important change when it affects the operator’s decision or expectations. Deliver a short outcome and the actual file for completed work; link the attachment by basename in the body. For a guided code review use `get_guide_brief` and submit the guide with its exact patch. Keep tasks in their owning tracker. Respect a request to keep a draft or question in chat.
 
-Behavior:
+## Clients
 
-1. Run the command. It opens the Inbox in the person's browser, starting it in the background when it is not running, prints the address and returns at once.
-2. Tell the person the address in one sentence. When it also says no browser opened (a remote session), pass on how it says to reach the Inbox.
-3. If it fails, tell them what it says. `Unknown inbox option: --open` means their Plannotator is older than this command: they can update with `plannotator update`, or run `plannotator inbox` in a terminal.
-
-Run the command yourself rather than telling the person to run it.
-
-## Using the Inbox
-
-The Plannotator Inbox is one window on this computer where you leave the person messages, `:::question` blocks they answer with a click, and files. They answer when they can. Nothing blocks: you send, then keep working or end your turn.
-
-- Use it for a decision only they can make (a :::question block; go on with other work), finished long work (a short summary with its pictures inline, files in `attachments`), or when they ask.
-- One thread per work stream, unless the person says otherwise.
-- Send with a `plannotator_inbox` tool when you have one (it can be listed with a prefix and may need loading through tool search first): `action` `send_message`, with a markdown `body`. Otherwise call `send_message` on the Inbox's MCP server, `plannotator inbox mcp`.
-- send_message's result says whether the person's reply arrives in this session by itself. When it does, do not wait or poll for it: end your turn or go on with other work. When it does not, go on with your work and read the thread later with read_thread.
-- A decision in the Inbox stays there: when the person writes in the chat, say what waits and link its thread, but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar). Ask in the chat only about something new they raised there that needs no pictures or files, or when they ask.
-- Be proactive about Inbox updates and about replying to the person through the Inbox when you think they would want you to. Don't withhold important updates or decisions, and don't batch updates to send later: proactivity is better than procrastination.
-- Never run `plannotator inbox` just to send: send_message starts a stopped Inbox itself, and bare `plannotator inbox` opens the window for the person.
-- Before your first send, run `plannotator inbox --help` and read it: every field, the full question syntax, and how to connect the MCP server.
-- The `plannotator` skill, where you have it, has more.
-
-## After the address
-
-This command starts no new work and resumes none: do anything else the person asked in the same message, otherwise stop there. For the rest of this session, use the Inbox as above: for a decision the person is not here to make, and to hand over long work you finished.
+- Claude Code uses the native Plannotator Inbox tool. Codex CLI uses the `plannotator-inbox` MCP tools. Use the project of the work; when passing a project explicitly, use its absolute directory. Preserve the returned thread link.
+- In ChatGPT use the Sinnix Agent Gateway. Discover `plannotator-inbox` with `mcp.tools`, read with `mcp.call`, and send with `mcp.change` and an idempotency key. Use the same absolute project path and conversation identifier on subsequent calls. Attach files already on the workstation. A ChatGPT-generated file must reach the workstation before it can be attached.
+- The send receipt states whether the client receives replies automatically. When it cannot, read the named thread on resumption or the next relevant turn. A pending Inbox decision stays in its thread.
+- Run `plannotator inbox --open` when asked to open the window. Tool sends can start the Inbox themselves. The installed `plannotator inbox --help` describes question syntax, attachment handling and client reply delivery.

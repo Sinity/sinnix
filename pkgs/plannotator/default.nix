@@ -11,8 +11,8 @@
 # The wrapper also keeps Plannotator out of files Home Manager owns. Left to
 # itself it adds its Inbox server to each agent's configuration and writes a
 # note into the agents' instruction files. Those integrations are declared in
-# Sinnix instead: the hooks in dots/claude/managed-settings.json and
-# modules/features/dev/agents/hooks.nix, the Inbox server in
+# Sinnix instead: the Claude plugin below, Codex plan review in
+# modules/features/dev/agents/hooks.nix, and the stdio Inbox server in
 # flake/data/mcp-registry.nix.
 #
 # The data directory is fixed as well. Unset, Plannotator picks ~/.plannotator
@@ -25,6 +25,7 @@
   stdenvNoCC,
   fetchurl,
   makeWrapper,
+  runCommand,
 }:
 stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "plannotator";
@@ -55,6 +56,23 @@ stdenvNoCC.mkDerivation (finalAttrs: {
       --run 'export PLANNOTATOR_DATA_DIR="''${PLANNOTATOR_DATA_DIR:-$HOME/.local/share/plannotator}"'
     runHook postInstall
   '';
+
+  # The native Claude plugin delivers Inbox replies to the interactive session.
+  passthru.claudePlugin =
+    let
+      source = fetchurl {
+        name = "plannotator-source-${finalAttrs.version}.tar.gz";
+        url = "https://codeload.github.com/backnotprop/plannotator/tar.gz/refs/tags/v${finalAttrs.version}";
+        hash = "sha256-0j/6rkOAXIrjdmQfFkOtoXt+IS3sKMSE8P3GbCYnqeI=";
+      };
+      prefix = "plannotator-${finalAttrs.version}/apps/hook";
+    in
+    runCommand "plannotator-claude-plugin-${finalAttrs.version}" { } ''
+      mkdir -p "$out"
+      tar -xzf ${source} -C "$out" --strip-components=3 \
+        --exclude='*.test.ts' --exclude='*/mod/testing' \
+        ${prefix}/.claude-plugin ${prefix}/hooks
+    '';
 
   meta = {
     description = "Browser-based plan, document and code review surface for coding agents";

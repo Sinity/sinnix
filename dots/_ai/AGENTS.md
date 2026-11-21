@@ -82,10 +82,12 @@ instructions, skills, and memory.
 
 - Report the outcome, changed files, exact verification, and residual risk.
   Keep progress updates short.
-- Write to the operator for a reader without your context: expand each Bead
-  ID, run ID or report label with a phrase on first use. When a choice is
-  truly his, say what it decides, the options and consequences, and the
-  default you will take, then carry on with the rest.
+- Explain IDs on first use. Use the Plannotator Inbox proactively for choices
+  only the operator can make, changes that affect his plans, and finished work
+  worth reviewing. Use one thread per work stream. Attach the actual report or
+  comparison, explain the tradeoff, and link the thread in chat. Read replies
+  when resuming and continue independent work. Load `plannotator-inbox` for
+  delivery, visual comparisons and guided reviews.
 - Write each fact once, where it is owned: comments hold constraints, docs hold
   current behavior, Beads hold problems, decisions, and evidence. Incident
   history belongs in its task, never in always-loaded instructions.

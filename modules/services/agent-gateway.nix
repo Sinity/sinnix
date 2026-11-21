@@ -29,10 +29,12 @@ let
   tunnelClient = scriptPkgs.tunnel-client;
   brokeredMcpServers = [
     "lynchpin"
+    "plannotator-inbox"
     "polylogue"
     "sinex"
   ];
   mcpBrokerCommands = {
+    plannotator-inbox = "${scriptPkgs.plannotator}/bin/plannotator";
     lynchpin = "${mcpTools.mcpLynchpinBin}/bin/mcp-lynchpin";
     polylogue = "${mcpTools.mcpPolylogueBin}/bin/mcp-polylogue";
     sinex = "${pkgs.writeScript "mcp-sinex" mcpTools.mcpSinexText}";

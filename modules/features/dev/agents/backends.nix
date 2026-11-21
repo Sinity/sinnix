@@ -121,6 +121,7 @@ let
     fi
 
     claude_args=(
+      --plugin-dir="${scriptPkgs.plannotator.claudePlugin}"
       "''${mcp_args[@]}"
     )
     # --add-dir accepts multiple values and would consume a following

@@ -361,9 +361,6 @@ mkFeatureModule {
               scriptPkgs.claude-quota
               scriptPkgs.codex-worker
               scriptPkgs.claude-agents
-              # Review surface the agents open for the operator; its hooks and
-              # Inbox server are declared in managed-settings.json, hooks.nix
-              # and the MCP registry, and the hook commands find it on PATH.
               scriptPkgs.plannotator
             ];
 

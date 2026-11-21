@@ -41,16 +41,6 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "EnterPlanMode",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "plannotator improve-context",
-            "timeout": 5
-          }
-        ]
-      },
-      {
         "matcher": "Bash",
         "hooks": [
           {
@@ -76,18 +66,6 @@
             "type": "command",
             "command": "polylogue hook PreToolUse",
             "timeout": 5
-          }
-        ]
-      }
-    ],
-    "PermissionRequest": [
-      {
-        "matcher": "ExitPlanMode",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "plannotator",
-            "timeout": 345600
           }
         ]
       }

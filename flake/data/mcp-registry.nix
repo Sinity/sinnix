@@ -124,8 +124,8 @@ let
         "inbox"
         "mcp"
       ];
+      # Claude Code gets the native Inbox tool and reply delivery from its plugin.
       clients = [
-        "claude"
         "codex"
         "pi"
       ];
