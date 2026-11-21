@@ -205,14 +205,7 @@ class StashSource:
             else list(executable)
         )
         self.scope = scope
-        self.key = json.dumps(
-            [
-                "stash",
-                self.command[-1],
-                os.environ.get("STASHBOX_DIR"),
-                os.environ.get("STASH_URL"),
-            ]
-        )
+        self.key = json.dumps(["stash", os.path.realpath(self.command[-1])])
         self.rows = []
         self.files = {}
 
