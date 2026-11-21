@@ -26,10 +26,11 @@ only for the interaction patterns the artifact needs.
 4. Add only the sections, controls, and patterns that serve the reader. Keep
    content readable with JavaScript disabled and make paths or queries useful
    without a network request.
-5. For operator input, use the local annotation and copy-for-agent pattern.
-   Never imply that `file://` input was received. Publish or send the file only
-   when an exposed tool and the current authority permit it. Otherwise return
-   the local path and say what was not published.
+5. Deliver a review through the existing Plannotator thread (see
+   `plannotator-inbox`). One-time comparisons can start in task scratch.
+   Embed the assets needed to understand them and open the sent edition
+   before retiring the scratch. Use a local answer form when the reader
+   needs offline review or a structured bulk export.
 6. Keep canonical reports beside their subject. Publish explicitly selected
    files and companion assets through `/realm/report/site/` with
    `sinnix fs catalog publish`; never link whole subject directories. Private catalog

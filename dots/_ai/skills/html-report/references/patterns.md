@@ -379,29 +379,15 @@ Use `.badge todo` → `.badge ok` cells; one row per decision, columns:
 priority badge · decision · blocker/owner · evidence link. Sortable for free
 via the template's table JS.
 
-## Annotations, corrections & handback (operator input → paste back to agent)
+## Offline feedback and structured bulk answers
 
-A `file://` page has no backend — it cannot push an edit anywhere on its own.
-Two techniques close the loop without breaking the one-file/zero-request
-contract:
+Use this form when the reader needs to work offline or return a dataset.
+For ordinary review, the Plannotator thread carries the comments and answers.
 
-1. **Autosave to `localStorage`**, keyed by the page's own path, the same way
-   the template already persists theme/font-size. Chromium treats each
-   absolute `file://` path as a stable origin, so edits genuinely survive
-   closing and reopening _that exact file_ — free durability, no agent
-   involved. It does **not** get the data back to the agent; the agent can't
-   read the browser's storage.
-2. **A "copy for agent" button** that serializes every tagged field into one
-   JSON blob, shown in a visible, pre-selected `<textarea>` and pushed to the
-   clipboard. This is the actual bridge: the operator pastes that block into
-   the chat. Show the textarea always (don't rely on the clipboard API alone)
-   — it is the fallback when `navigator.clipboard` is blocked, and it doubles
-   as visible confirmation that something was captured.
-
-Realtime two-way sync requires a separately authorized connected runtime.
-Inspect its exposed tool contract before using it; a local HTML file does not
-inherit hosted capabilities. The copy-button handback below works without
-introducing a server or an external publication dependency.
+Save drafts in browser storage when available. A different browser, file path
+or sandboxed preview can lose access to that storage. Export the answers to
+a visible text field and offer a copy button. Tell the reader where to send
+the export and confirm receipt from the returned data.
 
 **Core script** (put once, near the other scripts):
 

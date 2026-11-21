@@ -77,12 +77,14 @@ writing rather than adding a runtime syntax-highlighter dependency.
 
 ## Operator input
 
-For reviews, decision queues, and plans, use the annotation, decision, and
-questionnaire patterns in the skill's `references/patterns.md`. A `file://` page has no
-backend. Save input to `localStorage` for reopening the same file and provide
-a visible copy-for-agent control that serializes fields to JSON. Never imply
-that local edits were received by an agent. A connected publisher may provide a
-different return path only when its exposed contract and authority support it.
+Keep exploration controls in the report. Put questions and passage-specific
+feedback in its Plannotator thread. The agent reads the reply, checks which
+edition it concerns and applies the decision to the owning document or task.
+For a live report, edit the same project source and send a new edition when
+the change matters to the reviewer.
+
+For disconnected readers or requested bulk-answer datasets, use the offline
+form in `references/patterns.md`. Explain how the reader returns the export.
 
 ## Revisions and supersession
 
