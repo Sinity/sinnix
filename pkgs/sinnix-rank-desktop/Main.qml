@@ -75,12 +75,14 @@ ApplicationWindow {
     header: ToolBar {
         id: appBar
         padding: 12
+        implicitHeight: headerRow.implicitHeight + 2 * padding
         background: Rectangle {
             color: "#171d25"
             Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: "#394250" }
         }
 
         RowLayout {
+            id: headerRow
             anchors.fill: parent
             anchors.margins: appBar.padding
             spacing: 12
