@@ -36,6 +36,7 @@ mkFeatureModule {
       default = true;
     };
   };
+  meta.dotfiles.configFile."mpv/scripts/video-projection" = "mpv/scripts/video-projection";
   configFn =
     {
       config,
@@ -75,6 +76,7 @@ mkFeatureModule {
             home.packages = with pkgs; [
               mpvc
               svp
+              scriptPkgs.video-projection
             ];
 
             programs.mpv = {
@@ -86,6 +88,7 @@ mkFeatureModule {
                 force-window = "yes";
                 # Local control follows the newest player; the runtime directory is private.
                 input-ipc-server = mpvSocket;
+                vo = "gpu-next";
                 hwdec = "auto-safe";
                 video-sync = "display-resample";
                 drm-vrr-enabled = "no";
