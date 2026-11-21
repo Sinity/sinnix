@@ -2,8 +2,8 @@
 return {
 	entry = function()
 		local paths = {}
-		for _, url in pairs(cx.active.selected) do
-			paths[#paths + 1] = tostring(url)
+		for _, file in pairs(cx.active.selected) do
+			paths[#paths + 1] = tostring(file.url)
 		end
 		if #paths == 0 then
 			paths[1] = tostring(cx.active.current.cwd)
