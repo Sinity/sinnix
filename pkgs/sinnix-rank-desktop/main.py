@@ -2,6 +2,7 @@
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -98,7 +99,7 @@ class Controller(QObject):
     media_changed = Signal()
     recents_changed = Signal()
     operation_completed = Signal(object, object, object)
-    frames_completed = Signal(str, object)
+    frames_completed = Signal(str, object, object)
     video_completed = Signal(str, object)
 
     def __init__(self):
@@ -120,7 +121,7 @@ class Controller(QObject):
         self._frames = PreviewWorker()
         self._frames_by_item = {}
         self._metadata_by_item = {}
-        self._frame_requests = set()
+        self._frame_requests = {}
         self._video_requests = {}
         self._version = None
         self.operation_completed.connect(self._complete)
@@ -159,11 +160,12 @@ class Controller(QObject):
         if isinstance(result, str):
             path = result
             self._metadata_by_item.pop(path, None)
-            ids = {str(item.id) for item in (*self._pair(), self._version) if item and item.path == path}
-            self._frames.cancel_except(self._frame_requests - ids)
-            for key in ids:
-                self._frames_by_item.pop(key, None)
-                self._frame_requests.discard(key)
+            stale_probe = self._video_requests.pop(path, None)
+            if stale_probe:
+                stale_probe.cancel()
+            self._frames.cancel_except(self._frame_requests.keys() - {path})
+            self._frames_by_item.pop(path, None)
+            self._frame_requests.pop(path, None)
         if source and result is not None:
             if self._session:
                 self._session.close()
@@ -312,41 +314,47 @@ class Controller(QObject):
 
     def _request_media(self):
         items = tuple(item for item in (*self._pair(), self._version) if item and item.kind == "video" and item.path)
-        keys = {str(item.id) for item in items}
+        keys = {str(item.path) for item in items}
         self._frames.cancel_except(keys)
-        self._frame_requests.intersection_update(keys)
+        for key in self._frame_requests.keys() - keys:
+            del self._frame_requests[key]
         for key in self._video_requests.keys() - keys:
             if self._video_requests[key].cancel():
                 del self._video_requests[key]
         for item in items:
-            key = str(item.id)
-            if key not in self._frames_by_item and key not in self._frame_requests:
-                self._frame_requests.add(key)
-                self._frames.request(item, self.frames_completed.emit)
-            video_key = str(item.path)
-            if video_key in self._metadata_by_item or key in self._video_requests:
+            key = str(item.path)
+            if key not in self._frame_requests and len(self._frames_by_item.get(key, {})) < len(PERCENTAGES):
+                generation = object()
+                self._frame_requests[key] = generation
+
+                def publish_frames(path, frames, token=generation):
+                    self.frames_completed.emit(path, token, frames)
+
+                self._frames.request(replace(item, id=key), publish_frames)
+            if key in self._metadata_by_item or key in self._video_requests:
                 continue
-            task = self._metadata.submit(probe_video, video_key, item.duration)
+            task = self._metadata.submit(probe_video, key, item.duration)
             self._video_requests[key] = task
 
-            def probed(future, id_=key, path=video_key):
+            def probed(future, path=key):
                 if not future.cancelled():
-                    self.video_completed.emit(id_, (path, *future.result()))
+                    self.video_completed.emit(path, (future, *future.result()))
 
             task.add_done_callback(probed)
 
-    @Slot(str, object)
-    def _receive_frames(self, key, frames):
-        self._frame_requests.discard(key)
-        self._frames_by_item[key] = dict(frames)
-        self.media_changed.emit()
+    @Slot(str, object, object)
+    def _receive_frames(self, path, generation, frames):
+        if self._frame_requests.get(path) is generation:
+            self._frames_by_item.setdefault(path, {}).update(frames)
+            self.media_changed.emit()
 
     @Slot(str, object)
-    def _receive_video(self, key, payload):
-        path, projection, duration = payload
-        self._video_requests.pop(key, None)
-        self._metadata_by_item[path] = (projection, duration)
-        self.media_changed.emit()
+    def _receive_video(self, path, payload):
+        job, projection, duration = payload
+        if self._video_requests.get(path) is job:
+            del self._video_requests[path]
+            self._metadata_by_item[path] = (projection, duration)
+            self.media_changed.emit()
 
     def _describe(self, item):
         if item is None:
@@ -364,7 +372,7 @@ class Controller(QObject):
             overview.append(timestamp(duration))
         if item.scene_id is not None:
             overview.append(f"{item.play_count} scene plays")
-        known_frames = self._frames_by_item.get(item_id, {})
+        known_frames = self._frames_by_item.get(path, {})
         frames = [
             {
                 "fraction": pct / 100,
@@ -376,8 +384,11 @@ class Controller(QObject):
         text = item.description or item.label
         if kind == "text" and path:
             try:
-                with Path(path).open(errors="replace") as file:
-                    text = file.read()
+                with Path(path).open("rb") as file:
+                    data = file.read(64 * 1024 + 1)
+                text = data[:64 * 1024].decode("utf-8", errors="replace")
+                if len(data) > 64 * 1024:
+                    text += "\n\n[Preview limited to 64 KiB]"
             except OSError:
                 pass
         return {
