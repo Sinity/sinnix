@@ -331,7 +331,8 @@ Rectangle {
                 onMoved: video.seek(value)
             }
             Label {
-                text: pane.clock(video.position) + " / " + pane.clock(video.duration || pane.info.duration || 0)
+                text: pane.clock(pane.videoVisible ? video.position : 0) + " / "
+                      + pane.clock((pane.videoVisible ? video.duration : 0) || pane.info.duration || 0)
                 color: pane.mutedText
             }
             ToolButton {

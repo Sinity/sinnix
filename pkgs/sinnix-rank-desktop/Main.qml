@@ -126,6 +126,7 @@ ApplicationWindow {
             }
             ComboBox {
                 id: order
+                implicitContentWidthPolicy: ComboBox.WidestText
                 enabled: !controller.busy && !!controller.title
                 textRole: "title"
                 valueRole: "value"
