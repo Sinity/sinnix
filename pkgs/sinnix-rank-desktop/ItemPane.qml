@@ -252,7 +252,7 @@ Rectangle {
                 anchors.fill: parent
                 anchors.margins: 8
                 visible: pane.info.kind === "video" && !pane.videoVisible
-                columns: content.width >= 430 ? 3 : 2
+                columns: content.width >= content.height * 16 / 9 ? 3 : 2
                 columnSpacing: 7
                 rowSpacing: 7
                 Repeater {
