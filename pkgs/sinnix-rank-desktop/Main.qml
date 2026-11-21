@@ -73,6 +73,7 @@ ApplicationWindow {
     palette.disabled.buttonText: "#7a8594"
 
     header: ToolBar {
+        id: appBar
         padding: 12
         background: Rectangle {
             color: "#171d25"
@@ -81,7 +82,7 @@ ApplicationWindow {
 
         RowLayout {
             anchors.fill: parent
-            anchors.margins: parent.padding
+            anchors.margins: appBar.padding
             spacing: 12
 
             Button {
@@ -199,7 +200,7 @@ ApplicationWindow {
             spacing: 8
 
             Button { text: "Tie · T"; enabled: controller.can_compare && !controller.busy; onClicked: window.pairAction("tie") }
-            Button { text: "Skip · S"; enabled: (controller.left.key || controller.right.key) && !controller.busy; onClicked: window.pairAction("skip") }
+            Button { text: "Skip · S"; enabled: !!(controller.left.key || controller.right.key) && !controller.busy; onClicked: window.pairAction("skip") }
             Button { text: "Undo · U"; enabled: controller.can_undo && !controller.busy; onClicked: window.pairAction("undo") }
             Item { Layout.fillWidth: true }
             Flow {
