@@ -94,7 +94,7 @@ Rectangle {
         id: commentDialog
         objectName: pane.side + "CommentDialog"
         anchors.centerIn: Overlay.overlay
-        width: Math.min(600, Overlay.overlay.width - 32)
+        width: 600
         modal: true
         title: "Video comment"
         property string fileKey
