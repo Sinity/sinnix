@@ -15,7 +15,7 @@ from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
 
 from previews import PERCENTAGES, PreviewWorker
-from session import DomainSource, Item, LocalSource, Session, StashSource
+from session import largest_first, DomainSource, Item, LocalSource, Session, StashSource
 
 
 def file_size(bytes_count):
@@ -96,7 +96,10 @@ def version_info(entry):
 
 class Controller(QObject):
     changed = Signal()
-    media_changed = Signal()
+    left_changed = Signal()
+    right_changed = Signal()
+    preview_changed = Signal()
+    frame_changed = Signal(str, int)
     recents_changed = Signal()
     operation_completed = Signal(object, object, object)
     frames_completed = Signal(str, object, object)
@@ -124,6 +127,13 @@ class Controller(QObject):
         self._frame_requests = {}
         self._video_requests = {}
         self._version = None
+        self._epoch = 0
+        self._file_identities = {}
+        self._visible_items = [None, None, None]
+        self._descriptions = [{}, {}, {}]
+        self._inspecting = False
+        self._prefetch = None
+        self._cached_only = None
         self.operation_completed.connect(self._complete)
         self.frames_completed.connect(self._receive_frames)
         self.video_completed.connect(self._receive_video)
@@ -156,6 +166,7 @@ class Controller(QObject):
     @Slot(object, object, object)
     def _complete(self, result, source, error):
         self._busy = False
+        self._epoch += 1
         self._error = error
         if isinstance(result, str):
             path = result
@@ -174,8 +185,8 @@ class Controller(QObject):
             self._version = None
             self._save_recent(source)
         self._request_media()
+        self._publish_items()
         self.changed.emit()
-        self.media_changed.emit()
 
     def _save_recent(self, source):
         self._recents = [source] + [old for old in self._recents if old != source][:9]
@@ -203,7 +214,7 @@ class Controller(QObject):
                 "files": lambda: LocalSource(values),
                 "stash": lambda: StashSource(
                     stash_adapter(),
-                    scope=values or "vr",
+                    scope=values,
                 ),
             }[action]()
             return Session(provider)
@@ -239,7 +250,7 @@ class Controller(QObject):
             else:
                 self.refresh()
             return
-        self._open({"kind": "stash", "value": scope or "vr", "label": "Stash"})
+        self._open({"kind": "stash", "value": scope, "label": "Stash"})
 
     @Slot(int)
     def open_recent(self, index):
@@ -257,6 +268,21 @@ class Controller(QObject):
     @Slot(str)
     def set_scope(self, scope):
         self._apply("set_scope", scope)
+
+    @Property(int, notify=changed)
+    def epoch(self):
+        return self._epoch
+
+    @Slot(int, str, str, str, "QVariantList")
+    def decide(self, epoch, left, right, action, ids):
+        if self._busy or epoch != self._epoch or [left, right] != [value.get("key", "") for value in self._descriptions[:2]]:
+            return
+        if action in ("left", "right"):
+            self.prefer(int(action == "right"))
+        elif action in ("tie", "skip", "undo"):
+            getattr(self, action)()
+        elif action == "delete":
+            self.delete_files(ids)
 
     @Slot(int)
     def prefer(self, side):
@@ -290,6 +316,12 @@ class Controller(QObject):
             result = subprocess.run(command, capture_output=True, timeout=10, text=True)
             if result.returncode:
                 raise RuntimeError(result.stderr.strip() or "The projection could not be saved.")
+            if self._session and isinstance(self._session.source, StashSource):
+                provider = self._session.source
+                scenes = {item.scene_id for item in provider.files.values() if item.path == path}
+                if scenes:
+                    provider.reconcile(sorted(scenes))
+                    self._session.refresh(reconcile=False)
             return path
 
         self._schedule(apply)
@@ -301,20 +333,51 @@ class Controller(QObject):
             kind="video", duration=info.get("duration"),
         )
         self._request_media()
-        self.media_changed.emit()
+        self._publish_items()
 
     @Slot()
     def close_preview(self):
         self._version = None
         self._request_media()
-        self.media_changed.emit()
+        self._publish_items()
 
     def _pair(self):
         return self._session.pair if self._session else (None, None)
 
     def _request_media(self):
         items = tuple(item for item in (*self._pair(), self._version) if item and item.kind == "video" and item.path)
+        self._prefetch = None
+        if (self._session and self._session.order == "largest" and items
+                and all(len(self._frames_by_item.get(item.path, {})) == len(PERCENTAGES) for item in items)):
+            seen = set(self._session.slot["seen"]) | set(self._session.slot["current"])
+            following = min((item for item in self._session.items.values() if item.id not in seen),
+                            key=largest_first, default=None)
+            if following and following.kind == "video" and following.path:
+                self._prefetch = following.path
+                items += (following,)
         keys = {str(item.path) for item in items}
+        replaced = set()
+        for item in items:
+            path = str(item.path)
+            identity = (item.id, item.size, item.identity.get("mod_time"))
+            previous = self._file_identities.get(path)
+            if previous is not None and previous != identity:
+                replaced.add(path)
+                self._frames_by_item.pop(path, None)
+                self._frame_requests.pop(path, None)
+                self._metadata_by_item.pop(path, None)
+                if stale := self._video_requests.pop(path, None):
+                    stale.cancel()
+            self._file_identities[path] = identity
+        if replaced:
+            self._frames.cancel_except(keys - replaced)
+        cached_only = self._prefetch if self._inspecting else None
+        if self._cached_only != cached_only:
+            switching = {self._cached_only, cached_only} - {None}
+            self._frames.cancel_except(keys - switching)
+            for path in switching:
+                self._frame_requests.pop(path, None)
+            self._cached_only = cached_only
         self._frames.cancel_except(keys)
         for key in self._frame_requests.keys() - keys:
             del self._frame_requests[key]
@@ -330,8 +393,9 @@ class Controller(QObject):
                 def publish_frames(path, frames, token=generation):
                     self.frames_completed.emit(path, token, frames)
 
-                self._frames.request(replace(item, id=key), publish_frames)
-            if key in self._metadata_by_item or key in self._video_requests:
+                self._frames.request(replace(item, id=key), publish_frames,
+                                     background=key == self._prefetch, cached_only=key == cached_only)
+            if key == self._prefetch or key in self._metadata_by_item or key in self._video_requests:
                 continue
             task = self._metadata.submit(probe_video, key, item.duration)
             self._video_requests[key] = task
@@ -345,8 +409,32 @@ class Controller(QObject):
     @Slot(str, object, object)
     def _receive_frames(self, path, generation, frames):
         if self._frame_requests.get(path) is generation:
-            self._frames_by_item.setdefault(path, {}).update(frames)
-            self.media_changed.emit()
+            known = self._frames_by_item.setdefault(path, {})
+            known.update(frames)
+            for pct, _ in frames:
+                self.frame_changed.emit(path, pct)
+            if len(known) == len(PERCENTAGES) and path != self._prefetch and not self._busy:
+                self._request_media()
+
+    @Slot(bool)
+    def inspecting(self, active):
+        self._inspecting = active
+        if not self._busy:
+            self._request_media()
+
+    @Slot(str, int, result="QVariantMap")
+    def frame(self, path, pct):
+        frames = self._frames_by_item.get(path, {})
+        return {"url": source_url(frames.get(pct)), "failed": pct in frames and not frames[pct]}
+
+    @Slot(str)
+    def retry_frames(self, path):
+        if path not in self._frame_requests:
+            return
+        self._frames.cancel_except(self._frame_requests.keys() - {path})
+        self._frame_requests.pop(path)
+        self._frames_by_item.pop(path, None)
+        self._request_media()
 
     @Slot(str, object)
     def _receive_video(self, path, payload):
@@ -354,7 +442,7 @@ class Controller(QObject):
         if self._video_requests.get(path) is job:
             del self._video_requests[path]
             self._metadata_by_item[path] = (projection, duration)
-            self.media_changed.emit()
+            self._publish_items(path)
 
     def _describe(self, item):
         if item is None:
@@ -362,6 +450,8 @@ class Controller(QObject):
         item_id = str(item.id)
         path = str(item.path) if item.path else ""
         projection, duration = self._metadata_by_item.get(path, ({}, item.duration))
+        if item.projection_kind == "vr" and projection.get("kind") == "flat" and projection.get("source") != "override":
+            projection = {**projection, "projection": "unknown"}
         kind = item.kind
         media = path
         if item.image and kind != "video":
@@ -372,15 +462,9 @@ class Controller(QObject):
             overview.append(timestamp(duration))
         if item.scene_id is not None:
             overview.append(f"{item.play_count} scene plays")
-        known_frames = self._frames_by_item.get(path, {})
-        frames = [
-            {
-                "fraction": pct / 100,
-                "url": source_url(known_frames.get(pct)),
-                "label": timestamp(duration * pct / 100) if duration else f"{pct}%",
-            }
-            for pct in PERCENTAGES
-        ] if kind == "video" else []
+        frames = [{"pct": pct, "fraction": pct / 100,
+                   "label": timestamp(duration * pct / 100) if duration else f"{pct}%"}
+                  for pct in PERCENTAGES] if kind == "video" else []
         text = item.description or item.label
         if kind == "text" and path:
             try:
@@ -399,17 +483,30 @@ class Controller(QObject):
             "versions": [version_info(entry) for entry in item.versions],
         }
 
-    @Property("QVariantMap", notify=media_changed)
+    def _publish_items(self, changed_path=None):
+        for index, (item, signal) in enumerate(zip((*self._pair(), self._version),
+                (self.left_changed, self.right_changed, self.preview_changed))):
+            if item != self._visible_items[index] or (item and item.path == changed_path):
+                self._visible_items[index] = item
+                self._descriptions[index] = self._describe(item)
+                signal.emit()
+
+    @Property("QVariantMap", notify=left_changed)
     def left(self):
-        return self._describe(self._pair()[0])
+        return self._descriptions[0]
 
-    @Property("QVariantMap", notify=media_changed)
+    @Property("QVariantMap", notify=right_changed)
     def right(self):
-        return self._describe(self._pair()[1])
+        return self._descriptions[1]
 
-    @Property("QVariantMap", notify=media_changed)
+    @Property("QVariantMap", notify=preview_changed)
     def preview(self):
-        return self._describe(self._version)
+        return self._descriptions[2]
+
+    @Property(str, notify=changed)
+    def undo_label(self):
+        previous = self._session.slot["undo"] if self._session else None
+        return (previous or {}).get("action", "ranking")
 
     @Property("QVariantList", notify=recents_changed)
     def recents(self):
@@ -449,7 +546,7 @@ class Controller(QObject):
     def can_undo(self):
         return bool(self._session and self._session.can_undo)
 
-    @Property(str, notify=media_changed)
+    @Property(str, notify=changed)
     def both_size(self):
         return file_size(sum(int(item.size or 0) for item in self._pair() if item))
 

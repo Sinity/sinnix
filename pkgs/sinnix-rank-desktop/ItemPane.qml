@@ -13,7 +13,9 @@ Rectangle {
     signal activated
     signal focusRequested
     signal versionsRequested
-    signal preferred
+    readonly property bool dialogOpen: correction.visible || options.visible
+    readonly property var video: player.item
+    TapHandler { onPressedChanged: if (pressed) pane.activated() }
 
     property color panel: "#1a2029"
     property color borderColor: "#303944"
@@ -22,7 +24,7 @@ Rectangle {
     property bool videoVisible: false
     property bool previewOnly: false
     property real pendingFraction: -1
-    property url playbackSource: ""
+
     property real imageZoom: 1
     property real imageX: 0
     property real imageY: 0
@@ -36,12 +38,12 @@ Rectangle {
 
     function reset() {
         if (video) {
+            seekTimer.stop();
             video.stop();
             video.recenter();
             video.original = false;
         }
         videoVisible = false;
-        playbackSource = "";
         pendingFraction = -1;
         imageZoom = 1;
         imageX = 0;
@@ -52,12 +54,11 @@ Rectangle {
         pane.activated();
         pendingFraction = fraction;
         videoVisible = true;
-        playbackSource = info.media;
-        if (video.duration > 0) {
+        if (video && video.duration > 0) {
             video.seek(pendingFraction * video.duration);
             pendingFraction = -1;
         }
-        video.play();
+        if (video) video.play();
     }
 
     function toggle() {
@@ -65,19 +66,29 @@ Rectangle {
             return;
         if (!videoVisible)
             jump(0);
-        else if (video.playing)
+        else if (video && video.playing)
             video.pause();
-        else
+        else if (video)
             video.play();
     }
 
     property string identity: info.key || ""
     onIdentityChanged: reset()
 
-    radius: 15
-    color: panel
+    radius: 0
+    color: "#16191d"
     border.color: active ? accent : borderColor
-    border.width: 1
+    border.width: 0
+
+    function setProjection() {
+        pane.activated()
+        const value = pane.info.projection || {}
+        projectionMode.currentIndex = Math.max(0, projectionMode.indexOfValue(value.projection))
+        stereoMode.currentIndex = Math.max(0, stereoMode.indexOfValue(value.layout))
+        inputFov.value = value.hfov || 180
+        swap.checked = !!value.swap
+        correction.open()
+    }
 
     Dialog {
         id: correction
@@ -133,8 +144,8 @@ Rectangle {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 16
-        spacing: 12
+        anchors.margins: 6
+        spacing: 6
 
         RowLayout {
             Layout.fillWidth: true
@@ -146,7 +157,7 @@ Rectangle {
                 Label {
                     Layout.fillWidth: true
                     text: pane.info.label || "No item"
-                    font.pixelSize: 19
+                    font.pixelSize: 15
                     font.bold: true
                     elide: Text.ElideRight
                     ToolTip.visible: hovered.hovered && truncated
@@ -156,17 +167,30 @@ Rectangle {
                 Label {
                     Layout.fillWidth: true
                     visible: !!text
-                    text: pane.info.details || ""
+                    text: pane.info.size_label || ""
+                    font.bold: true
                     color: pane.mutedText
-                    font.pixelSize: 13
+                    font.pixelSize: 17
                     elide: Text.ElideRight
                 }
             }
             CompareButton {
-                text: pane.focused ? "Show both" : "Expand"
-                visible: !pane.previewOnly
-                enabled: !!pane.info.key
-                onClicked: pane.focusRequested()
+                visible: pane.info.kind === "video" && pane.info.projection?.projection === "unknown"
+                text: "Set projection"
+                onClicked: pane.setProjection()
+            }
+            CompareButton {
+                text: "Options"
+                onClicked: { pane.activated(); options.open() }
+                Menu {
+                    id: options
+                    MenuItem { text: pane.focused ? "Show both" : "Expand"; onTriggered: pane.focusRequested() }
+                    MenuItem { text: "Projection and eyes"; enabled: pane.info.kind === "video"; onTriggered: pane.setProjection() }
+                    MenuItem { text: "Other versions"; enabled: !!pane.info.versions?.length; onTriggered: pane.versionsRequested() }
+                    MenuItem { text: "Original view"; checkable: true; enabled: !!pane.video; checked: pane.video?.original || false; onTriggered: pane.video.original = checked }
+                    MenuItem { text: "Recenter"; enabled: !!pane.video; onTriggered: pane.video.recenter() }
+                    MenuItem { text: "Reset zoom"; enabled: pane.imageZoom > 1; onTriggered: { pane.imageZoom = 1; pane.imageX = 0; pane.imageY = 0 } }
+                }
             }
         }
 
@@ -242,164 +266,110 @@ Rectangle {
                 }
             }
 
-            GridLayout {
-                anchors.centerIn: parent
-                readonly property real gap: 8
-                readonly property real tileWidth: Math.min(
-                    (content.width - 16 - (columns - 1) * gap) / columns,
-                    (content.height - 16 - (rows - 1) * gap) / rows * 16 / 9)
-                width: Math.max(0, columns * tileWidth + (columns - 1) * gap)
-                height: Math.max(0, rows * tileWidth * 9 / 16 + (rows - 1) * gap)
-                visible: pane.info.kind === "video" && !pane.videoVisible
-                columns: content.width >= content.height * 16 / 9 ? 3 : 2
-                rows: 6 / columns
-                columnSpacing: gap
-                rowSpacing: gap
-                Repeater {
-                    model: pane.info.frames || []
-                    delegate: Rectangle {
-                        required property var modelData
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        Layout.preferredWidth: 1
-                        Layout.preferredHeight: 1
-                        color: thumb.hovered ? "#354352" : "#252e39"
-                        radius: 8
-                        clip: true
+            Loader {
+                id: player
+                asynchronous: true
+                active: pane.videoVisible
+                anchors.fill: parent
+                anchors.bottomMargin: active ? Math.min(content.height / 4, 75) : 0
+                sourceComponent: VideoPane {
+                    source: pane.info.media || ""
+                    projection: pane.info.projection || ({})
+                    muted: pane.muted
+                    volume: 0.75
+                    onDurationChanged: {
+                        if (duration > 0 && pane.pendingFraction >= 0) {
+                            seek(pane.pendingFraction * duration)
+                            pane.pendingFraction = -1
+                        }
+                    }
+                    Component.onCompleted: play()
+                }
+            }
 
+            Grid {
+                id: grid
+                function tile(c) {
+                    return Math.min((content.width - (c - 1) * spacing) / c,
+                        (content.height - (6/c - 1) * spacing) / (6/c) * 16/9)
+                }
+                columns: pane.videoVisible ? 6 : [1,2,3,6].reduce((best,c) => tile(c) > tile(best) ? c : best, 1)
+                spacing: 3
+                property real cellWidth: Math.max(1,pane.videoVisible ? (content.width-5*spacing)/6 : tile(columns))
+                property real cellHeight: pane.videoVisible ? Math.min(player.anchors.bottomMargin - spacing,cellWidth*9/16) : cellWidth*9/16
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: pane.videoVisible ? content.height-height : (content.height-height)/2
+                visible: pane.info.kind === "video"
+                Repeater {
+                    model: pane.info.kind === "video" ? 6 : 0
+                    delegate: Rectangle {
+                        id: tile
+                        required property int index
+                        property var moment: pane.info.frames?.[index] || ({})
+                        property var frame
+                        function refresh() {
+                            frame = moment.pct ? pane.rankController.frame(pane.info.path, moment.pct) : ({})
+                        }
+                        onMomentChanged: refresh()
+                        Component.onCompleted: refresh()
+                        Connections {
+                            target: pane.rankController
+                            function onFrame_changed(path, pct) {
+                                if (path === pane.info.path && pct === tile.moment.pct) tile.refresh()
+                            }
+                        }
+                        width: grid.cellWidth
+                        height: grid.cellHeight
+                        color: "#24282d"
                         Image {
+                            id: image
                             anchors.fill: parent
-                            source: modelData.url || ""
+                            source: tile.frame?.url || ""
                             fillMode: Image.PreserveAspectFit
                             asynchronous: true
-                            opacity: thumb.hovered ? 0.78 : 1
                         }
+                        Rectangle { anchors.fill: parent; color: "transparent"; border.width: hover.hovered ? 2 : 0; border.color: pane.accent }
+                        HoverHandler { id: hover }
                         Label {
                             anchors.left: parent.left
                             anchors.bottom: parent.bottom
-                            anchors.margins: 5
-                            padding: 5
-                            text: modelData.label
-                            color: "#ffffff"
-                            background: Rectangle { color: "#cc10141a"; radius: 4 }
+                            padding: 3
+                            font.family: "monospace"
+                            font.pixelSize: 12
+                            text: tile.moment.label || ""
+                            background: Rectangle { color: "#cb121518" }
                         }
-                        Label {
+                        TapHandler { onTapped: pane.jump(tile.moment.fraction) }
+                        Button {
                             anchors.centerIn: parent
-                            visible: !modelData.url || thumb.hovered
-                            text: "▶"
-                            color: "#ffffff"
-                            font.pixelSize: 24
+                            visible: tile.frame?.failed || image.status === Image.Error
+                            text: "Retry"
+                            onClicked: pane.rankController.retry_frames(pane.info.path)
                         }
-                        HoverHandler { id: thumb }
-                        TapHandler { onTapped: pane.jump(modelData.fraction) }
-                    }
-                }
-            }
-
-            VideoPane {
-                id: video
-                anchors.fill: parent
-                visible: pane.videoVisible
-                source: pane.playbackSource
-                projection: pane.info.projection || ({})
-                muted: pane.muted
-                volume: 0.75
-                onDurationChanged: {
-                    if (duration > 0 && pane.pendingFraction >= 0) {
-                        seek(pane.pendingFraction * duration);
-                        pane.pendingFraction = -1;
                     }
                 }
             }
         }
-
-        GridLayout {
-            Layout.fillWidth: true
-            visible: pane.info.kind === "video"
-            columns: width >= 640 ? 2 : 1
-            rowSpacing: 3
-            RowLayout {
-                Layout.fillWidth: true
-                CompareButton {
-                    text: video.playing ? "Pause" : "Play"
-                    onClicked: { pane.activated(); pane.toggle(); }
-                }
-                Slider {
-                    id: timeline
-                    Layout.fillWidth: true
-                    enabled: pane.videoVisible && video.duration > 0
-                    from: 0
-                    to: Math.max(video.duration, 1)
-                    value: video.position
-                    onMoved: video.seek(value)
-                }
-                Label {
-                    text: pane.clock(pane.videoVisible ? video.position : 0) + " / "
-                          + pane.clock((pane.videoVisible ? video.duration : 0) || pane.info.duration || 0)
-                    color: pane.mutedText
-                }
-            }
-            RowLayout {
-                Layout.alignment: Qt.AlignRight
-                CompareButton {
-                    text: "Frames"
-                    visible: pane.videoVisible
-                    onClicked: { video.pause(); pane.videoVisible = false; }
-                }
-                CompareButton {
-                    text: video.original ? "Flatten" : "Original"
-                    visible: pane.videoVisible && ["equirect", "fisheye"].includes(pane.info.projection?.projection)
-                    onClicked: video.original = !video.original
-                }
-                CompareButton {
-                    text: "Projection"
-                    enabled: !!pane.info.path && !pane.rankController.busy
-                    onClicked: {
-                        const projection = pane.info.projection || {};
-                        projectionMode.currentIndex = Math.max(0, projectionMode.indexOfValue(projection.projection));
-                        stereoMode.currentIndex = Math.max(0, stereoMode.indexOfValue(projection.layout));
-                        inputFov.value = projection.hfov || 180;
-                        swap.checked = !!projection.swap;
-                        correction.open();
-                    }
-                }
-                CompareButton {
-                    text: "Recenter"
-                    visible: pane.videoVisible && ["equirect", "fisheye"].includes(pane.info.projection?.projection) && !video.original
-                    onClicked: video.recenter()
-                }
-            }
-        }
-
-        Label {
-            Layout.fillWidth: true
-            visible: pane.videoVisible && !!video.playbackError
-            text: video.playbackError
-            color: "#fca1a9"
-            wrapMode: Text.Wrap
-        }
-
         RowLayout {
+            visible: pane.videoVisible
             Layout.fillWidth: true
-            CompareButton {
-                tone: "primary"
-                objectName: pane.side + "Prefer"
-                visible: !pane.previewOnly
-                text: pane.side === "left" ? "Prefer left   1" : "Prefer right   2"
-                enabled: pane.rankController.can_compare && !pane.rankController.busy
-                onClicked: pane.preferred()
+            CompareButton { text: "Back to frames"; onClicked: pane.reset() }
+            CompareButton { text: pane.video?.playing ? "Pause" : "Play"; onClicked: pane.toggle() }
+            Slider {
+                id: timeline
+                Layout.fillWidth: true
+                to: Math.max(1,pane.video?.duration || 0)
+                value: pane.video?.position || 0
+                onMoved: { pane.activated(); seekTimer.targetTime = value; if (!seekTimer.running) seekTimer.start() }
+                Timer {
+                    id: seekTimer
+                    interval: 40
+                    property real targetTime
+                    onTriggered: if (pane.video) pane.video.seek(targetTime)
+                }
             }
-            CompareButton {
-                text: "Reset zoom"
-                visible: pane.info.kind === "image" && pane.imageZoom > 1
-                onClicked: { pane.imageZoom = 1; pane.imageX = 0; pane.imageY = 0; }
-            }
-            Item { Layout.fillWidth: true }
-            CompareButton {
-                text: "Other versions (" + (pane.info.versions?.length || 0) + ")"
-                visible: (pane.info.versions?.length || 0) > 0
-                onClicked: pane.versionsRequested()
-            }
+            Label { text: pane.clock(timeline.pressed || seekTimer.running ? timeline.value : (pane.video?.position || 0)); font.family: "monospace" }
         }
+        Label { visible: !!pane.video?.playbackError; text: pane.video?.playbackError || ""; color: "#fca1a9" }
     }
 }

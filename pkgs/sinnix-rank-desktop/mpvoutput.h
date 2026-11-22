@@ -79,6 +79,7 @@ private:
     qreal m_volume = 1;
     bool m_muted = true;
     bool m_stretch = false;
+    bool m_renderReady = false;
     bool m_open = false;
     bool m_loaded = false;
     bool m_requestedPlay = false;

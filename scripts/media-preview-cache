@@ -13,6 +13,7 @@ usage() {
 Usage:
   media-preview-cache thumb-path FILE [PERCENT]
   media-preview-cache ensure FILE [PERCENT]
+  media-preview-cache batch [--cached] FILE PERCENT...
   media-preview-cache warm DIR [PERCENT]
 
 Commands:
@@ -28,9 +29,9 @@ canonical_file() {
 
 thumb_path() {
   local resolved="$1" percent="$2" filter="$3"
-  local metadata key shard
+  local key shard
 
-  metadata="$(stat --printf='%s\t%Y\t%Z' -- "$resolved")" || return
+
   key="$(
     {
       printf '%s\t%s\t%s\n' "$resolved" "$metadata" "$percent"
@@ -46,9 +47,12 @@ thumb_path() {
 
 projected_thumb() {
   local source="$1" percent="$2" filter="$3" output="$4"
-  local duration seek
+  local seek
   [[ "$percent" =~ ^[0-9]+$ ]] || return 2
-  duration="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$source")" || return
+  local duration="${batch_duration:-}"
+  if [[ -z "$duration" ]]; then
+    duration="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$source")" || return
+  fi
   seek="$(awk -v duration="$duration" -v percent="$percent" 'BEGIN {
     if (duration !~ /^[0-9]+([.][0-9]+)?$/) exit 1
     printf "%.6f", duration * percent / 100
@@ -140,16 +144,38 @@ main() {
   local cmd="${1:-}"
 
   case "$cmd" in
-    thumb-path|ensure)
+    thumb-path|ensure|batch)
+      local cached_only=false
+      if [[ "$cmd" == batch && "${2:-}" == --cached ]]; then
+        cached_only=true
+        shift
+      fi
       [[ $# -ge 2 ]] || {
         usage >&2
         exit 1
       }
-      local resolved filter
+      local resolved filter metadata
       IFS= read -r -d '' resolved < <(canonical_file "$2") || return
+      metadata="$(stat --printf='%s\t%Y\t%Z' -- "$resolved")" || return
       filter="$(video-projection thumbnail-filter "$resolved")" || return
       if [[ "$cmd" == "thumb-path" ]]; then
         thumb_path "$resolved" "${3:-$default_percent}" "$filter"
+      elif [[ "$cmd" == batch ]]; then
+        shift 2
+        (( $# )) || return 2
+        local pct path batch_duration=""
+        for pct in "$@"; do
+          [[ "$pct" =~ ^[0-9]{1,2}$|^100$ ]] || return 2
+          path="$(thumb_path "$resolved" "$pct" "$filter")" || return
+          if [[ ! -s "$path" ]]; then
+            if "$cached_only"; then continue; fi
+            if [[ -n "$filter" && -z "$batch_duration" ]]; then
+              batch_duration="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$resolved")" || return
+            fi
+            path="$(ensure_thumb "$resolved" "$pct" "$filter")" || path=""
+          fi
+          printf '%s\t%s\n' "$pct" "$path"
+        done
       else
         ensure_thumb "$resolved" "${3:-$default_percent}" "$filter"
       fi

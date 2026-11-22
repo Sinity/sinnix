@@ -21,6 +21,7 @@ public:
     }
 
 signals:
+    void renderReady();
     void redraw();
     void eventsReady();
     void renderError(const QString &message);
@@ -95,6 +96,7 @@ private:
         mpv_render_context_set_update_callback(m_context, [](void *data) {
             emit static_cast<Mpv *>(data)->redraw();
         }, m_mpv.get());
+        emit m_mpv->renderReady();
         return true;
     }
 
@@ -112,6 +114,11 @@ MpvOutput::MpvOutput(QQuickItem *parent)
     connect(m_mpv.get(), &Mpv::redraw, this, &MpvOutput::update, Qt::QueuedConnection);
     connect(m_mpv.get(), &Mpv::eventsReady, this, &MpvOutput::drainEvents, Qt::QueuedConnection);
     connect(m_mpv.get(), &Mpv::renderError, this, &MpvOutput::setError, Qt::QueuedConnection);
+    connect(m_mpv.get(), &Mpv::renderReady, this, [this]() {
+        m_renderReady = true;
+        if (m_requestedPlay)
+            play();
+    }, Qt::QueuedConnection);
     auto *handle = m_mpv->handle;
     if (!handle) {
         m_mpv.reset();
@@ -216,6 +223,8 @@ void MpvOutput::play() {
     if (!m_mpv || m_path.isEmpty())
         return;
     m_requestedPlay = true;
+    if (!m_renderReady)
+        return;
     if (!m_open) {
         setError({});
         // Hold the first frame until a pending thumbnail seek is applied.
