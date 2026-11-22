@@ -11,8 +11,10 @@ ApplicationWindow {
     minimumWidth: 790
     minimumHeight: 540
     visible: true
-    color: "#10141a"
-    title: controller.title ? controller.title + " · Preference ranking" : "Preference ranking"
+    color: "#111419"
+    font.family: "Inter"
+    font.pixelSize: 14
+    title: controller.title ? controller.title + " · Compare" : "Compare"
 
     property var rankController: controller
     property string activeSide: "left"
@@ -74,10 +76,10 @@ ApplicationWindow {
 
     header: ToolBar {
         id: appBar
-        padding: 12
+        padding: 16
         implicitHeight: headerRow.implicitHeight + 2 * padding
         background: Rectangle {
-            color: "#171d25"
+            color: "#1a1f27"
             Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: "#394250" }
         }
 
@@ -87,7 +89,7 @@ ApplicationWindow {
             anchors.margins: appBar.padding
             spacing: 12
 
-            Button {
+            CompareButton {
                 text: "Open"
                 enabled: !controller.busy
                 onClicked: sources.open()
@@ -98,7 +100,7 @@ ApplicationWindow {
                 spacing: 2
                 Label {
                     Layout.fillWidth: true
-                    text: controller.title || "Preference ranking"
+                    text: controller.title || "Compare"
                     font.pixelSize: 19
                     font.bold: true
                     elide: Text.ElideRight
@@ -116,6 +118,7 @@ ApplicationWindow {
                 visible: controller.can_scope
                 enabled: !controller.busy
                 Accessible.name: "Video type"
+                implicitHeight: 36
                 textRole: "title"
                 valueRole: "value"
                 model: [
@@ -134,6 +137,7 @@ ApplicationWindow {
                 textRole: "title"
                 valueRole: "value"
                 Accessible.name: "Comparison order"
+                implicitHeight: 36
                 model: [
                     { title: "Largest first · winner stays", value: "largest" },
                     { title: "Most informative · fresh pairs", value: "informative" }
@@ -141,7 +145,7 @@ ApplicationWindow {
                 currentIndex: Math.max(0, indexOfValue(controller.order))
                 onActivated: controller.set_order(currentValue)
             }
-            ToolButton {
+            CompareButton {
                 text: "Refresh"
                 enabled: !controller.busy && !!controller.title
                 onClicked: controller.refresh()
@@ -151,8 +155,8 @@ ApplicationWindow {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 14
-        spacing: 12
+        anchors.margins: 18
+        spacing: 14
 
         RowLayout {
             Layout.fillWidth: true
@@ -201,17 +205,14 @@ ApplicationWindow {
             Layout.fillWidth: true
             spacing: 8
 
-            Button { text: "Tie · T"; enabled: controller.can_compare && !controller.busy; onClicked: window.pairAction("tie") }
-            Button { text: "Skip · S"; enabled: !!(controller.left.key || controller.right.key) && !controller.busy; onClicked: window.pairAction("skip") }
-            Button { text: "Undo · U"; enabled: controller.can_undo && !controller.busy; onClicked: window.pairAction("undo") }
+            CompareButton { text: "Tie · T"; enabled: controller.can_compare && !controller.busy; onClicked: window.pairAction("tie") }
+            CompareButton { text: "Skip · S"; enabled: !!(controller.left.key || controller.right.key) && !controller.busy; onClicked: window.pairAction("skip") }
+            CompareButton { text: "Undo · U"; enabled: controller.can_undo && !controller.busy; onClicked: window.pairAction("undo") }
             Item { Layout.fillWidth: true }
-            Flow {
+            RowLayout {
                 visible: controller.can_delete
                 spacing: 6
-                component DeleteButton: Button {
-                    palette.button: "#502d36"
-                    palette.buttonText: "#ffd4d7"
-                }
+                component DeleteButton: CompareButton { tone: "danger" }
                 DeleteButton {
                     text: "Delete left · " + controller.left.size_label
                     visible: !!controller.left.id

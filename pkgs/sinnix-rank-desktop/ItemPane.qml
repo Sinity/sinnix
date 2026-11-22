@@ -15,10 +15,10 @@ Rectangle {
     signal versionsRequested
     signal preferred
 
-    property color panel: "#191e26"
-    property color borderColor: "#313947"
-    property color mutedText: "#aebccc"
-    property color accent: "#87cfb4"
+    property color panel: "#1a2029"
+    property color borderColor: "#303944"
+    property color mutedText: "#aab6c5"
+    property color accent: "#91ddc7"
     property bool videoVisible: false
     property bool previewOnly: false
     property real pendingFraction: -1
@@ -74,7 +74,7 @@ Rectangle {
     property string identity: info.key || ""
     onIdentityChanged: reset()
 
-    radius: 12
+    radius: 15
     color: panel
     border.color: active ? accent : borderColor
     border.width: 1
@@ -133,19 +133,13 @@ Rectangle {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 14
+        anchors.margins: 16
         spacing: 12
 
         RowLayout {
             Layout.fillWidth: true
             spacing: 10
 
-            Label {
-                text: pane.side === "left" ? "1" : "2"
-                color: pane.accent
-                font.pixelSize: 18
-                font.bold: true
-            }
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 1
@@ -168,8 +162,8 @@ Rectangle {
                     elide: Text.ElideRight
                 }
             }
-            ToolButton {
-                text: pane.focused ? "Restore" : "Focus"
+            CompareButton {
+                text: pane.focused ? "Show both" : "Expand"
                 visible: !pane.previewOnly
                 enabled: !!pane.info.key
                 onClicked: pane.focusRequested()
@@ -249,12 +243,18 @@ Rectangle {
             }
 
             GridLayout {
-                anchors.fill: parent
-                anchors.margins: 8
+                anchors.centerIn: parent
+                readonly property real gap: 8
+                readonly property real tileWidth: Math.min(
+                    (content.width - 16 - (columns - 1) * gap) / columns,
+                    (content.height - 16 - (rows - 1) * gap) / rows * 16 / 9)
+                width: Math.max(0, columns * tileWidth + (columns - 1) * gap)
+                height: Math.max(0, rows * tileWidth * 9 / 16 + (rows - 1) * gap)
                 visible: pane.info.kind === "video" && !pane.videoVisible
                 columns: content.width >= content.height * 16 / 9 ? 3 : 2
-                columnSpacing: 7
-                rowSpacing: 7
+                rows: 6 / columns
+                columnSpacing: gap
+                rowSpacing: gap
                 Repeater {
                     model: pane.info.frames || []
                     delegate: Rectangle {
@@ -263,8 +263,8 @@ Rectangle {
                         Layout.fillHeight: true
                         Layout.preferredWidth: 1
                         Layout.preferredHeight: 1
-                        color: "#263140"
-                        radius: 5
+                        color: thumb.hovered ? "#354352" : "#252e39"
+                        radius: 8
                         clip: true
 
                         Image {
@@ -272,7 +272,7 @@ Rectangle {
                             source: modelData.url || ""
                             fillMode: Image.PreserveAspectFit
                             asynchronous: true
-                            opacity: thumb.hovered ? 0.85 : 1
+                            opacity: thumb.hovered ? 0.78 : 1
                         }
                         Label {
                             anchors.left: parent.left
@@ -316,11 +316,11 @@ Rectangle {
         GridLayout {
             Layout.fillWidth: true
             visible: pane.info.kind === "video"
-            columns: width >= 540 ? 2 : 1
+            columns: width >= 640 ? 2 : 1
             rowSpacing: 3
             RowLayout {
                 Layout.fillWidth: true
-                ToolButton {
+                CompareButton {
                     text: video.playing ? "Pause" : "Play"
                     onClicked: { pane.activated(); pane.toggle(); }
                 }
@@ -341,17 +341,17 @@ Rectangle {
             }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                ToolButton {
+                CompareButton {
                     text: "Frames"
                     visible: pane.videoVisible
                     onClicked: { video.pause(); pane.videoVisible = false; }
                 }
-                ToolButton {
+                CompareButton {
                     text: video.original ? "Flatten" : "Original"
                     visible: pane.videoVisible && ["equirect", "fisheye"].includes(pane.info.projection?.projection)
                     onClicked: video.original = !video.original
                 }
-                ToolButton {
+                CompareButton {
                     text: "Projection"
                     enabled: !!pane.info.path && !pane.rankController.busy
                     onClicked: {
@@ -363,7 +363,7 @@ Rectangle {
                         correction.open();
                     }
                 }
-                ToolButton {
+                CompareButton {
                     text: "Recenter"
                     visible: pane.videoVisible && ["equirect", "fisheye"].includes(pane.info.projection?.projection) && !video.original
                     onClicked: video.recenter()
@@ -381,21 +381,21 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            Button {
+            CompareButton {
+                tone: "primary"
                 objectName: pane.side + "Prefer"
                 visible: !pane.previewOnly
-                text: pane.side === "left" ? "Prefer left" : "Prefer right"
+                text: pane.side === "left" ? "Prefer left   1" : "Prefer right   2"
                 enabled: pane.rankController.can_compare && !pane.rankController.busy
-                highlighted: pane.active
                 onClicked: pane.preferred()
             }
-            ToolButton {
+            CompareButton {
                 text: "Reset zoom"
                 visible: pane.info.kind === "image" && pane.imageZoom > 1
                 onClicked: { pane.imageZoom = 1; pane.imageX = 0; pane.imageY = 0; }
             }
             Item { Layout.fillWidth: true }
-            ToolButton {
+            CompareButton {
                 text: "Other versions (" + (pane.info.versions?.length || 0) + ")"
                 visible: (pane.info.versions?.length || 0) > 0
                 onClicked: pane.versionsRequested()

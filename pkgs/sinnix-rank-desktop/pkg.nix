@@ -47,10 +47,12 @@ stdenv.mkDerivation {
   postInstall = ''
     mkdir -p "$out/share/sinnix-rank" "$out/bin"
     cp "$src"/*.py "$src"/*.qml "$out/share/sinnix-rank/"
-    cp -r "$src/shaders" "$out/share/sinnix-rank/"
-    for shader in "$out/share/sinnix-rank"/shaders/*.frag; do
-      ${qt6.qtshadertools}/bin/qsb --glsl '100 es,300 es,120,150' -o "$shader.qsb" "$shader"
-    done
+    mkdir -p "$out/share/sinnix-rank/shaders"
+    shader="$out/share/sinnix-rank/shaders/perspective.frag.qsb"
+    ${qt6.qtshadertools}/bin/qsb --glsl '100 es,300 es,120,150' \
+      -o "$shader" "$src/shaders/perspective.frag"
+    # qsb can report a write failure while exiting successfully.
+    test -s "$shader"
     makeWrapper ${python}/bin/python3 "$out/bin/sinnix-rank-desktop" \
       --set LC_NUMERIC C \
       --suffix LD_LIBRARY_PATH : /run/opengl-driver/lib \
