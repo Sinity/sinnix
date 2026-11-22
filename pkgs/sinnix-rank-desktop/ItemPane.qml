@@ -13,7 +13,7 @@ Rectangle {
     signal activated
     signal focusRequested
     signal versionsRequested
-    readonly property bool dialogOpen: correction.visible || options.visible
+    readonly property bool dialogOpen: correction.visible || options.visible || commentDialog.visible
     readonly property var video: player.item
     TapHandler { onPressedChanged: if (pressed) pane.activated() }
 
@@ -88,6 +88,82 @@ Rectangle {
         inputFov.value = value.hfov || 180
         swap.checked = !!value.swap
         correction.open()
+    }
+
+    Dialog {
+        id: commentDialog
+        objectName: pane.side + "CommentDialog"
+        anchors.centerIn: Overlay.overlay
+        width: Math.min(600, Overlay.overlay.width - 32)
+        modal: true
+        title: "Video comment"
+        property string fileKey
+        property string fileLabel
+        property bool saving: false
+        closePolicy: saving ? Popup.NoAutoClose : Popup.CloseOnEscape
+        onOpened: commentText.forceActiveFocus()
+
+        function edit() {
+            fileKey = pane.identity
+            fileLabel = pane.info.label
+            commentText.text = pane.rankController.file_comment(fileKey)
+            open()
+        }
+
+        Connections {
+            target: pane.rankController
+            function onComment_saved(key) {
+                if (key === commentDialog.fileKey) commentDialog.close()
+            }
+            function onChanged() {
+                if (commentDialog.saving && !pane.rankController.busy)
+                    commentDialog.saving = false
+            }
+        }
+
+        contentItem: ColumnLayout {
+            Label {
+                Layout.fillWidth: true
+                text: commentDialog.fileLabel
+                elide: Text.ElideMiddle
+            }
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 180
+                contentWidth: availableWidth
+                TextArea {
+                    id: commentText
+                    objectName: pane.side + "CommentText"
+                    Accessible.name: "Video comment"
+                    placeholderText: "Write a comment about this video"
+                    textFormat: TextEdit.PlainText
+                    wrapMode: TextEdit.Wrap
+                    readOnly: commentDialog.saving
+                }
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: pane.rankController.failed
+                text: pane.rankController.message
+                wrapMode: Text.Wrap
+            }
+        }
+        footer: DialogButtonBox {
+            Button {
+                objectName: pane.side + "SaveComment"
+                text: "Save"
+                enabled: !pane.rankController.busy && pane.identity === commentDialog.fileKey
+                onClicked: {
+                    commentDialog.saving = true
+                    pane.rankController.save_file_comment(commentDialog.fileKey, commentText.text)
+                }
+            }
+            Button {
+                text: "Cancel"
+                enabled: !commentDialog.saving
+                onClicked: commentDialog.close()
+            }
+        }
     }
 
     Dialog {
@@ -186,6 +262,11 @@ Rectangle {
                     id: options
                     MenuItem { text: pane.focused ? "Show both" : "Expand"; onTriggered: pane.focusRequested() }
                     MenuItem { text: "Projection and eyes"; enabled: pane.info.kind === "video"; onTriggered: pane.setProjection() }
+                    MenuItem {
+                        text: "Comment…"
+                        enabled: pane.info.kind === "video" && !pane.rankController.busy
+                        onTriggered: commentDialog.edit()
+                    }
                     MenuItem { text: "Other versions"; enabled: !!pane.info.versions?.length; onTriggered: pane.versionsRequested() }
                     MenuItem { text: "Original view"; checkable: true; enabled: !!pane.video; checked: pane.video?.original || false; onTriggered: pane.video.original = checked }
                     MenuItem { text: "Recenter"; enabled: !!pane.video; onTriggered: pane.video.recenter() }

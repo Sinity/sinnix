@@ -14,7 +14,7 @@ ApplicationWindow {
     color: "#111419"
     font.family: "Inter"
     font.pixelSize: 14
-    title: controller.title ? controller.title + " · Compare" : "Compare"
+    title: controller.window_title
 
     property var rankController: controller
     property string activeSide: "left"

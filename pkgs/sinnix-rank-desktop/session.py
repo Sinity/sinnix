@@ -80,6 +80,23 @@ class Item:
     identity: dict = field(default_factory=dict, repr=False)
 
 
+def comparison_title(collection, pair):
+    parts = ["Compare"]
+    if collection:
+        parts.append(" ".join(collection.split()))
+    if any(pair):
+        for side, item in zip(("L", "R"), pair):
+            if item is None:
+                parts.append(f"{side} empty")
+                continue
+            label = " ".join(item.label.split())
+            if len(label) > 60:
+                label = label[:24] + "…" + label[-35:]
+            identity = f" #{item.id}" if item.scene_id is not None else ""
+            parts.append(f"{side}{identity} {label}")
+    return " · ".join(parts)
+
+
 class DomainSource:
     order = "informative"
     can_delete = False
@@ -391,6 +408,22 @@ class Session:
         self.state["scope"] = self.scope
         self.state["order"] = self.order
         atomic_publish(self.path, json.dumps(self.state).encode(), fsync=True)
+
+    def comment(self, file_id):
+        return self.state.get("file_comments", {}).get(file_id, "")
+
+    def save_comment(self, file_id, text):
+        comments = self.state.setdefault("file_comments", {})
+        previous = comments.pop(file_id, None)
+        if text.strip():
+            comments[file_id] = text
+        try:
+            self.save()
+        except OSError:
+            comments.pop(file_id, None)
+            if previous is not None:
+                comments[file_id] = previous
+            raise
 
     def load(self):
         items, imported = self.source.load(self.scope)

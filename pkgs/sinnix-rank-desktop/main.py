@@ -15,7 +15,7 @@ from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
 
 from previews import PERCENTAGES, PreviewWorker
-from session import largest_first, DomainSource, Item, LocalSource, Session, StashSource
+from session import comparison_title, largest_first, DomainSource, Item, LocalSource, Session, StashSource
 
 
 def file_size(bytes_count):
@@ -100,6 +100,7 @@ class Controller(QObject):
     right_changed = Signal()
     preview_changed = Signal()
     frame_changed = Signal(str, int)
+    comment_saved = Signal(str)
     recents_changed = Signal()
     operation_completed = Signal(object, object, object)
     frames_completed = Signal(str, object, object)
@@ -132,6 +133,7 @@ class Controller(QObject):
         self._visible_items = [None, None, None]
         self._descriptions = [{}, {}, {}]
         self._prefetch = None
+        self._saving_comment = None
         self._first_frame_requests = set()
         self.operation_completed.connect(self._complete)
         self.frames_completed.connect(self._receive_frames)
@@ -187,6 +189,10 @@ class Controller(QObject):
         self._request_media()
         self._publish_items()
         self.changed.emit()
+        if self._saving_comment is not None:
+            key, self._saving_comment = self._saving_comment, None
+            if not error:
+                self.comment_saved.emit(key)
 
     def _save_recent(self, source):
         self._recents = [source] + [old for old in self._recents if old != source][:9]
@@ -304,6 +310,23 @@ class Controller(QObject):
     def delete_files(self, ids):
         if self.can_delete and ids:
             self._apply("delete", tuple(map(str, ids)))
+
+    @Slot(str, result=str)
+    def file_comment(self, key):
+        for item, description in zip(self._visible_items, self._descriptions):
+            if item and item.kind == "video" and description.get("key") == key:
+                return self._session.comment(item.id)
+        return ""
+
+    @Slot(str, str)
+    def save_file_comment(self, key, text):
+        if self._busy:
+            return
+        for item, description in zip(self._visible_items, self._descriptions):
+            if item and item.kind == "video" and description.get("key") == key:
+                self._saving_comment = key
+                self._apply("save_comment", item.id, text)
+                return
 
     @Slot(str, str, str, int, bool)
     def correct_projection(self, path, projection, layout, field_of_view, swap):
@@ -518,6 +541,10 @@ class Controller(QObject):
     @Property(str, notify=changed)
     def title(self):
         return self._session.title if self._session else ""
+
+    @Property(str, notify=changed)
+    def window_title(self):
+        return comparison_title(self.title, self._visible_items[:2])
 
     @Property(str, notify=changed)
     def source_label(self):
