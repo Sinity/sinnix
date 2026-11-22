@@ -44,7 +44,6 @@ Rectangle {
             video.original = false;
         }
         videoVisible = false;
-
         pendingFraction = -1;
         imageZoom = 1;
         imageX = 0;
@@ -55,7 +54,6 @@ Rectangle {
         pane.activated();
         pendingFraction = fraction;
         videoVisible = true;
-
         if (video && video.duration > 0) {
             video.seek(pendingFraction * video.duration);
             pendingFraction = -1;
@@ -70,7 +68,7 @@ Rectangle {
             jump(0);
         else if (video && video.playing)
             video.pause();
-        else
+        else if (video)
             video.play();
     }
 
@@ -270,6 +268,7 @@ Rectangle {
 
             Loader {
                 id: player
+                asynchronous: true
                 active: pane.videoVisible
                 anchors.fill: parent
                 anchors.bottomMargin: active ? Math.min(content.height / 4, 75) : 0

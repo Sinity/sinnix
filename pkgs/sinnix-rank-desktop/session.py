@@ -198,13 +198,14 @@ class StashSource:
     can_delete = True
     can_scope = True
 
-    def __init__(self, executable, scope="vr"):
+    def __init__(self, executable, scope=None):
         self.command = (
             [os.fspath(executable)]
             if isinstance(executable, (str, os.PathLike))
             else list(executable)
         )
-        self.scope = scope
+        self.requested_scope = scope
+        self.scope = scope or "vr"
         self.key = json.dumps(["stash", os.path.realpath(self.command[-1])])
         self.rows = []
         self.files = {}
@@ -352,6 +353,8 @@ class Session:
                 self.state = json.loads(self.path.read_text())
             except FileNotFoundError:
                 self.state = {}
+            if isinstance(source, StashSource) and source.requested_scope is None:
+                self.scope = self.state.get("scope", self.scope)
             self.order = self.state.get("order", self.order)
             self.refresh(reconcile=False)
         except BaseException:
@@ -385,6 +388,7 @@ class Session:
         return self.slot["undo"] is not None
 
     def save(self):
+        self.state["scope"] = self.scope
         self.state["order"] = self.order
         atomic_publish(self.path, json.dumps(self.state).encode(), fsync=True)
 

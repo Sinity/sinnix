@@ -46,9 +46,9 @@ ApplicationWindow {
     onInspectingVideoChanged: controller.inspecting(inspectingVideo)
 
     function pairAction(action, keys, ids) {
-        controller.decide(keys[0], keys[1], action, ids || [])
+        controller.decide(keys[0], keys[1], keys[2], action, ids || [])
     }
-    function pairKeys() { return [left.identity, right.identity] }
+    function pairKeys() { return [controller.epoch, left.identity, right.identity] }
 
     Timer { id: secondClick; interval: Qt.styleHints.mouseDoubleClickInterval }
     component Decision: CompareButton {
@@ -234,10 +234,6 @@ ApplicationWindow {
     Shortcut { autoRepeat: false; sequence: "F"; enabled: !window.dialogsOpen; onActivated: window.focusSide(window.activeSide) }
     Shortcut { autoRepeat: false; sequence: "Escape"; enabled: !window.dialogsOpen; onActivated: { if (window.focusedSide) window.focusedSide = ""; else (window.activeSide === "left" ? left : right).reset() } }
     Shortcut { autoRepeat: false; sequence: "Ctrl+O"; enabled: !window.dialogsOpen && !controller.busy; onActivated: sources.open() }
-
-    function previewVisible() {
-        return versionPreview.visible;
-    }
 
     Dialog {
         id: sources

@@ -25,21 +25,23 @@ class PreviewWorker:
                     except ProcessLookupError:
                         pass
 
-    def request(self, item, callback, *, background=False):
+    def request(self, item, callback, *, background=False, cached_only=False):
         with self._lock:
             if item.id in self._requests or not item.path or item.kind != "video":
                 return
             token = object()
             self._requests[item.id] = (token, None)
-            self._pool.submit(self._generate, item, callback, background, token)
+            self._pool.submit(self._generate, item, callback, background, token, cached_only)
 
     def close(self):
         self.cancel_except(())
         self._pool.shutdown(wait=True, cancel_futures=True)
 
-    def _generate(self, item, callback, background, token):
+    def _generate(self, item, callback, background, token, cached_only):
         missing = set(PERCENTAGES)
         command = ["media-preview-cache", "batch", item.path, *map(str, PERCENTAGES)]
+        if cached_only:
+            command.insert(2, "--cached")
         if background:
             command = ["nice", "-n", "10", *command]
         with self._lock:
@@ -59,5 +61,5 @@ class PreviewWorker:
                     pct = int(number)
                     missing.remove(pct)
                     callback(item.id, ((pct, path),))
-        if missing:
+        if missing and not cached_only:
             callback(item.id, tuple((pct, "") for pct in sorted(missing)))
