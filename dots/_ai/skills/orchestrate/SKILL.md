@@ -32,6 +32,10 @@ next, not on supervising progress.
     inherit bias) or a different model is needed.
     Pass an explicit `model` on a non-fork dispatch when the role default
     is not what you want; a fork always inherits the parent model.
+  - A Codex coordinator runs without a thread goal (`/goal`). An active goal
+    starts a new turn every time one ends, so a coordinator that is correctly
+    waiting gets a turn a minute with nothing to do but read status. End each
+    turn in an action or in one blocking wait on a named completion.
   - In Codex, inspect owner state before dispatch. `followup_task` starts or
     resumes assigned work for an idle or completed owner; `send_message` only
     informs an owner already working. Diagnose required-check failures before
