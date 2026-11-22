@@ -12,6 +12,7 @@ PERCENTAGES = (5, 22, 39, 56, 73, 90)
 class PreviewWorker:
     def __init__(self):
         self._pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="video-preview")
+        self._lookahead = ThreadPoolExecutor(max_workers=1, thread_name_prefix="next-preview")
         self._requests = {}
         self._lock = threading.Lock()
 
@@ -25,23 +26,23 @@ class PreviewWorker:
                     except ProcessLookupError:
                         pass
 
-    def request(self, item, callback, *, background=False, cached_only=False):
+    def request(self, item, callback, *, background=False, percentages=PERCENTAGES):
         with self._lock:
             if item.id in self._requests or not item.path or item.kind != "video":
                 return
             token = object()
             self._requests[item.id] = (token, None)
-            self._pool.submit(self._generate, item, callback, background, token, cached_only)
+            pool = self._lookahead if background else self._pool
+            pool.submit(self._generate, item, callback, background, token, percentages)
 
     def close(self):
         self.cancel_except(())
         self._pool.shutdown(wait=True, cancel_futures=True)
+        self._lookahead.shutdown(wait=True, cancel_futures=True)
 
-    def _generate(self, item, callback, background, token, cached_only):
-        missing = set(PERCENTAGES)
-        command = ["media-preview-cache", "batch", item.path, *map(str, PERCENTAGES)]
-        if cached_only:
-            command.insert(2, "--cached")
+    def _generate(self, item, callback, background, token, percentages):
+        missing = set(percentages)
+        command = ["media-preview-cache", "batch", item.path, *map(str, percentages)]
         if background:
             command = ["nice", "-n", "10", *command]
         with self._lock:
@@ -51,7 +52,7 @@ class PreviewWorker:
                 process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                            text=True, start_new_session=True)
             except OSError:
-                callback(item.id, tuple((pct, "") for pct in PERCENTAGES))
+                callback(item.id, tuple((pct, "") for pct in percentages))
                 return
             self._requests[item.id] = (token, process)
         with process:
@@ -61,5 +62,5 @@ class PreviewWorker:
                     pct = int(number)
                     missing.remove(pct)
                     callback(item.id, ((pct, path),))
-        if missing and not cached_only:
+        if missing:
             callback(item.id, tuple((pct, "") for pct in sorted(missing)))
