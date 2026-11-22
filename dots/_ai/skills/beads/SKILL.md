@@ -12,109 +12,118 @@ commands below use `bd` as shorthand for the installed host executable.
 Task state lives outside every checkout, in the Beads/Dolt database under
 `/realm/state/tasks/<project>`, reached through the repository's `.beads`
 redirect (`bd where` shows it). `bd` is the only write path. The current
-directory selects the local store;
-configured native prefix routes can resolve foreign IDs. An unresolved foreign
-prefix reports `task_store_mismatch` with the requested prefix and searched
-store. Run from the owning repository, or use `-C`, for local reads and writes.
-Pass `--actor <name>` (or set `BEADS_ACTOR`);
-the default records the operator as author. Task mutations create no Git
-commits and never belong on a feature branch.
+directory selects the local store; prefix routes resolve another store's IDs,
+so an edge may name a foreign ID. Pass `--actor <name>` (or set
+`BEADS_ACTOR`); the default records the operator as author. Task mutations
+create no Git commits and never belong on a feature branch. Task text is
+public: no operator quotes, private paths, session IDs or personal data.
 
-## Reading
+## Structure
 
-- `bd ready`, `bd list --status …`, `bd show <id>`, `bd graph --open <epic>`.
-  The dependency graph is the authority: an epic is a closure gate over its
-  `blocks` edges, so child counts and labels do not measure its completion.
-- Ready means dependency-ready, not necessarily executable now. Check the
-  design for an operational window, live authority, or operator consent
-  before claiming.
-- Status is a claim, not proof. Check a task's concrete claim against the
-  code at head before dispatching it or accepting it as done; open tasks are
-  often already fixed and closed ones sometimes are not.
+A store has three levels: a release milestone, area epics, work items.
 
-## Changing
+- **Area epics** are few and fixed. They mirror the product's subsystems under
+  the names its docs use. An epic's description says what belongs in it and
+  which doc pages own its design; it holds no work, notes or acceptance rows.
+- **A work item is one coherent change one owner lands as one pull request**,
+  or one operation run, or one decision. Work that needs the same source
+  edits, evidence or test selection is one item whatever plan or report it
+  came from. Split only where two owners could work at once on different
+  files, or one part can be verified without the other.
+- **A change across repositories is one item** in the store of the product
+  whose behaviour changes, with a `repo:<name>` label for each other
+  repository it touches. A prerequisite in another store is a `blocks` edge.
+- **The release** is one milestone whose blockers are exactly what must be
+  true to ship.
 
-- Claim before working (`bd update <id> --claim`) and release what you will
-  not finish.
-- Record dated facts as you go with `bd note`: measurements, disproved
-  hypotheses, operator decisions. Keep one current-state note per task,
-  consolidating on contact, so a cold reader never mistakes a superseded
-  amendment for the current plan. Never paste other tasks' status into a
-  note; derive it from the graph.
-- Turn prose dependencies into edges (`bd dep add`) the moment you notice
-  them. Link follow-up scope to its origin with `discovered-from` or
-  `supersedes`; for a split or residual, set `split_from` or `residual_of`
-  metadata to `sinnix://projects/<project>/beads/<id>`. Origin links are not
-  prerequisites; add `blocks` separately when one is.
-- Pass task prose that contains Markdown, backticks, or shell metacharacters
-  through a file (`--body-file <path>`, or `--stdin`), never through shell
-  interpolation. `--file` means something else: it creates one task per `##`
-  heading.
-- List-valued metadata (`verification_commands`, `affected_paths`,
-  `write_scope`, `acceptance_criteria`) takes a JSON array of non-empty
-  strings or a `;`-separated string.
+## Fields
 
-## Closing
+- **Type:** `epic`, `milestone`, `feature` (a designed capability not built),
+  `task` (a change to something built), `bug` (behaviour contradicts its doc
+  page; name the sentence), `decision` (a question with options; closes with
+  the answer), `spike` (one stated question; closes with the finding).
+- **Priority:** 0 data is being lost or the host harmed now; 1 on the release
+  path; 2 scheduled designed work; 3 after the release; 4 designed and
+  unscheduled.
+- **Status:** `in_progress` only through `--claim` by the owner who will land
+  the item. `deferred` means designed and not scheduled; the description's
+  last line says what would schedule it. `blocked` is derived from edges.
+- **Title:** the outcome in plain words, no plan codes or ritual.
+- **Description:** one paragraph with the outcome and why it matters, then
+  `Scope:` with module names, then `Not in scope:` when a reader would assume
+  otherwise. It is the single current contract: edit it, and correct related
+  claims from the same investigation, instead of stacking amendments.
+- **Design:** the modules touched, the approach and the rejected alternative
+  with its reason, the invariants, the check command. Date file:line
+  citations. Leave it empty when the doc page says it all.
+- **Spec:** `--spec-id docs/<page>.md#<heading>`, the section that owns the
+  behaviour.
+- **Acceptance:** the native field, numbered lines, each observable and
+  naming its check (a test or a command). Read them adversarially: could an
+  executor satisfy the words and miss the point?
+- **Estimate:** `--estimate` minutes of one worker, from comparable finished
+  changes; unset without evidence.
+- **Notes:** one dated paragraph of current state, replaced when the state
+  changes. `--notes` and `--design` replace the field.
+- **Comments:** dated evidence that outlives the current state (a measurement
+  with its command, a disproved hypothesis, a ruling in paraphrase), appended
+  with `bd comment`.
+- **Labels:** `operation`, `operator`, `repo:<name>`. Area membership is the
+  parent edge; plans and dates are not labels.
+- **Metadata:** only keys a tool reads: `split_from` and `residual_of` (as
+  `sinnix://projects/<project>/beads/<id>`).
+- **Edges:** one parent, `blocks` for a real prerequisite, `discovered-from`
+  for where a finding came from. A relation worth knowing otherwise is a
+  sentence in the description.
 
-Close when acceptance criteria are met under the project's delivery rules.
-Leave a compact evidence note: the commit or PR and useful result, or current
-code evidence for an already-completed task. A code task closes when its
-change is on the default branch and its named tests pass there; an operational
-task closes when its listed checks have run against the deployment. Record known failures and unrelated follow-up
-scope honestly without blocking other completed tasks or narrating a checklist.
+Pass prose containing Markdown, backticks or shell metacharacters through a
+file (`--body-file <path>`, `--design-file`, or `--stdin`). `--file` means
+something else: it creates one task per `##` heading.
 
-Split unfinished scope into a successor rather than stretching the closure.
-A close refused by an open blocker means close the blocker first, or
-`--force` deliberately with the reason stated. Batch housekeeping from one
-wave into a few commands.
+## Kinds of item
 
-## Writing a task
+- **Code change:** acceptance is behaviour on the default branch. It closes
+  when its commit is there and the named checks passed there.
+- **Operation** (label `operation`): a deploy, live run, measurement on real
+  data or host step. The description is the fixed list of checks to run
+  against the deployment; it is blocked by the code items it exercises and
+  closes with the run's evidence.
+- **Operator decision** (type `decision`, label `operator`): the question, the
+  options, the recommendation and what it holds up. It blocks its dependents
+  and closes with the answer. Technical decisions go in the design field of
+  the item they shape.
+- **Designed, unscheduled capability:** a deferred `feature` at priority 4;
+  small ones in one area share an item that lists each with its doc pointer.
 
-A task is a prompt for an executor and a record for a cold reader. Write
-enough that neither has to reconstruct intent.
+## Workflow
 
-- **Title** names the artifact or behavior ("Check X on the rebuilt archive"),
-  never the ritual ("acceptance: emit receipt").
-- **Description** opens with one plain paragraph: the outcome and why it
-  matters. It is the single current contract; supersede it by editing, not by
-  stacking correction notes. When a current claim is disproved, correct the
-  record's body and check related claims from the same investigation. Preserve
-  the original evidence in native history. If review is partial, name the
-  claims checked and those still unverified. Dated historical claims that were
-  true when written stay intact.
-- **Design** names the seams: modules touched, the chosen approach and the
-  rejected one, invariants that must hold, and the focused verification
-  command. Date file:line citations ("as of 2026-09-27").
-- **Acceptance criteria** describe observable behavior, each checkable by a
-  named command or inspection, with non-goals. Read them adversarially: could
-  an executor satisfy the words and miss the point? Store them once in
-  `metadata.acceptance_criteria` as `{id, text}` rows with stable IDs.
-- **Code and operation are separate tasks.** A code task's acceptance is
-  behaviour on the default branch, each criterion checked by a named test or
-  command. A live run, deployment, measurement on real data or operator window
-  is its own task, depending on the code tasks it exercises, written once per
-  release as the fixed list of checks to run against that deployment.
-- Add metadata only when something consumes it.
+1. **Select** with `bd ready`, `bd show <id>`, `bd graph --open <epic>`. Ready
+   means dependency-ready; check the design for an operational window or
+   consent. Status is a claim: check an item's statement about the code at
+   head before dispatching it or accepting it as done.
+2. **Claim** with `bd update <id> --claim`. An owner that stops early runs
+   `bd unclaim <id>` and updates the notes.
+3. **Change** on one branch and one pull request whose body ends with
+   `Task: <id>`; set `--external-ref gh-<number>`.
+4. **Close** when the acceptance rows are met under the project's delivery
+   rules: `bd close <id> -r "<commit> #<pr>: <result>"`. Rows not met move to
+   a successor with `residual_of` first. A close refused by an open blocker
+   means close the blocker, or `--force` with the reason stated.
+5. **Findings on the way** are fixed in the same change when they share its
+   edits. Otherwise file a new item under its area at discovery time, with a
+   real title and a `discovered-from` edge; never a note on an unrelated item.
+6. **Coordinator checkpoint:** `bd orphans` (merged and still open),
+   in-progress items whose owner has no session, worktree or pull request,
+   `bd stale`, `bd lint`, `bd epic status`.
 
-## Shaping work
+A wide refactor that cannot land in one change is split by callers: each item
+moves a set of callers and deletes the old form for them, and the last deletes
+what remains. A program too unclear to slice becomes `spike` or `decision`
+items ordered by `blocks` edges, one sharp question each.
 
-- Slice implementation as tracer bullets: each task a narrow, complete path
-  through schema, logic, surface, and test, each landing as its own pull
-  request on the default branch. Group tasks
-  that share files, evidence, or a verification boundary with
-  `dispatch_group=<leader-id>` so one worker delivers them together; each keeps
-  its own close. Remove the metadata when the leader closes.
-- A wide refactor that cannot land in one change is split by callers, not by
-  keeping old and new forms side by side: each task moves a set of callers and
-  deletes the old form for them, and the last task deletes what remains. No
-  task leaves a compatibility path behind.
-- For a program too unclear to slice, file decision tasks: one sharp question
-  each, ordered by `blocks` edges, closed by the recorded answer. A question
-  you cannot yet state precisely stays a line in the parent epic until it
-  sharpens.
-- File a discovered follow-up at discovery time, linked to its origin, with a
-  real title and edges. A ten-second follow-up with a ritual title costs more
-  than it saves.
+Bulk rewrites go through `bd export`, an edited JSONL and `bd import` (upsert;
+labels and edges merge, so removals need `bd update --remove-label` and
+`bd dep remove`). Keep the export as the restore copy.
 
 ## Writes that report an unclear result
 
