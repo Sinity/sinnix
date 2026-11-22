@@ -208,6 +208,7 @@ class StashSource:
         self.key = json.dumps(["stash", os.path.realpath(self.command[-1])])
         self.rows = []
         self.files = {}
+        self.passes = None
 
     def call(self, op, **fields):
         result = subprocess.run(
@@ -229,33 +230,33 @@ class StashSource:
             )
         return response
 
+    def reconcile(self, scenes=None):
+        data = self.call("roster", scenes=scenes)
+        if scenes is None:
+            self.files.clear()
+            self.rows = data["comparisons"]
+            self.passes = data["passes"]
+        else:
+            self.files = {key: item for key, item in self.files.items() if item.scene_id not in scenes}
+        for group in data["groups"]:
+            scene = str(group["id"])
+            versions = tuple(group["files"])
+            for row in versions:
+                key = str(row["id"])
+                self.files[key] = Item(
+                    id=key, label=row["basename"], path=row["path"], kind="video",
+                    size=int(row["size"]), projection_kind=row["kind"], scene_id=scene,
+                    scene_url=f"{data['origin']}/scenes/{scene}", play_count=group["play_count"] or 0,
+                    duration=row.get("duration"), versions=versions, identity=row,
+                    projection={"projection": row["projection"]},
+                )
+
     def load(self, scope):
-        data = self.call("load", scope=scope)
-        self.rows = data.get("comparisons", [])
-        self.files = {
-            str(row["id"]): Item(
-                id=str(row["id"]),
-                label=row["label"],
-                path=row["path"],
-                kind="video",
-                size=int(row["size"]),
-                projection_kind=row["kind"],
-                scene_id=str(row["scene_id"]),
-                scene_url=row.get("scene_url"),
-                play_count=int(row.get("play_count") or 0),
-                duration=row.get("duration"),
-                versions=tuple(
-                    {**version, "id": str(version["id"])}
-                    for version in row.get("versions", [])
-                ),
-                projection=row.get("projection")
-                if isinstance(row.get("projection"), dict)
-                else {},
-                identity=row,
-            )
-            for row in data["files"]
-        }
-        return list(self.files.values()), data.get("pass")
+        if self.passes is None:
+            self.reconcile()
+        return [item for item in self.files.values()
+                if scope == "all" or item.projection_kind == scope
+                or (scope == "unknown" and item.identity["projection"] == "unknown")], self.passes.get(scope)
 
     def comparisons(self):
         # Use one file per scene when projecting existing scene votes into file selection.
@@ -352,7 +353,7 @@ class Session:
             except FileNotFoundError:
                 self.state = {}
             self.order = self.state.get("order", self.order)
-            self.refresh()
+            self.refresh(reconcile=False)
         except BaseException:
             self.close()
             raise
@@ -405,7 +406,9 @@ class Session:
                 "undo": None,
             }
 
-    def refresh(self):
+    def refresh(self, reconcile=True):
+        if reconcile and isinstance(self.source, StashSource):
+            self.source.reconcile()
         self.load()
         if not self.slot.get("failed"):
             self.advance()
@@ -441,7 +444,7 @@ class Session:
             previous = self.scope
             self.scope = value
             try:
-                self.refresh()
+                self.refresh(reconcile=False)
             except Exception:
                 self.scope = previous
                 raise
@@ -503,7 +506,10 @@ class Session:
         pair = self.pair
         if None in pair and not skip:
             raise ValueError("Show two items before comparing.")
+        action = "skip" if skip else "tie" if winner is None else (
+            "prefer left" if winner == pair[0].id else "prefer right")
         previous = {
+            "action": action,
             "current": self.slot["current"],
             "seen": list(self.slot["seen"]),
             "pairs": list(self.slot["pairs"]),
@@ -523,7 +529,14 @@ class Session:
             for item in pair
         ]
         self.advance()
-        self.finish()
+        if winner and self.order == "largest":
+            kept = 0 if pair[0].id == winner else 1
+            status = ["Left preferred", "Right preferred"][kept]
+            if self.pair[1 - kept]:
+                status += " · next file on " + ["right", "left"][kept]
+            self.finish(status)
+        else:
+            self.finish()
 
     def prefer(self, side):
         if side not in (0, 1) or self.pair[side] is None:
@@ -588,10 +601,16 @@ class Session:
             for item_id in removed:
                 self.items.pop(item_id, None)
             self.finish(f"Removed {len(removed)} of {len(ids)} files")
+            if isinstance(self.source, StashSource):
+                scenes = sorted({str(files[key]["scene_id"]) for key in ids})
+                self.source.reconcile(scenes)
             self.load()
         if not failed:
             self.advance()
         self.finish(
-            f"Removed {len(removed)} of {len(ids)} files"
-            + (f" · {' · '.join(failed)}" if failed else "")
+            " · ".join(
+                f"{Path(files[key]['path']).name}: " + (
+                    results.get(key, {}).get("error") or ("deleted" if key in removed else "removal unverified")
+                ) for key in ids
+            )
         )

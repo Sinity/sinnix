@@ -126,7 +126,7 @@ on its side. Most informative draws the next pair from the current evidence.
 
 In a file library, select **VR** and **Largest first** to review the biggest
 files in size order. Each side shows six frames. Click a frame to start at
-that point, or press F to expand the active side. If the lens looks wrong,
+that point. Click the six moments below the player to jump, or choose **Back to frames**. Click a pane to select its sound and keyboard controls. Space pauses or resumes it and F expands it. If the lens looks wrong,
 open that pane’s projection settings. Saved per-file corrections also apply
 to mpv and Yazi previews.
 

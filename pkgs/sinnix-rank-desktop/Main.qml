@@ -40,23 +40,31 @@ ApplicationWindow {
         }
     }
 
-    function pairAction(action) {
-        if (controller.busy)
-            return;
-        if (action === "left" || action === "right" || action === "tie") {
-            if (!controller.can_compare)
-                return;
-            if (action === "tie")
-                controller.tie();
-            else
-                controller.prefer(action === "left" ? 0 : 1);
-        } else if (action === "skip" && (controller.left.key || controller.right.key)) {
-            controller.skip();
-        } else if (action === "undo" && controller.can_undo) {
-            controller.undo();
+    readonly property bool dialogsOpen: sources.visible || versions.visible || versionPreview.visible
+        || left.dialogOpen || right.dialogOpen || libraryMenu.visible || scope.popup.visible || order.popup.visible
+    readonly property bool inspectingVideo: left.videoVisible || right.videoVisible || versionPreview.visible
+    onInspectingVideoChanged: controller.inspecting(inspectingVideo)
+
+    function pairAction(action, keys, ids) {
+        controller.decide(keys[0], keys[1], action, ids || [])
+    }
+    function pairKeys() { return [left.identity, right.identity] }
+
+    Timer { id: secondClick; interval: Qt.styleHints.mouseDoubleClickInterval }
+    component Decision: CompareButton {
+        required property string decision
+        property var keys: []
+        property var files: []
+        property var pressedFiles: []
+        enabled: !controller.busy
+        onPressed: { keys = window.pairKeys(); pressedFiles = files.slice() }
+        onClicked: {
+            if (!secondClick.running) {
+                secondClick.start()
+                window.pairAction(decision, keys, pressedFiles)
+            }
         }
     }
-
     function versionDrawer(side) {
         window.versionSide = side;
         versions.open();
@@ -76,7 +84,7 @@ ApplicationWindow {
 
     header: ToolBar {
         id: appBar
-        padding: 16
+        padding: 5
         implicitHeight: headerRow.implicitHeight + 2 * padding
         background: Rectangle {
             color: "#1a1f27"
@@ -86,31 +94,17 @@ ApplicationWindow {
         RowLayout {
             id: headerRow
             anchors.fill: parent
-            anchors.margins: appBar.padding
+            anchors.margins: 0
             spacing: 12
 
             CompareButton {
-                text: "Open"
+                text: controller.can_scope ? "Library  ▾" : (controller.title || "Library") + "  ▾"
                 enabled: !controller.busy
-                onClicked: sources.open()
-                Accessible.name: "Open a ranking collection"
-            }
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 2
-                Label {
-                    Layout.fillWidth: true
-                    text: controller.title || "Compare"
-                    font.pixelSize: 19
-                    font.bold: true
-                    elide: Text.ElideRight
-                }
-                Label {
-                    Layout.fillWidth: true
-                    text: controller.source_label
-                    visible: !!text
-                    color: "#aebccc"
-                    elide: Text.ElideRight
+                onClicked: libraryMenu.open()
+                Menu {
+                    id: libraryMenu
+                    MenuItem { text: "Open source"; onTriggered: sources.open() }
+                    MenuItem { text: "Refresh"; enabled: !!controller.title; onTriggered: controller.refresh() }
                 }
             }
             ComboBox {
@@ -139,29 +133,25 @@ ApplicationWindow {
                 Accessible.name: "Comparison order"
                 implicitHeight: 36
                 model: [
-                    { title: "Largest first · winner stays", value: "largest" },
-                    { title: "Most informative · fresh pairs", value: "informative" }
+                    { title: "Largest first", value: "largest" },
+                    { title: "Most informative", value: "informative" }
                 ]
                 currentIndex: Math.max(0, indexOfValue(controller.order))
                 onActivated: controller.set_order(currentValue)
             }
-            CompareButton {
-                text: "Refresh"
-                enabled: !controller.busy && !!controller.title
-                onClicked: controller.refresh()
-            }
+            Item { Layout.fillWidth: true }
         }
     }
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 18
-        spacing: 14
+        anchors.margins: 8
+        spacing: 5
 
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 12
+            spacing: 1
 
             ItemPane {
                 id: left
@@ -178,9 +168,9 @@ ApplicationWindow {
                 muted: window.leftMuted
                 onActivated: window.selectSide(side)
                 onFocusRequested: window.focusSide(side)
-                onPreferred: window.pairAction(side)
                 onVersionsRequested: window.versionDrawer(side)
             }
+            Rectangle { visible: !window.focusedSide; Layout.fillHeight: true; implicitWidth: 1; color: "#45494f" }
             ItemPane {
                 id: right
                 objectName: "rightPane"
@@ -196,63 +186,54 @@ ApplicationWindow {
                 muted: window.rightMuted
                 onActivated: window.selectSide(side)
                 onFocusRequested: window.focusSide(side)
-                onPreferred: window.pairAction(side)
                 onVersionsRequested: window.versionDrawer(side)
             }
         }
 
-        RowLayout {
+        GridLayout {
             Layout.fillWidth: true
-            spacing: 8
-
-            CompareButton { text: "Tie · T"; enabled: controller.can_compare && !controller.busy; onClicked: window.pairAction("tie") }
-            CompareButton { text: "Skip · S"; enabled: !!(controller.left.key || controller.right.key) && !controller.busy; onClicked: window.pairAction("skip") }
-            CompareButton { text: "Undo · U"; enabled: controller.can_undo && !controller.busy; onClicked: window.pairAction("undo") }
-            Item { Layout.fillWidth: true }
+            columns: window.width >= 1500 ? 2 : 1
+            rowSpacing: 4
             RowLayout {
+                Layout.fillWidth: true
+                Decision { objectName: "leftPrefer"; decision: "left"; tone: "primary"; text: "Prefer left   1"; enabled: controller.can_compare && !controller.busy }
+                Item { Layout.fillWidth: true }
+                Decision { decision: "tie"; text: "Tie"; enabled: controller.can_compare && !controller.busy }
+                Decision { decision: "skip"; text: "Skip"; enabled: !!(left.identity || right.identity) && !controller.busy }
+                Decision { decision: "undo"; text: "Undo " + controller.undo_label; implicitWidth: 135; enabled: controller.can_undo && !controller.busy }
+                Item { Layout.fillWidth: true }
+                Decision { objectName: "rightPrefer"; decision: "right"; tone: "primary"; text: "Prefer right   2"; enabled: controller.can_compare && !controller.busy }
+            }
+            RowLayout {
+                Layout.alignment: Qt.AlignRight
                 visible: controller.can_delete
-                spacing: 6
-                component DeleteButton: CompareButton { tone: "danger" }
-                DeleteButton {
-                    text: "Delete left · " + controller.left.size_label
-                    visible: !!controller.left.id
-                    enabled: !controller.busy
-                    onClicked: controller.delete_files([controller.left.id])
-                }
-                DeleteButton {
-                    text: "Delete right · " + controller.right.size_label
-                    visible: !!controller.right.id
-                    enabled: !controller.busy
-                    onClicked: controller.delete_files([controller.right.id])
-                }
-                DeleteButton {
-                    text: "Delete both · " + controller.both_size
-                    visible: !!controller.left.id && !!controller.right.id
-                    enabled: !controller.busy
-                    onClicked: controller.delete_files([controller.left.id, controller.right.id])
-                }
+                component Removal: Decision { decision: "delete"; tone: "danger"; implicitWidth: 172 }
+                Removal { text: "Delete left · " + (controller.left.size_label || "0 B"); files: [controller.left.id]; enabled: !controller.busy && !!left.identity }
+                Removal { text: "Delete right · " + (controller.right.size_label || "0 B"); files: [controller.right.id]; enabled: !controller.busy && !!right.identity }
+                Removal { text: "Delete both · " + controller.both_size; files: [controller.left.id, controller.right.id]; enabled: !controller.busy && !!left.identity && !!right.identity }
             }
         }
-
         Label {
             Layout.fillWidth: true
             text: controller.message
             color: controller.failed ? "#fca1a9" : "#aebccc"
-            visible: !!text
-            wrapMode: Text.Wrap
+            elide: Text.ElideRight
+            ToolTip.text: text
+            ToolTip.visible: statusHover.hovered && truncated
+            HoverHandler { id: statusHover }
             font.pixelSize: 13
         }
     }
 
-    Shortcut { autoRepeat: false; sequence: "1"; enabled: !sources.visible && !versions.visible && !previewVisible(); onActivated: window.pairAction("left") }
-    Shortcut { autoRepeat: false; sequence: "2"; enabled: !sources.visible && !versions.visible && !previewVisible(); onActivated: window.pairAction("right") }
-    Shortcut { autoRepeat: false; sequence: "T"; enabled: !sources.visible && !versions.visible && !previewVisible(); onActivated: window.pairAction("tie") }
-    Shortcut { autoRepeat: false; sequence: "S"; enabled: !sources.visible && !versions.visible && !previewVisible(); onActivated: window.pairAction("skip") }
-    Shortcut { autoRepeat: false; sequence: "U"; enabled: !sources.visible && !versions.visible && !previewVisible(); onActivated: window.pairAction("undo") }
-    Shortcut { autoRepeat: false; sequence: "Space"; enabled: !sources.visible && !versions.visible && !previewVisible(); onActivated: (window.activeSide === "left" ? left : right).toggle() }
-    Shortcut { autoRepeat: false; sequence: "F"; enabled: !sources.visible && !versions.visible && !previewVisible(); onActivated: window.focusSide(window.activeSide) }
-    Shortcut { autoRepeat: false; sequence: "Escape"; enabled: !!window.focusedSide && !sources.visible && !versions.visible && !previewVisible(); onActivated: window.focusedSide = "" }
-    Shortcut { autoRepeat: false; sequence: "Ctrl+O"; enabled: !controller.busy; onActivated: sources.open() }
+    Shortcut { autoRepeat: false; sequence: "1"; enabled: !window.dialogsOpen; onActivated: window.pairAction("left", window.pairKeys()) }
+    Shortcut { autoRepeat: false; sequence: "2"; enabled: !window.dialogsOpen; onActivated: window.pairAction("right", window.pairKeys()) }
+    Shortcut { autoRepeat: false; sequence: "T"; enabled: !window.dialogsOpen; onActivated: window.pairAction("tie", window.pairKeys()) }
+    Shortcut { autoRepeat: false; sequence: "S"; enabled: !window.dialogsOpen; onActivated: window.pairAction("skip", window.pairKeys()) }
+    Shortcut { autoRepeat: false; sequence: "U"; enabled: !window.dialogsOpen; onActivated: window.pairAction("undo", window.pairKeys()) }
+    Shortcut { autoRepeat: false; sequence: "Space"; enabled: !window.dialogsOpen; onActivated: (window.activeSide === "left" ? left : right).toggle() }
+    Shortcut { autoRepeat: false; sequence: "F"; enabled: !window.dialogsOpen; onActivated: window.focusSide(window.activeSide) }
+    Shortcut { autoRepeat: false; sequence: "Escape"; enabled: !window.dialogsOpen; onActivated: { if (window.focusedSide) window.focusedSide = ""; else (window.activeSide === "left" ? left : right).reset() } }
+    Shortcut { autoRepeat: false; sequence: "Ctrl+O"; enabled: !window.dialogsOpen && !controller.busy; onActivated: sources.open() }
 
     function previewVisible() {
         return versionPreview.visible;
@@ -361,12 +342,14 @@ ApplicationWindow {
                             text: "Play version"
                             onClicked: { controller.preview_version(modelData); versionPreview.open(); }
                         }
-                        Button {
+                        Decision {
+                            decision: "delete"
+                            files: [modelData.id]
                             text: "Delete version · " + modelData.size_label
                             palette.button: "#502d36"
                             palette.buttonText: "#ffd4d7"
                             enabled: !controller.busy
-                            onClicked: controller.delete_files([modelData.id])
+
                         }
                     }
                     Rectangle { Layout.fillWidth: true; height: 1; color: "#313947" }
@@ -393,7 +376,7 @@ ApplicationWindow {
             focused: true
             previewOnly: true
             muted: false
-            onPreferred: {}
+            onIdentityChanged: if (identity) Qt.callLater(() => jump(0))
         }
     }
 
