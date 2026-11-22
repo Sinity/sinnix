@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 from rank_core import Item as RankItem
-from session import DomainSource, Item, LocalSource, Session
+from session import DomainSource, Item, LocalSource, Session, comparison_title
 
 
 def displayed(session):
@@ -116,3 +116,32 @@ def test_import_and_partial_delete_reopen_for_retry(tmp_path):
     resumed.set_scope("vr")
     assert displayed(resumed) == ("2", "1")
     resumed.close()
+
+
+def test_title_keeps_ordered_file_ids_and_filename_endings():
+    left = Item("25", "Start\n" + "x" * 100 + "_left.mp4", scene_id="1")
+    right = Item("14", "Right.mp4", scene_id="2")
+    title = comparison_title("Library", (left, right))
+    assert title.startswith("Compare · Library · L #25 Start ")
+    assert "\n" not in title and "_left.mp4 · R #14 Right.mp4" in title
+    assert comparison_title("Library", (None, right)) == "Compare · Library · L empty · R #14 Right.mp4"
+    assert comparison_title("", (None, None)) == "Compare"
+
+
+def test_file_comment_follows_file_across_filters_and_restart(tmp_path):
+    source = Library()
+    with_comment = Session(source, state_root=tmp_path)
+    with_comment.save_comment("3", "Line one\nLine two")
+    with_comment.set_scope("all")
+    assert with_comment.comment("3") == "Line one\nLine two"
+    assert not with_comment.comment("4")
+    with_comment.close()
+
+    restored = Session(source, state_root=tmp_path)
+    assert restored.comment("3") == "Line one\nLine two"
+    restored.save_comment("3", "")
+    restored.close()
+
+    cleared = Session(source, state_root=tmp_path)
+    assert cleared.comment("3") == ""
+    cleared.close()

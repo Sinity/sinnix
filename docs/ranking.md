@@ -134,3 +134,5 @@ Preferring a file records a vote. The separate delete buttons permanently
 remove the left file, the right file, or both in one click. Each button shows
 the size of its selection. Open the versions list to inspect and remove an
 alternate file individually. Undo reverses a ranking decision.
+
+The Compare window title identifies the displayed left and right files. For Stash it includes both file IDs. Open **Comment…** from a video’s **Options** menu to save or edit a private comment. Comments follow the file across pairs, filters, and restarts.
