@@ -131,9 +131,8 @@ class Controller(QObject):
         self._file_identities = {}
         self._visible_items = [None, None, None]
         self._descriptions = [{}, {}, {}]
-        self._inspecting = False
         self._prefetch = None
-        self._cached_only = None
+        self._first_frame_requests = set()
         self.operation_completed.connect(self._complete)
         self.frames_completed.connect(self._receive_frames)
         self.video_completed.connect(self._receive_video)
@@ -177,6 +176,7 @@ class Controller(QObject):
             self._frames.cancel_except(self._frame_requests.keys() - {path})
             self._frames_by_item.pop(path, None)
             self._frame_requests.pop(path, None)
+            self._first_frame_requests.discard(path)
         if source and result is not None:
             if self._session:
                 self._session.close()
@@ -347,8 +347,7 @@ class Controller(QObject):
     def _request_media(self):
         items = tuple(item for item in (*self._pair(), self._version) if item and item.kind == "video" and item.path)
         self._prefetch = None
-        if (self._session and self._session.order == "largest" and items
-                and all(len(self._frames_by_item.get(item.path, {})) == len(PERCENTAGES) for item in items)):
+        if (self._session and self._session.order == "largest" and items):
             seen = set(self._session.slot["seen"]) | set(self._session.slot["current"])
             following = min((item for item in self._session.items.values() if item.id not in seen),
                             key=largest_first, default=None)
@@ -365,36 +364,37 @@ class Controller(QObject):
                 replaced.add(path)
                 self._frames_by_item.pop(path, None)
                 self._frame_requests.pop(path, None)
+                self._first_frame_requests.discard(path)
                 self._metadata_by_item.pop(path, None)
                 if stale := self._video_requests.pop(path, None):
                     stale.cancel()
             self._file_identities[path] = identity
         if replaced:
             self._frames.cancel_except(keys - replaced)
-        cached_only = self._prefetch if self._inspecting else None
-        if self._cached_only != cached_only:
-            switching = {self._cached_only, cached_only} - {None}
-            self._frames.cancel_except(keys - switching)
-            for path in switching:
-                self._frame_requests.pop(path, None)
-            self._cached_only = cached_only
         self._frames.cancel_except(keys)
         for key in self._frame_requests.keys() - keys:
             del self._frame_requests[key]
+            self._first_frame_requests.discard(key)
         for key in self._video_requests.keys() - keys:
             if self._video_requests[key].cancel():
                 del self._video_requests[key]
         for item in items:
             key = str(item.path)
-            if key not in self._frame_requests and len(self._frames_by_item.get(key, {})) < len(PERCENTAGES):
+            background = key == self._prefetch
+            known = self._frames_by_item.get(key, {})
+            moments = PERCENTAGES[:1] if background else PERCENTAGES
+            pending = tuple(pct for pct in moments if pct not in known)
+            if pending and key not in self._frame_requests:
                 generation = object()
                 self._frame_requests[key] = generation
+                if background:
+                    self._first_frame_requests.add(key)
 
                 def publish_frames(path, frames, token=generation):
                     self.frames_completed.emit(path, token, frames)
 
                 self._frames.request(replace(item, id=key), publish_frames,
-                                     background=key == self._prefetch, cached_only=key == cached_only)
+                                     background=background, percentages=pending)
             if key == self._prefetch or key in self._metadata_by_item or key in self._video_requests:
                 continue
             task = self._metadata.submit(probe_video, key, item.duration)
@@ -413,14 +413,12 @@ class Controller(QObject):
             known.update(frames)
             for pct, _ in frames:
                 self.frame_changed.emit(path, pct)
-            if len(known) == len(PERCENTAGES) and path != self._prefetch and not self._busy:
-                self._request_media()
-
-    @Slot(bool)
-    def inspecting(self, active):
-        self._inspecting = active
-        if not self._busy:
-            self._request_media()
+            if path in self._first_frame_requests:
+                self._first_frame_requests.remove(path)
+                self._frame_requests.pop(path)
+                self._frames.cancel_except(self._frame_requests)
+                if not self._busy:
+                    self._request_media()
 
     @Slot(str, int, result="QVariantMap")
     def frame(self, path, pct):
@@ -433,6 +431,7 @@ class Controller(QObject):
             return
         self._frames.cancel_except(self._frame_requests.keys() - {path})
         self._frame_requests.pop(path)
+        self._first_frame_requests.discard(path)
         self._frames_by_item.pop(path, None)
         self._request_media()
 
@@ -477,6 +476,10 @@ class Controller(QObject):
                 pass
         return {
             "id": item_id, "key": f"{item_id}\n{path}", "label": item.label, "path": path,
+            "poster": (
+                f"{item.scene_url.replace('/scenes/', '/scene/')}/screenshot"
+                if item.scene_url and item.identity.get("primary") else ""
+            ),
             "kind": kind, "media": source_url(media), "text": text, "duration": (duration or 0) * 1000,
             "projection": projection or item.projection or {}, "size_label": file_size(item.size),
             "details": " · ".join(overview), "frames": frames,

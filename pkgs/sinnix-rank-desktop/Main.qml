@@ -42,8 +42,6 @@ ApplicationWindow {
 
     readonly property bool dialogsOpen: sources.visible || versions.visible || versionPreview.visible
         || left.dialogOpen || right.dialogOpen || libraryMenu.visible || scope.popup.visible || order.popup.visible
-    readonly property bool inspectingVideo: left.videoVisible || right.videoVisible || versionPreview.visible
-    onInspectingVideoChanged: controller.inspecting(inspectingVideo)
 
     function pairAction(action, keys, ids) {
         controller.decide(keys[0], keys[1], keys[2], action, ids || [])

@@ -322,6 +322,26 @@ Rectangle {
                         height: grid.cellHeight
                         color: "#24282d"
                         Image {
+                            id: poster
+                            objectName: "stashPoster"
+                            anchors.fill: parent
+                            source: tile.index === 0 && image.status !== Image.Ready
+                                    ? (pane.info.poster || "") : ""
+                            visible: status === Image.Ready
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                            sourceSize.width: Math.ceil(grid.cellWidth)
+                        }
+                        Label {
+                            anchors.top: parent.top
+                            anchors.left: parent.left
+                            visible: poster.visible
+                            padding: 3
+                            text: "Stash preview"
+                            background: Rectangle { color: "#cb121518" }
+                            z: 1
+                        }
+                        Image {
                             id: image
                             anchors.fill: parent
                             source: tile.frame?.url || ""
