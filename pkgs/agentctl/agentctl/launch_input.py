@@ -57,7 +57,7 @@ UNIT_PATH_VALUE = re.compile(r"-?/[^\x00-\x20:]+\Z")
 UNIT_BANDWIDTH_PROPERTIES = frozenset({"IOReadBandwidthMax", "IOWriteBandwidthMax"})
 UNIT_BANDWIDTH_VALUE = re.compile(r"/[^\x00-\x20:]+ [1-9][0-9]*[KMGTPE]?\Z")
 
-# A job-owned scratch directory: created before the command, exported as
+# Every job's own scratch directory: created before the command, exported as
 # `AGENTCTL_SCRATCH` and `TMPDIR`, then removed after its unit stops. `tmpfs` is RAM,
 # `nvme` the scratch filesystem; the environment overrides exist so a test
 # owns both roots.
@@ -139,7 +139,7 @@ def supported_unit_property(value: object) -> bool:
 
 
 def scratch_root(kind: str) -> Path | None:
-    """The directory holding one tier's job-owned scratch, or None for no tier."""
+    """The directory holding one tier's job-owned scratch, or None for an unknown tier."""
     declared = SCRATCH_ROOTS.get(kind)
     if declared is None:
         return None
@@ -147,10 +147,12 @@ def scratch_root(kind: str) -> Path | None:
     return Path(os.environ.get(variable) or default)
 
 
-def scratch_path(kind: str, job_id: str) -> Path | None:
+def scratch_path(kind: str, job_id: str) -> Path:
     """Where the job ``job_id`` owns its scratch under ``kind``'s root."""
     root = scratch_root(kind)
-    return root / job_id if root is not None else None
+    if root is None:
+        raise QueueInputError(f"scratch kind must be one of {sorted(SCRATCH_KINDS)}")
+    return root / job_id
 
 
 def write_input(path: Path, document: Mapping[str, Any]) -> None:
@@ -272,22 +274,21 @@ def read_input(path: Path) -> dict[str, Any]:
             f"{'/'.join(sorted(UNIT_PROPERTIES | UNIT_PATH_PROPERTIES | UNIT_BANDWIDTH_PROPERTIES))} settings"
         )
     scratch = value.get("scratch")
-    if scratch is not None:
-        if not isinstance(scratch, dict):
-            raise QueueInputError("launch input scratch must be an object")
-        kind = scratch.get("kind")
-        root = scratch_root(kind) if isinstance(kind, str) else None
-        if root is None:
-            raise QueueInputError(
-                f"launch input scratch kind must be one of {sorted(SCRATCH_KINDS)}"
-            )
-        path = scratch.get("path")
-        # The wrapper creates this directory and removes it afterwards, so a
-        # path outside the tier's own root is refused rather than trusted.
-        if (
-            not isinstance(path, str)
-            or not PurePosixPath(path).is_absolute()
-            or Path(path).parent != root
-        ):
-            raise QueueInputError(f"launch input scratch path must be under {root}")
+    if not isinstance(scratch, dict):
+        raise QueueInputError("launch input scratch must be an object")
+    kind = scratch.get("kind")
+    root = scratch_root(kind) if isinstance(kind, str) else None
+    if root is None:
+        raise QueueInputError(
+            f"launch input scratch kind must be one of {sorted(SCRATCH_KINDS)}"
+        )
+    path = scratch.get("path")
+    # The wrapper creates this directory and removes it afterwards, so a
+    # path outside the tier's own root is refused rather than trusted.
+    if (
+        not isinstance(path, str)
+        or not PurePosixPath(path).is_absolute()
+        or Path(path).parent != root
+    ):
+        raise QueueInputError(f"launch input scratch path must be under {root}")
     return value

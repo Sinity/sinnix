@@ -397,6 +397,7 @@ def test_a_private_pueue_task_places_its_child_in_the_declared_pool_scope(
                 "result_kind": "exit",
                 "label": "fixture:verify:private",
                 "log_path": str(log_path),
+                "scratch": {"kind": "nvme", "path": str(tmp_path / "nvme" / job_id)},
             }
         )
     )
@@ -406,6 +407,8 @@ def test_a_private_pueue_task_places_its_child_in_the_declared_pool_scope(
         command=(
             "env",
             f"PYTHONPATH={CHILD_PYTHONPATH}",
+            # A queued task gets only the allowlisted client environment.
+            f"AGENTCTL_NVME_SCRATCH_ROOT={tmp_path / 'nvme'}",
             sys.executable,
             "-m",
             "agentctl.run",
@@ -518,6 +521,7 @@ def test_cancelling_a_task_reaps_every_descendant_it_started(
     wrapper = tmp_path / "agentctl-run"
     wrapper.write_text(
         f"#!/bin/sh\nexport PYTHONPATH={CHILD_PYTHONPATH}\n"
+        f"export AGENTCTL_NVME_SCRATCH_ROOT={tmp_path / 'nvme'}\n"
         f'exec {sys.executable} -m agentctl.run "$@"\n'
     )
     wrapper.chmod(0o755)
@@ -543,6 +547,7 @@ def test_cancelling_a_task_reaps_every_descendant_it_started(
                 "result_kind": "exit",
                 "label": "fixture:verify:reaped",
                 "log_path": str(tmp_path / "reaped-job.log"),
+                "scratch": {"kind": "nvme", "path": str(tmp_path / "nvme" / "reaped-job")},
             }
         )
     )

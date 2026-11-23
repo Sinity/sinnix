@@ -11,8 +11,8 @@ Those, plus the nix version, key the cached script; any change re-evaluates.
 The script ends by running the project's shellHook, so per-run setup that
 reads other files (a dependency sync, for one) still happens every time. Each
 command gets private temporary storage, removed after it exits; stop signals
-are forwarded before cleanup. An uncatchable kill still needs the enclosing
-job's declared scratch owner for cleanup.
+are forwarded before cleanup. An uncatchable kill leaves it to the enclosing
+job's scratch, which agentctl removes when the job ends.
 """
 
 from __future__ import annotations

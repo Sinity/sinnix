@@ -203,11 +203,10 @@ access (`ReadOnlyPaths`, `ReadWritePaths`, `InaccessiblePaths`).
 
 ### Scratch
 
-An operation with `scratch = "tmpfs"` or `"nvme"` gets one job-owned directory,
-`/dev/shm/agentctl/<ref>` or `/realm/tmp/work/agentctl/<ref>` (mode 0700),
-exported as `AGENTCTL_SCRATCH`, `DEVKIT_SCRATCH` and `TMPDIR`. An invocation
-without declared scratch does not inherit `DEVKIT_SCRATCH`. After the unit exits,
-agentctl deletes its scratch. If deletion fails, the outcome
+Every job gets one directory of its own, `/realm/tmp/work/agentctl/<ref>`, or
+`/dev/shm/agentctl/<ref>` for an operation declaring `scratch = "tmpfs"`
+(mode 0700), exported as `AGENTCTL_SCRATCH`, `DEVKIT_SCRATCH` and `TMPDIR`.
+After the unit exits, whatever the outcome, agentctl deletes it. If deletion fails, the outcome
 records `scratch.cleanup_error` and the command's exit status is unchanged.
 An existing path is never reused or removed. Cleanup also runs if result
 bookkeeping fails after the command ends. If a unit's observation fails,
@@ -351,7 +350,7 @@ generation; reboot remains a separate action.
 | `timeout_seconds`     | 1 to 28,800, or 0 for no limit; default 3,600                                                                                                                                                                                                                                                                                                     |
 | `arguments`           | `none`, or `required` when the caller must pass a selector after `--`                                                                                                                                                                                                                                                                             |
 | `cache`               | `none` (default), or `tree+environment` to answer a request from an active or successful job with the same clean content tree, environment and arguments, in any checkout of the project and at any commit; after the queue entry is cleaned, its retained outcome still answers (`<state_dir>/results/` maps each request key to its newest job) |
-| `scratch`             | `none`, `tmpfs` or `nvme`                                                                                                                                                                                                                                                                                                                         |
+| `scratch`             | `nvme` (default) or `tmpfs`                                                                                                                                                                                                                                                                                                                       |
 | `admission`           | `{ memory_mib }`: the expected footprint, exported as `AGENTCTL_ADMISSION_MEMORY_MIB`. It is not a limit                                                                                                                                                                                                                                          |
 | `unit_properties`     | resource limits for the unit, e.g. `["MemoryMax=3G", "IOReadBandwidthMax=/realm 20M"]`                                                                                                                                                                                                                                                            |
 

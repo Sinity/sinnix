@@ -78,6 +78,7 @@ def write_launch(tmp_path: Path, name: str = "launch.json", **overrides: Any) ->
         "label": "fixture:check:job-a",
         "log_path": str(tmp_path / "job-a.log"),
         "event_spool_path": str(tmp_path / "events.jsonl"),
+        "scratch": {"kind": "nvme", "path": str(tmp_path / "nvme" / "job-a")},
     }
     launch.update(overrides)
     path = tmp_path / name
@@ -487,7 +488,9 @@ def test_worker_exports_queue_identity_to_the_child(
     )
 
     assert main([str(launch)]) == 0
-    assert log_of(tmp_path) == "job-a fixture check pytest agentctl job-a unset"
+    assert log_of(tmp_path) == (
+        f"job-a fixture check pytest agentctl job-a {tmp_path / 'nvme' / 'job-a'}"
+    )
 
 
 def test_a_declared_pool_runs_the_child_as_a_service(
@@ -678,11 +681,25 @@ def test_a_declared_scratch_is_created_exported_and_removed(
     assert Path(document["temporary"]).parent == scratch
 
 
-def test_a_job_declaring_no_scratch_records_none(tmp_path: Path) -> None:
-    launch = write_launch(tmp_path, argv=["sh", "-c", "exit 0"])
+def test_every_job_gets_scratch_on_disk_that_ends_with_it(tmp_path: Path) -> None:
+    """A job that declared no tier still writes temporary files into its own
+    directory, and nothing of it remains after the job."""
+    scratch = tmp_path / "nvme" / "job-a"
+    launch = write_launch(
+        tmp_path,
+        argv=["sh", "-c", 'test "$TMPDIR" = "$AGENTCTL_SCRATCH" && mktemp'],
+    )
 
     assert main([str(launch)]) == 0
+    assert Path(log_of(tmp_path).strip()).parent == scratch
+    assert not scratch.exists()
     assert "scratch" not in outcome_of(tmp_path)
+
+
+def test_a_launch_input_without_scratch_is_refused(tmp_path: Path) -> None:
+    launch = write_launch(tmp_path, argv=["sh", "-c", "exit 0"], scratch=None)
+
+    assert main([str(launch)]) == REFUSED_EXIT_CODE
 
 
 def test_a_refused_launch_leaves_no_scratch_behind(
@@ -1434,8 +1451,11 @@ def test_retry_stops_the_unit_left_by_its_killed_wrapper(
         document = json.loads(launch.read_text())
         document["argv"] = ["true"]
         launch.write_text(json.dumps(document))
+        assert (tmp_path / "nvme" / "job-a").is_dir()
         assert main([str(launch)]) == 0
         assert not Path(f"/proc/{pid}").exists()
+        # The killed attempt's scratch went with its unit; the retry's with it.
+        assert not (tmp_path / "nvme" / "job-a").exists()
         assert run_module.unit_properties(unit) == {}
         assert outcome_of(tmp_path)["attempt"] == 2
     finally:

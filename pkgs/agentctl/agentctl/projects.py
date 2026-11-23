@@ -36,9 +36,9 @@ class ProjectConfigError(ValueError):
 _POOL_NAME = re.compile(r"[a-z][a-z0-9-]{0,63}")
 _ENVIRONMENT_NAME = re.compile(r"[A-Z_][A-Z0-9_]*\Z")
 CACHE_KINDS = frozenset({"none", "tree+environment"})
-# Where an operation's job-owned scratch directory lives: nowhere, in RAM, or
-# on disk. `run` owns the roots and the removal.
-SCRATCH_KINDS = frozenset({"none", "tmpfs", "nvme"})
+# Where an operation's job-owned scratch directory lives: in RAM or on disk.
+# Every job has one; `run` owns the roots and the removal.
+SCRATCH_KINDS = frozenset({"tmpfs", "nvme"})
 # Whether `job start` may be invoked with extra argv. `required` is a
 # declaration that the operation cannot execute without a caller-supplied
 # selector. Callers pass the selector explicitly after the operation name.
@@ -206,7 +206,7 @@ class ProjectOperation:
     result: str = "exit"
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
     cache: str = "none"
-    scratch: str = "none"
+    scratch: str = "nvme"
     arguments: str = "none"
     admission: AdmissionEnvelope | None = None
     unit_properties: tuple[str, ...] = ()

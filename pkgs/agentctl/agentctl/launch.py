@@ -289,7 +289,7 @@ def enqueue(
     result_kind: str,
     environment: Mapping[str, str],
     kind: str = "declared-operation",
-    scratch: str = "none",
+    scratch: str = "nvme",
     admission: AdmissionEnvelope | None = None,
     after: Sequence[int] = (),
     stashed: bool = False,
@@ -314,7 +314,8 @@ def enqueue(
 
     ``binding`` is what the caller ties the task to (the gateway's call
     identity); it is stored as written and read back on ``job get``. ``scratch`` names
-    the tier of the job-owned directory the wrapper creates and removes.
+    the tier of the job-owned directory the wrapper creates and removes; every
+    job has one.
     """
     job_id = job_id or _new_job_id(label)
     if not job_queries.JOB_ID.fullmatch(job_id):
@@ -371,9 +372,7 @@ def enqueue(
         launch["environment_receipt"] = dict(environment_receipt)
     if binding:
         launch["binding"] = dict(binding)
-    scratch_dir = scratch_path(scratch, job_id)
-    if scratch_dir is not None:
-        launch["scratch"] = {"kind": scratch, "path": str(scratch_dir)}
+    launch["scratch"] = {"kind": scratch, "path": str(scratch_path(scratch, job_id))}
     if result_kind != "exit":
         launch["result_path"] = str(config.jobs_dir / f"{job_id}.result")
     input_path = config.inputs_dir / f"{job_id}.json"

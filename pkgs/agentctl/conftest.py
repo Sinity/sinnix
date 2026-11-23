@@ -407,6 +407,15 @@ def secret_env_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture(autouse=True)
+def scratch_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
+    """Where this test's jobs own their scratch; never the host's roots."""
+    roots = {"tmpfs": tmp_path / "tmpfs", "nvme": tmp_path / "nvme"}
+    monkeypatch.setenv("AGENTCTL_TMPFS_SCRATCH_ROOT", str(roots["tmpfs"]))
+    monkeypatch.setenv("AGENTCTL_NVME_SCRATCH_ROOT", str(roots["nvme"]))
+    return roots
+
+
+@pytest.fixture(autouse=True)
 def _no_inherited_queue_group(monkeypatch: pytest.MonkeyPatch) -> None:
     """The suite must not inherit the group of a pueue task that runs it.
 

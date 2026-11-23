@@ -22,7 +22,6 @@ default_base = "origin/master"
 description = "Run default Sinnix checks"
 exec = ["check"]
 pool = "bulk"
-scratch = "nvme"
 cache = "tree+environment"
 timeout_seconds = 7200
 # Four evaluation workers, each replaced past 512 MiB, so the peak is about
@@ -35,14 +34,12 @@ admission = { memory_mib = 4608 }
 description = "Build explicitly selected Sinnix flake checks"
 exec = ["nix", "build", "--no-link"]
 pool = "bulk"
-scratch = "nvme"
 timeout_seconds = 1800
 
 [operations.earlyoom_vm_verify]
 description = "Verify emergency earlyoom victim selection and real signals in an isolated VM"
 exec = ["nix", "build", "--no-link", "--max-jobs", "1", "--cores", "2", ".#heavyChecks.x86_64-linux.earlyoom-emergency-vm"]
 pool = "bulk"
-scratch = "nvme"
 timeout_seconds = 1800
 admission = { memory_mib = 4096 }
 
@@ -54,7 +51,6 @@ exec = ["python3", "flake/tests/earlyoom_pressure_host.py"]
 arguments = "required"
 pool = "bulk"
 result = "json"
-scratch = "nvme"
 timeout_seconds = 1800
 admission = { memory_mib = 4608 }
 unit_properties = ["MemoryMax=4G", "MemorySwapMax=0", "IOWeight=10", "IOReadBandwidthMax=/realm 8M", "IOWriteBandwidthMax=/realm 8M", "IOReadBandwidthMax=/nix 8M", "IOWriteBandwidthMax=/nix 8M"]
@@ -65,7 +61,6 @@ exec = ["python3", "flake/tests/backup_native_restore.py"]
 arguments = "required"
 pool = "bulk"
 result = "json"
-scratch = "nvme"
 timeout_seconds = 600
 admission = { memory_mib = 2048 }
 
@@ -74,7 +69,6 @@ description = "Compare explicit source and preserved trees read-only, including 
 exec = ["sudo", "-n", "rsync", "--archive", "--hard-links", "--acls", "--xattrs", "--numeric-ids", "--dry-run", "--checksum", "--delete", "--itemize-changes", "--stats"]
 arguments = "required"
 pool = "bulk"
-scratch = "nvme"
 timeout_seconds = 28800
 
 [operations.reverse_engineering_verify]
@@ -102,7 +96,6 @@ description = "Run selected AgentCTL and gateway Python tests"
 exec = ["nix", "develop", ".#gateway-tests", "--command", "gateway-pytest", "-q"]
 arguments = "required"
 pool = "pytest"
-scratch = "nvme"
 timeout_seconds = 1800
 
 [operations.verify_telemetry_restore]
@@ -110,7 +103,6 @@ description = "Restore one retained telemetry SQLite zstd artifact and check its
 exec = ["sinnix-sqlite-backup", "--immutable-source", "--verify-only", "--compressed-source", "--max-restore-bytes", "85899345920", "--acquire-budget-seconds", "3600"]
 arguments = "required"
 pool = "bulk"
-scratch = "nvme"
 timeout_seconds = 28800
 admission = { memory_mib = 4096 }
 unit_properties = ["MemoryHigh=4G", "MemoryMax=5G"]
@@ -163,7 +155,6 @@ timeout_seconds = 7200
 description = "Run maintained Nix and shell linters"
 exec = ["lint"]
 pool = "normal"
-scratch = "nvme"
 cache = "tree+environment"
 
 [operations.switch]
@@ -172,7 +163,6 @@ exec = ["switch"]
 pool = "system-build"
 # A caller is told which other activations are queued or running, and for whom.
 announce = true
-scratch = "nvme"
 timeout_seconds = 28800
 
 [operations.boot]
@@ -180,7 +170,6 @@ description = "Build and set the workstation boot default for the next reboot"
 exec = ["boot"]
 pool = "system-build"
 announce = true
-scratch = "nvme"
 timeout_seconds = 28800
 
 [operations.transcribe]
@@ -253,7 +242,6 @@ description = "Publish a coherent URL-ledger generation from explicit local stat
 exec = ["sinnix-url-ledger", "build"]
 arguments = "required"
 pool = "bulk"
-scratch = "nvme"
 timeout_seconds = 1800
 
 [operations.fs_index_restore]
@@ -261,14 +249,12 @@ description = "Restore a coherent filesystem-index generation from explicit date
 exec = ["sinnix-fs", "refresh", "--index-dir", "/realm/state/fs-index", "--retained-inputs"]
 arguments = "required"
 pool = "bulk"
-scratch = "nvme"
 timeout_seconds = 7200
 
 [operations.fs_index_scan]
 description = "Scan managed filesystems and publish one coherent index generation"
 exec = ["sinnix-fs", "scan", "--out-dir", "/realm/state/fs-index"]
 pool = "bulk"
-scratch = "nvme"
 timeout_seconds = 21600
 
 [operations.verify_report_navigation]
@@ -348,7 +334,6 @@ description = "Measure logical file-size prefixes in one explicit Borg archive w
 exec = ["python3", "flake/tests/backup_archive_inventory.py"]
 arguments = "required"
 pool = "bulk"
-scratch = "nvme"
 timeout_seconds = 1800
 admission = { memory_mib = 4096 }
 

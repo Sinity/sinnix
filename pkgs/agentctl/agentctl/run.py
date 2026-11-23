@@ -424,6 +424,9 @@ class _Scratch:
 
     def __init__(self) -> None:
         self.path: Path | None = None
+        # Whether this attempt made its scratch directory; a failure before
+        # that point concerns the unit alone.
+        self.created = False
         self.unit: str | None = None
         self.cleaned = False
 
@@ -768,7 +771,7 @@ def _run(
         if scratch_owner.unit is not None:
             record["unit"] = scratch_owner.unit
         if scratch_error is not None:
-            if scratch_dir is None:
+            if not scratch_owner.created:
                 record["unit_error"] = scratch_error
             else:
                 record["scratch"] = {
@@ -781,8 +784,7 @@ def _run(
         publish_outcome(record)
         return REFUSED_EXIT_CODE
 
-    scratch = launch.get("scratch")
-    scratch_dir = Path(scratch["path"]) if scratch else None
+    scratch_dir = Path(launch["scratch"]["path"])
     pool = unit_pool(os.environ.get("PUEUE_GROUP")) or unit_pool(launch.get("pool"))
     unit = unit_for(launch_input, pool) if pool else None
     daemon = pueue.daemon_tag()
@@ -806,16 +808,28 @@ def _run(
         and launch.get("environment_receipt") is not None
     )
     start_git = git_observation(Path(launch["working_directory"])) if cached else None
-    if scratch_dir is not None:
-        try:
-            scratch_dir.parent.mkdir(parents=True, exist_ok=True)
-            # Existing material has not been created by this attempt. Never
-            # adopt it, follow its link, or later remove it as owned scratch.
-            scratch_dir.mkdir(mode=0o700)
-            scratch_owner.path = scratch_dir
-        except OSError as error:
-            log_path.write_text(f"could not create the scratch directory: {error}\n")
+    if (
+        unit is not None
+        and launch["attempt"] > 1
+        and scratch_dir.is_dir()
+        and not scratch_dir.is_symlink()
+        and scratch_dir.stat().st_uid == os.getuid()
+    ):
+        # An earlier attempt of this job made it, and that attempt's unit has
+        # just been stopped above: the scratch dies with that attempt.
+        if (error := remove_scratch(scratch_dir)) is not None:
+            log_path.write_text(f"could not remove the earlier attempt's scratch: {error}\n")
             return refused()
+    try:
+        scratch_dir.parent.mkdir(parents=True, exist_ok=True)
+        # Existing material has not been created by this attempt. Never
+        # adopt it, follow its link, or later remove it as owned scratch.
+        scratch_dir.mkdir(mode=0o700)
+        scratch_owner.path = scratch_dir
+        scratch_owner.created = True
+    except OSError as error:
+        log_path.write_text(f"could not create the scratch directory: {error}\n")
+        return refused()
 
     append_event(spool_path, {**event, "phase": "started"})
 
@@ -866,11 +880,9 @@ def _run(
         environment["AGENTCTL_CHECKOUT_HEAD"] = head
     if pool:
         environment["AGENTCTL_POOL"] = pool
-    environment.pop("DEVKIT_SCRATCH", None)
-    if scratch_dir is not None:
-        environment["AGENTCTL_SCRATCH"] = str(scratch_dir)
-        environment["DEVKIT_SCRATCH"] = str(scratch_dir)
-        environment["TMPDIR"] = str(scratch_dir)
+    environment["AGENTCTL_SCRATCH"] = str(scratch_dir)
+    environment["DEVKIT_SCRATCH"] = str(scratch_dir)
+    environment["TMPDIR"] = str(scratch_dir)
     argv = list(launch["argv"])
     executable = shutil.which(argv[0], path=environment.get("PATH", os.defpath))
     properties: dict[str, str] = {}
@@ -1001,13 +1013,12 @@ def _run(
     request = artifacts.cancellation(declared_log_path, launch["attempt"])
     if request:
         record["cancellation"] = request
-    if scratch_dir is not None:
-        cleanup_error = scratch_owner.cleanup()
-        if cleanup_error is not None:
-            record["scratch"] = {
-                "path": str(scratch_dir),
-                "cleanup_error": cleanup_error,
-            }
+    cleanup_error = scratch_owner.cleanup()
+    if cleanup_error is not None:
+        record["scratch"] = {
+            "path": str(scratch_dir),
+            "cleanup_error": cleanup_error,
+        }
     publish_outcome(record)
     return status
 

@@ -1057,7 +1057,11 @@ def test_a_declared_scratch_tier_reaches_the_launch_input_and_job_get(
         "path": str(tmp_path / "nvme" / job_id),
     }
     plain = launch.start_operation(config, project, project.operation("check"))
-    assert "scratch" not in read_launch(config, fake_pueue.task(plain["task_id"]))
+    plain_job = Path(fake_pueue.added[1]["command"][1]).stem
+    assert read_launch(config, fake_pueue.task(plain["task_id"]))["scratch"] == {
+        "kind": "nvme",
+        "path": str(tmp_path / "nvme" / plain_job),
+    }
 
     artifacts.begin(written, "fixture-input")
     outcome = outcome_path_for(written["log_path"])

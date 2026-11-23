@@ -50,8 +50,8 @@ def test_the_fixture_descriptor_loads_every_declared_field(project_root: Path) -
     assert project.operation("nightly").pool == "bulk"
     verify = project.operation("verify")
     assert (verify.result, verify.timeout_seconds) == ("json", 120)
-    # A descriptor that declares no scratch tier gets none.
-    assert [operation.scratch for operation in project.operations] == ["none"] * 4
+    # A descriptor that declares no scratch tier gets scratch on disk.
+    assert [operation.scratch for operation in project.operations] == ["nvme"] * 4
     assert [operation.name for operation in project.operations] == [
         "check",
         "nightly",
@@ -164,14 +164,14 @@ def test_a_declared_scratch_tier_is_carried_by_the_operation(tmp_path: Path) -> 
     descriptor = root / ".agentctl" / "project.toml"
     descriptor.write_text(
         descriptor.read_text()
-        + '\n[operations.heavy]\ndescription = "x"\nexec = ["x"]\nscratch = "nvme"\n'
+        + '\n[operations.heavy]\ndescription = "x"\nexec = ["x"]\nscratch = "tmpfs"\n'
     )
 
     project = load_project_adapter(root)
 
-    assert project.operation("heavy").scratch == "nvme"
-    assert project.operation("heavy").catalog_row()["scratch"] == "nvme"
-    assert project.operation("check").scratch == "none"
+    assert project.operation("heavy").scratch == "tmpfs"
+    assert project.operation("heavy").catalog_row()["scratch"] == "tmpfs"
+    assert project.operation("check").scratch == "nvme"
 
 
 def test_a_required_variable_missing_at_launch_fails_loudly(

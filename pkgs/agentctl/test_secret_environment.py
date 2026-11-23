@@ -42,6 +42,7 @@ def launch_document(tmp_path: Path, argv: list[str]) -> dict[str, object]:
         "label": "fixture:check:job-a",
         "log_path": str(tmp_path / "job-a.log"),
         "event_spool_path": str(tmp_path / "events.jsonl"),
+        "scratch": {"kind": "nvme", "path": str(tmp_path / "nvme" / "job-a")},
     }
 
 

@@ -8,9 +8,9 @@ top-level entry except `claude-<uid>` into `/realm/tmp/previous-boot`, and
 `sinnix-scratch-purge` deletes that directory in the background at idle I/O.
 The reset's condition (no `/run/user/<uid>` yet) makes an activation on the
 running system skip it.
-Declared AgentCTL operations with `scratch = "nvme"` create a private job
-subdirectory and remove it on completion. Producers must honor inherited
-TMPDIR and keep retained output outside it.
+Every AgentCTL job runs with a private TMPDIR that agentctl removes when the
+job ends (`docs/agentctl.md`). Producers must honor inherited TMPDIR and keep
+retained output outside it.
 
 `sinnix-tmp-sweep` runs every 15 minutes. It recognizes Nix devshell scratch,
 Claude Code session scratch, and these invocation directories:
