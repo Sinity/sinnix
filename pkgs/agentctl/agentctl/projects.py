@@ -431,7 +431,11 @@ def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation
         if definition["cache"] not in CACHE_KINDS:
             raise ProjectConfigError(f"operations.{name}.cache is invalid")
         fields["cache"] = definition["cache"]
-    if "scratch" in definition:
+    if definition.get("scratch") == "none":
+        # A checkout on an older commit still declares the retired tier; like
+        # an unknown field it is ignored, so the checkout stays in service.
+        _warn_unknown(descriptor, f"operations.{name}", {'scratch = "none"'})
+    elif "scratch" in definition:
         if definition["scratch"] not in SCRATCH_KINDS:
             raise ProjectConfigError(f"operations.{name}.scratch is invalid")
         fields["scratch"] = definition["scratch"]

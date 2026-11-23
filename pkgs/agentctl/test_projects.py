@@ -119,6 +119,16 @@ def test_unknown_operation_fields_warn_and_load(
     assert "operation check ignores unknown fields: parameters" in err
 
 
+def test_the_retired_scratch_none_falls_back_to_disk_scratch(tmp_path: Path) -> None:
+    root = write_project(tmp_path / "p")
+    descriptor = root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text()
+        + '\n[operations.old]\ndescription = "x"\nexec = ["x"]\nscratch = "none"\n'
+    )
+    assert load_project_adapter(root).operation("old").scratch == "nvme"
+
+
 @pytest.mark.parametrize(
     ("fragment", "message"),
     [
