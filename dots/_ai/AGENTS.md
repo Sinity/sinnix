@@ -57,6 +57,9 @@ project rules; runtime and task state stay with their owning tools.
   or recurring audit placed around a symptom is accretion; when judgment or a
   direct fix would make it unnecessary, do that instead, and remove such
   mechanisms you find, including your own.
+- What a product records about its own work (logs, spans, phase timings,
+  counters, status detail) is product behaviour its operator reads, and is
+  built with the feature it describes. It is never the accretion above.
 - When a review or retrospective finds a process fix, make it in the owning
   tool or instruction in the same session, or record on a Bead why not.
 - Every construct earns its place: a module, doc section, convention, test,
@@ -80,6 +83,11 @@ instructions, skills, and memory.
 - Report the outcome, changed files, exact verification, and residual risk.
   Keep progress updates short. Give each estimate with its basis: recorded
   durations of comparable finished work (job history, merged pull requests).
+- A measured figure names what it was measured on in the same sentence (which
+  data, how much, cached or cold). A figure from smaller or generated data is
+  an estimate and is called one. A claim about speed, load or behaviour over
+  time is verified by a run on the real data, read from the product's own
+  record of that run.
 - Explain IDs on first use. Use the Plannotator Inbox proactively for choices
   only the operator can make, changes that affect his plans, and finished work
   worth reviewing, and link the thread in chat; load `plannotator-inbox` to
