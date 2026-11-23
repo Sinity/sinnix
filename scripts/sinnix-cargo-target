@@ -291,7 +291,7 @@ fi
 if [ "$new_target" -eq 1 ]; then
   # Detached at idle priority: the build that asked for a target never waits
   # on deleting another checkout's.
-  setsid -f ionice -c 3 "$(realpath "${BASH_SOURCE[0]}")" --release-orphans \
+  setsid -f ionice -c 3 bash "$(realpath "${BASH_SOURCE[0]}")" --release-orphans \
     >/dev/null 2>&1 </dev/null || true
 fi
 printf '%s\n' "$target"
