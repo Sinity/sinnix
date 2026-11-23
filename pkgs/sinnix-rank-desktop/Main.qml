@@ -90,17 +90,16 @@ ApplicationWindow {
         }
     }
 
-    // The choice: as wide as the item it chooses, labelled with its keys.
+    // The choice, in the rail between the two items: a large target per side,
+    // labelled with its keys, that flashes when it records.
     component Choice: AbstractButton {
         id: choice
         required property string decision
         property var keys: []
-        property string keyArrow
-        property string keyDigit
         function pulse() { flashAnimation.restart() }
         hoverEnabled: true
         enabled: controller.can_compare && !controller.busy
-        implicitHeight: Math.round(50 * window.u)
+        implicitHeight: Math.round(112 * window.u)
         onPressed: keys = window.pairKeys()
         onClicked: {
             if (!secondClick.running) {
@@ -110,7 +109,7 @@ ApplicationWindow {
             }
         }
         background: Rectangle {
-            radius: Math.round(8 * window.u)
+            radius: Math.round(12 * window.u)
             color: !choice.enabled ? "#141920"
                    : choice.down ? "#5fae9a" : choice.hovered ? "#2b5b50" : "#1d3a34"
             border.width: 1
@@ -128,28 +127,56 @@ ApplicationWindow {
                 }
             }
         }
-        contentItem: RowLayout {
-            spacing: Math.round(10 * window.u)
-            layoutDirection: choice.decision === "right" ? Qt.RightToLeft : Qt.LeftToRight
-            Item { implicitWidth: Math.round(6 * window.u) }
-            KeyCap { text: choice.keyArrow; u: window.u * 1.15; font.pixelSize: Math.round(17 * window.u) }
-            KeyCap { text: choice.keyDigit; u: window.u * 1.15 }
+        contentItem: ColumnLayout {
+            spacing: Math.round(4 * window.u)
             Label {
-                Layout.fillWidth: true
+                Layout.alignment: Qt.AlignHCenter
+                text: choice.decision === "left" ? "←" : "→"
+                font.pixelSize: Math.round(30 * window.u)
+                color: choice.enabled ? "#dff7ef" : "#4f5864"
+            }
+            Label {
+                Layout.alignment: Qt.AlignHCenter
                 text: choice.decision === "left" ? "Prefer left" : "Prefer right"
-                horizontalAlignment: choice.decision === "right" ? Text.AlignRight : Text.AlignLeft
-                font.pixelSize: Math.round(16 * window.u)
+                font.pixelSize: Math.round(15 * window.u)
                 font.weight: Font.DemiBold
                 color: choice.enabled ? "#dff7ef" : "#4f5864"
+            }
+            KeyCap {
+                Layout.alignment: Qt.AlignHCenter
+                text: choice.decision === "left" ? "← or 1" : "→ or 2"
+                u: window.u
             }
         }
     }
 
+    component Card: Rectangle {
+        default property alias content: inner.data
+        property alias spacing: inner.spacing
+        Layout.fillWidth: true
+        implicitHeight: inner.implicitHeight + Math.round(24 * window.u)
+        radius: Math.round(10 * window.u)
+        color: "#10141a"
+        ColumnLayout {
+            id: inner
+            anchors.fill: parent
+            anchors.margins: Math.round(12 * window.u)
+            spacing: Math.round(8 * window.u)
+        }
+    }
+    component Heading: Label {
+        color: window.mutedText
+        font.pixelSize: Math.round(11 * window.u)
+        font.weight: Font.DemiBold
+        font.capitalization: Font.AllUppercase
+        font.letterSpacing: 0.6
+    }
+
     function choose(side) {
-        const strip = side === "left" ? leftChoice : rightChoice;
+        const target = side === "left" ? leftChoice : rightChoice;
         if (!controller.can_compare || controller.busy)
             return;
-        strip.pulse();
+        target.pulse();
         pairAction(side, pairKeys());
     }
 
@@ -168,72 +195,12 @@ ApplicationWindow {
     palette.disabled.text: "#5f6875"
     palette.disabled.buttonText: "#5f6875"
 
-    header: Rectangle {
-        implicitHeight: Math.round(44 * window.u)
-        color: "#10141a"
-
-        RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: Math.round(8 * window.u)
-            anchors.rightMargin: Math.round(8 * window.u)
-            spacing: Math.round(12 * window.u)
-
-            // Source, filter and order change once per sitting, so they share
-            // one line that opens one menu.
-            CompareButton {
-                id: sessionButton
-                u: window.u
-                flat: true
-                enabled: !controller.busy || !controller.title
-                text: (controller.title || "Open a collection")
-                      + (controller.can_scope ? "  ·  " + window.titleOf(window.scopes, controller.scope) : "")
-                      + (controller.title ? "  ·  " + window.titleOf(window.orders, controller.order) : "")
-                      + "   ▾"
-                font.pixelSize: Math.round(14 * window.u)
-                onClicked: controller.title ? sessionMenu.open() : sources.open()
-            }
-            Item { Layout.fillWidth: true }
-            BusyIndicator {
-                running: controller.busy
-                visible: running
-                implicitWidth: Math.round(24 * window.u)
-                implicitHeight: implicitWidth
-            }
-            Label {
-                text: controller.progress_label
-                color: window.mutedText
-                font.pixelSize: Math.round(13 * window.u)
-            }
-            CompareButton {
-                u: window.u
-                flat: true
-                text: "Keys"
-                keyHint: "?"
-                onClicked: keysHelp.open()
-            }
-        }
-        // Progress through a size-ordered pass.
-        Rectangle {
-            anchors.bottom: parent.bottom
-            width: parent.width
-            height: 1
-            color: "#232a33"
-        }
-        Rectangle {
-            anchors.bottom: parent.bottom
-            visible: controller.progress_fraction >= 0
-            width: parent.width * Math.max(0, controller.progress_fraction)
-            height: Math.max(2, Math.round(2 * window.u))
-            color: window.accent
-            opacity: 0.8
-        }
-    }
-
     Popup {
         id: sessionMenu
         objectName: "sessionMenu"
-        x: sessionButton.x
-        y: 0
+        parent: sessionCard
+        x: Math.round((sessionCard.width - width) / 2)
+        y: sessionCard.height + Math.round(6 * window.u)
         padding: Math.round(14 * window.u)
         width: Math.round(460 * window.u)
         background: Rectangle { color: "#161b22"; radius: Math.round(10 * window.u); border.color: "#2f3843" }
@@ -246,13 +213,6 @@ ApplicationWindow {
             tone: chosen ? "primary" : "neutral"
             text: entry.title
         }
-        component Heading: Label {
-            color: window.mutedText
-            font.pixelSize: Math.round(12 * window.u)
-            font.weight: Font.DemiBold
-            font.capitalization: Font.AllUppercase
-        }
-
         contentItem: ColumnLayout {
             spacing: Math.round(10 * window.u)
             Heading { text: "Collection" }
@@ -338,142 +298,267 @@ ApplicationWindow {
         }
     }
 
-    ColumnLayout {
+    RowLayout {
         anchors.fill: parent
         anchors.margins: Math.round(8 * window.u)
         spacing: Math.round(8 * window.u)
 
-        RowLayout {
-            Layout.fillWidth: true
+        ItemPane {
+            id: left
+            objectName: "leftPane"
             Layout.fillHeight: true
-            spacing: Math.round(6 * window.u)
-
-            ItemPane {
-                id: left
-                objectName: "leftPane"
-                Layout.fillHeight: true
-                Layout.fillWidth: true
-                Layout.preferredWidth: 1
-                visible: window.focusedSide !== "right"
-                u: window.u
-                rankController: window.rankController
-                canDelete: controller.can_delete
-                info: controller.left
-                side: "left"
-                active: window.activeSide === side
-                focused: window.focusedSide === side
-                muted: window.leftMuted
-                onActivated: window.selectSide(side)
-                onFocusRequested: window.focusSide(side)
-                onVersionsRequested: { window.versionSide = side; versions.open() }
-                onDeletePressed: window.deleteKeys = window.pairKeys()
-                onDeleteHeld: window.pairAction("delete", window.deleteKeys, [controller.left.id])
-            }
-            ItemPane {
-                id: right
-                objectName: "rightPane"
-                Layout.fillHeight: true
-                Layout.fillWidth: true
-                Layout.preferredWidth: 1
-                visible: window.focusedSide !== "left"
-                u: window.u
-                rankController: window.rankController
-                canDelete: controller.can_delete
-                info: controller.right
-                side: "right"
-                active: window.activeSide === side
-                focused: window.focusedSide === side
-                muted: window.rightMuted
-                onActivated: window.selectSide(side)
-                onFocusRequested: window.focusSide(side)
-                onVersionsRequested: { window.versionSide = side; versions.open() }
-                onDeletePressed: window.deleteKeys = window.pairKeys()
-                onDeleteHeld: window.pairAction("delete", window.deleteKeys, [controller.right.id])
-            }
-        }
-
-        RowLayout {
             Layout.fillWidth: true
-            Layout.fillHeight: false
-            spacing: Math.round(6 * window.u)
-            Choice {
-                id: leftChoice
-                objectName: "leftPrefer"
+            Layout.preferredWidth: 1
+            visible: window.focusedSide !== "right"
+            u: window.u
+            rankController: window.rankController
+            canDelete: controller.can_delete
+            info: controller.left
+            side: "left"
+            active: window.activeSide === side
+            focused: window.focusedSide === side
+            muted: window.leftMuted
+            onActivated: window.selectSide(side)
+            onFocusRequested: window.focusSide(side)
+            onVersionsRequested: { window.versionSide = side; versions.open() }
+            onDeletePressed: window.deleteKeys = window.pairKeys()
+            onDeleteHeld: window.pairAction("delete", window.deleteKeys, [controller.left.id])
+        }
+        // The rail: the session, the pair's facts side by side, the choice,
+        // what comes next and what this sitting has done.
+        ColumnLayout {
+            id: rail
+            Layout.fillHeight: true
+            Layout.preferredWidth: Math.round(300 * window.u)
+            Layout.maximumWidth: Math.round(300 * window.u)
+            spacing: Math.round(8 * window.u)
+
+            Card {
+                id: sessionCard
+                spacing: Math.round(6 * window.u)
+                // Source, filter and order change once per sitting, so they
+                // share one control that opens one menu.
+                AbstractButton {
+                    id: sessionButton
+                    Layout.fillWidth: true
+                    hoverEnabled: true
+                    implicitHeight: sessionText.implicitHeight + Math.round(8 * window.u)
+                    onClicked: controller.title ? sessionMenu.open() : sources.open()
+                    background: Rectangle {
+                        radius: Math.round(6 * window.u)
+                        color: sessionButton.hovered ? "#1b2129" : "transparent"
+                    }
+                    contentItem: ColumnLayout {
+                        id: sessionText
+                        spacing: Math.round(2 * window.u)
+                        Label {
+                            Layout.fillWidth: true
+                            text: (controller.title || "Open a collection") + "  ▾"
+                            font.pixelSize: Math.round(15 * window.u)
+                            font.weight: Font.DemiBold
+                            elide: Text.ElideRight
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            visible: !!controller.title
+                            text: [controller.can_scope ? window.titleOf(window.scopes, controller.scope) : "",
+                                   window.titleOf(window.orders, controller.order)].filter(t => t).join(" · ")
+                            color: window.mutedText
+                            font.pixelSize: Math.round(13 * window.u)
+                        }
+                    }
+                }
+                Rectangle {
+                    Layout.fillWidth: true
+                    visible: controller.progress_fraction >= 0
+                    implicitHeight: Math.max(3, Math.round(4 * window.u))
+                    radius: height / 2
+                    color: "#1e252e"
+                    Rectangle {
+                        width: parent.width * Math.max(0, controller.progress_fraction)
+                        height: parent.height
+                        radius: parent.radius
+                        color: window.accent
+                    }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label {
+                        Layout.fillWidth: true
+                        text: controller.progress_label
+                        color: window.mutedText
+                        font.pixelSize: Math.round(12 * window.u)
+                        elide: Text.ElideRight
+                    }
+                    BusyIndicator {
+                        running: controller.busy
+                        visible: running
+                        implicitWidth: Math.round(20 * window.u)
+                        implicitHeight: implicitWidth
+                    }
+                    CompareButton { u: window.u; flat: true; text: "Keys"; keyHint: "?"; onClicked: keysHelp.open() }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    visible: controller.tally.compared > 0 || controller.tally.deleted > 0
+                    text: [controller.tally.compared ? controller.tally.compared + " compared" : "",
+                           controller.tally.deleted ? controller.tally.deleted + " deleted" : "",
+                           controller.tally.freed_label ? controller.tally.freed_label + " freed" : ""]
+                          .filter(t => t).join(" · ")
+                    color: window.strongText
+                    font.pixelSize: Math.round(13 * window.u)
+                    wrapMode: Text.Wrap
+                }
+            }
+
+            Card {
+                visible: controller.comparison.length > 0
+                spacing: Math.round(2 * window.u)
+                Repeater {
+                    model: controller.comparison
+                    delegate: ColumnLayout {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        spacing: 0
+                        Heading {
+                            Layout.alignment: Qt.AlignHCenter
+                            Layout.topMargin: Math.round(4 * window.u)
+                            text: modelData.label
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Label {
+                                Layout.fillWidth: true
+                                Layout.preferredWidth: 1
+                                text: modelData.left
+                                elide: Text.ElideRight
+                                color: modelData.winner === "left" ? window.accent
+                                       : modelData.winner ? window.mutedText : window.strongText
+                                font.weight: modelData.winner === "left" ? Font.DemiBold : Font.Normal
+                                font.pixelSize: Math.round(14 * window.u)
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                Layout.preferredWidth: 1
+                                horizontalAlignment: Text.AlignRight
+                                text: modelData.right
+                                elide: Text.ElideLeft
+                                color: modelData.winner === "right" ? window.accent
+                                       : modelData.winner ? window.mutedText : window.strongText
+                                font.weight: modelData.winner === "right" ? Font.DemiBold : Font.Normal
+                                font.pixelSize: Math.round(14 * window.u)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Card {
+                visible: controller.failed
+                color: "#3a1f25"
+                Label {
+                    Layout.fillWidth: true
+                    text: controller.message
+                    color: "#fcc3c8"
+                    wrapMode: Text.Wrap
+                    font.pixelSize: Math.round(13 * window.u)
+                }
+            }
+
+            Item { Layout.fillHeight: true }
+
+            Card {
+                visible: !!controller.upcoming.label
+                spacing: Math.round(6 * window.u)
+                Heading { text: "Next up" }
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: width * 9 / 16
+                    radius: Math.round(6 * window.u)
+                    color: "#0b0e12"
+                    clip: true
+                    Image {
+                        anchors.fill: parent
+                        source: controller.upcoming.frame || ""
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                        sourceSize.width: Math.ceil(parent.width)
+                    }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: controller.upcoming.label || ""
+                    elide: Text.ElideMiddle
+                    font.pixelSize: Math.round(13 * window.u)
+                }
+                Label {
+                    text: controller.upcoming.size_label || ""
+                    color: window.mutedText
+                    font.pixelSize: Math.round(12 * window.u)
+                }
+            }
+
+            GridLayout {
                 Layout.fillWidth: true
-                decision: "left"
-                keyArrow: "←"
-                keyDigit: "1"
+                columns: 2
+                columnSpacing: Math.round(8 * window.u)
+                rowSpacing: Math.round(8 * window.u)
+                Choice { id: leftChoice; objectName: "leftPrefer"; decision: "left"; Layout.fillWidth: true; Layout.preferredWidth: 1 }
+                Choice { id: rightChoice; objectName: "rightPrefer"; decision: "right"; Layout.fillWidth: true; Layout.preferredWidth: 1 }
+                Decision { decision: "tie"; text: "Tie"; keyHint: "T"; Layout.fillWidth: true; Layout.preferredWidth: 1; enabled: controller.can_compare && !controller.busy }
+                Decision { decision: "skip"; text: "Skip"; keyHint: "S"; Layout.fillWidth: true; Layout.preferredWidth: 1; enabled: !!(left.identity || right.identity) && !controller.busy }
             }
-            Decision { decision: "tie"; text: "Tie"; keyHint: "T"; implicitHeight: leftChoice.implicitHeight; enabled: controller.can_compare && !controller.busy }
-            Decision { decision: "skip"; text: "Skip"; keyHint: "S"; implicitHeight: leftChoice.implicitHeight; enabled: !!(left.identity || right.identity) && !controller.busy }
-            Choice {
-                id: rightChoice
-                objectName: "rightPrefer"
-                Layout.fillWidth: true
-                decision: "right"
-                keyArrow: "→"
-                keyDigit: "2"
+
+            Card {
+                visible: controller.recent.length > 0
+                spacing: Math.round(4 * window.u)
+                Heading { text: "This sitting" }
+                Repeater {
+                    model: controller.recent.slice(0, 5)
+                    delegate: RowLayout {
+                        required property var modelData
+                        required property int index
+                        Layout.fillWidth: true
+                        Label {
+                            Layout.fillWidth: true
+                            text: modelData.text
+                            elide: Text.ElideMiddle
+                            color: index === 0 ? window.strongText : window.mutedText
+                            font.pixelSize: Math.round(13 * window.u)
+                        }
+                        Decision {
+                            visible: index === 0 && controller.can_undo
+                            decision: "undo"
+                            text: "Undo"
+                            keyHint: "U"
+                            flat: true
+                            enabled: controller.can_undo && !controller.busy
+                        }
+                    }
+                }
             }
         }
-    }
 
-    // What the last action did, with its undo, then out of the way. Errors
-    // stay until dismissed or replaced.
-    Rectangle {
-        id: toast
-        property string text: ""
-        property bool error: false
-        property bool shown: false
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: Math.round(72 * window.u)
-        width: Math.min(parent.width - Math.round(48 * window.u), toastRow.implicitWidth + Math.round(28 * window.u))
-        height: toastRow.implicitHeight + Math.round(16 * window.u)
-        radius: Math.round(10 * window.u)
-        color: error ? "#3a1f25" : "#1e252e"
-        border.color: error ? "#6a3a42" : "#36404c"
-        opacity: shown ? 1 : 0
-        visible: opacity > 0
-        Behavior on opacity { NumberAnimation { duration: 160 } }
-
-        function show(text, error) {
-            toast.text = text;
-            toast.error = error;
-            toast.shown = !!text;
-            if (error) hideTimer.stop(); else hideTimer.restart();
-        }
-        Timer { id: hideTimer; interval: 5000; onTriggered: toast.shown = false }
-        HoverHandler { onHoveredChanged: if (hovered) hideTimer.stop(); else if (!toast.error && toast.shown) hideTimer.restart() }
-
-        RowLayout {
-            id: toastRow
-            anchors.centerIn: parent
-            spacing: Math.round(12 * window.u)
-            Label {
-                Layout.maximumWidth: window.width * 0.6
-                text: toast.text
-                color: toast.error ? "#fcc3c8" : window.strongText
-                elide: Text.ElideRight
-            }
-            Decision {
-                decision: "undo"
-                visible: controller.can_undo && !toast.error
-                text: "Undo"
-                keyHint: "U"
-                flat: true
-                enabled: controller.can_undo && !controller.busy
-            }
-            CompareButton { u: window.u; flat: true; visible: toast.error; text: "Dismiss"; onClicked: toast.shown = false }
-        }
-
-        property int epoch: -1
-        Connections {
-            target: controller
-            function onChanged() {
-                if (controller.busy || controller.epoch === toast.epoch) return;
-                toast.epoch = controller.epoch;
-                toast.show(controller.message, controller.failed);
-            }
+        ItemPane {
+            id: right
+            objectName: "rightPane"
+            Layout.fillHeight: true
+            Layout.fillWidth: true
+            Layout.preferredWidth: 1
+            visible: window.focusedSide !== "left"
+            u: window.u
+            rankController: window.rankController
+            canDelete: controller.can_delete
+            info: controller.right
+            side: "right"
+            active: window.activeSide === side
+            focused: window.focusedSide === side
+            muted: window.rightMuted
+            onActivated: window.selectSide(side)
+            onFocusRequested: window.focusSide(side)
+            onVersionsRequested: { window.versionSide = side; versions.open() }
+            onDeletePressed: window.deleteKeys = window.pairKeys()
+            onDeleteHeld: window.pairAction("delete", window.deleteKeys, [controller.right.id])
         }
     }
 

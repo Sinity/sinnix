@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -101,6 +102,52 @@ def version_info(entry):
     }
 
 
+def readable(label):
+    """A filename as words: no extension, separators as spaces."""
+    name = re.sub(r"\.[A-Za-z0-9]{2,4}$", "", str(label or ""))
+    return re.sub(r"\s+", " ", name.replace("_", " ")).strip()
+
+
+def projection_label(projection):
+    kind = (projection or {}).get("projection")
+    layout = {"sbs": "side by side", "tb": "top and bottom"}.get((projection or {}).get("layout"), "")
+    if kind == "equirect":
+        return " ".join(filter(None, [f"{int(projection.get('hfov') or 180)}°", layout]))
+    if kind == "fisheye":
+        return " ".join(filter(None, [f"Fisheye {int(projection.get('hfov') or 180)}°", layout]))
+    return {"flat": "Flat", "unknown": "Not set"}.get(kind, "")
+
+
+def compare_rows(left, right):
+    """The facts of a pair, side by side, with the stronger value marked.
+
+    Bigger wins for size, resolution, length and bitrate; plays only mark
+    which file has been watched more. Rows missing on both sides are left
+    out.
+    """
+    a, b = left.get("stats") or {}, right.get("stats") or {}
+    rows = []
+
+    def row(label, key, show, better=True):
+        va, vb = a.get(key), b.get(key)
+        if not va and not vb:
+            return
+        winner = ""
+        if better and va and vb and va != vb:
+            winner = "left" if va > vb else "right"
+        rows.append({"label": label, "left": show(va, a) if va else "—",
+                     "right": show(vb, b) if vb else "—", "winner": winner})
+
+    row("Size", "size", lambda v, _: file_size(v))
+    row("Resolution", "pixels", lambda _, s: f"{s['width']} × {s['height']}")
+    row("Length", "duration", lambda v, _: timestamp(v))
+    row("Bitrate", "bitrate", lambda v, _: f"{v / 1e6:.0f} Mb/s")
+    row("Codec", "codec", lambda v, _: v, better=False)
+    row("Projection", "projection", lambda v, _: v, better=False)
+    row("Plays", "plays", lambda v, _: str(v), better=False)
+    return rows
+
+
 class Controller(QObject):
     changed = Signal()
     left_changed = Signal()
@@ -109,6 +156,8 @@ class Controller(QObject):
     frame_changed = Signal(str, int)
     comment_saved = Signal(str)
     recents_changed = Signal()
+    pair_changed = Signal()
+    upcoming_changed = Signal()
     operation_completed = Signal(object, object, object)
     frames_completed = Signal(str, object, object)
     video_completed = Signal(str, object)
@@ -142,6 +191,10 @@ class Controller(QObject):
         self._prefetch = None
         self._saving_comment = None
         self._first_frame_requests = set()
+        # This sitting's work, for the rail: what was decided and freed.
+        self._tally = {"compared": 0, "deleted": 0, "freed": 0}
+        self._recent = []
+        self._pending = None
         self.operation_completed.connect(self._complete)
         self.frames_completed.connect(self._receive_frames)
         self.video_completed.connect(self._receive_video)
@@ -186,6 +239,9 @@ class Controller(QObject):
             self._frames_by_item.pop(path, None)
             self._frame_requests.pop(path, None)
             self._first_frame_requests.discard(path)
+        pending, self._pending = self._pending, None
+        if pending and not error and self._session:
+            self._record(pending)
         if source and result is not None:
             if self._session:
                 self._session.close()
@@ -290,6 +346,9 @@ class Controller(QObject):
     def decide(self, epoch, left, right, action, ids):
         if self._busy or epoch != self._epoch or [left, right] != [value.get("key", "") for value in self._descriptions[:2]]:
             return
+        pair = self._visible_items[:2]
+        self._pending = {"action": action, "pair": pair, "ids": [str(i) for i in ids],
+                         "sizes": self._sizes(pair, ids)}
         if action in ("left", "right"):
             self.prefer(int(action == "right"))
         elif action in ("tie", "skip", "undo"):
@@ -317,6 +376,67 @@ class Controller(QObject):
     def delete_files(self, ids):
         if self.can_delete and ids:
             self._apply("delete", tuple(map(str, ids)))
+
+    @staticmethod
+    def _sizes(pair, ids):
+        sizes = {}
+        for item in pair:
+            if item is None:
+                continue
+            sizes[str(item.id)] = (item.label, int(item.size or 0))
+            for version in item.versions:
+                sizes[str(version["id"])] = (version.get("basename") or item.label, int(version.get("size") or 0))
+        return {key: sizes[key] for key in map(str, ids) if key in sizes}
+
+    def _record(self, pending):
+        action, pair = pending["action"], pending["pair"]
+        if action in ("left", "right") and all(pair):
+            kept = pair[action == "right"]
+            self._tally["compared"] += 1
+            self._recent.insert(0, {"text": f"Kept {action} · {readable(kept.label)}", "kind": "choice"})
+        elif action == "tie":
+            self._tally["compared"] += 1
+            self._recent.insert(0, {"text": "Tie", "kind": "choice"})
+        elif action == "skip":
+            self._recent.insert(0, {"text": "Skipped the pair", "kind": "skip"})
+        elif action == "undo" and self._recent:
+            undone = self._recent.pop(0)
+            if undone["kind"] == "choice":
+                self._tally["compared"] -= 1
+        elif action == "delete":
+            present = set()
+            for item in self._session.items.values():
+                present.add(str(item.id))
+                present.update(str(version["id"]) for version in item.versions)
+            for key, (label, size) in pending["sizes"].items():
+                if key not in present:
+                    self._tally["deleted"] += 1
+                    self._tally["freed"] += size
+                    self._recent.insert(0, {"text": f"Deleted {readable(label)} · {file_size(size)}", "kind": "delete"})
+        del self._recent[8:]
+
+    @Property("QVariantMap", notify=changed)
+    def tally(self):
+        return {**self._tally, "freed_label": file_size(self._tally["freed"]) if self._tally["freed"] else ""}
+
+    @Property("QVariantList", notify=changed)
+    def recent(self):
+        return self._recent
+
+    @Property("QVariantList", notify=pair_changed)
+    def comparison(self):
+        return compare_rows(self._descriptions[0], self._descriptions[1])
+
+    @Property("QVariantMap", notify=upcoming_changed)
+    def upcoming(self):
+        """The file the next pair will bring in, already being prefetched."""
+        if not (self._session and self._prefetch):
+            return {}
+        item = next((i for i in self._session.items.values() if str(i.path) == self._prefetch), None)
+        if item is None:
+            return {}
+        frame = (self._frames_by_item.get(self._prefetch) or {}).get(PERCENTAGES[0])
+        return {"label": readable(item.label), "size_label": file_size(item.size), "frame": source_url(frame)}
 
     @Slot(str, result=str)
     def file_comment(self, key):
@@ -443,6 +563,8 @@ class Controller(QObject):
             known.update(frames)
             for pct, _ in frames:
                 self.frame_changed.emit(path, pct)
+            if path == self._prefetch:
+                self.upcoming_changed.emit()
             if path in self._first_frame_requests:
                 self._first_frame_requests.remove(path)
                 self._frame_requests.pop(path)
@@ -494,6 +616,15 @@ class Controller(QObject):
             facts.append(timestamp(duration))
         if item.scene_id is not None:
             facts.append(f"{item.play_count} plays")
+        stats = {
+            "size": int(item.size or 0), "duration": duration or 0,
+            "pixels": (video["width"] or 0) * (video["height"] or 0),
+            "width": video["width"], "height": video["height"],
+            "bitrate": int(item.size or 0) * 8 / duration if duration and item.size else 0,
+            "codec": str(video["video_codec"]).upper() if video["video_codec"] else "",
+            "projection": projection_label(projection or item.projection) if kind == "video" else "",
+            "plays": item.play_count if item.scene_id is not None else 0,
+        }
         frames = [{"pct": pct, "fraction": pct / 100,
                    "label": timestamp(duration * pct / 100) if duration else f"{pct}%"}
                   for pct in PERCENTAGES] if kind == "video" else []
@@ -515,7 +646,7 @@ class Controller(QObject):
             ),
             "kind": kind, "media": source_url(media), "text": text, "duration": (duration or 0) * 1000,
             "projection": projection or item.projection or {}, "size_label": file_size(item.size),
-            "details": " · ".join(facts), "frames": frames,
+            "details": " · ".join(facts), "frames": frames, "stats": stats,
             "aspect": (video["width"] / video["height"]) if video["width"] and video["height"] else 16 / 9,
             "versions": [version_info(entry) for entry in item.versions],
         }
@@ -527,6 +658,9 @@ class Controller(QObject):
                 self._visible_items[index] = item
                 self._descriptions[index] = self._describe(item)
                 signal.emit()
+                if index < 2:
+                    self.pair_changed.emit()
+        self.upcoming_changed.emit()
 
     @Property("QVariantMap", notify=left_changed)
     def left(self):

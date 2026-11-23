@@ -265,8 +265,11 @@ Rectangle {
                     ToolTip.text: pane.info.path || pane.info.label || ""
                     HoverHandler { id: titleHover }
                 }
+                // In the main window the rail shows the pair's facts side by
+                // side; a lone preview has no rail, so it shows them here.
                 RowLayout {
                     Layout.fillWidth: true
+                    visible: pane.previewOnly
                     spacing: Math.round(10 * pane.u)
                     Label {
                         visible: !!text
@@ -282,12 +285,6 @@ Rectangle {
                         font.pixelSize: Math.round(13 * pane.u)
                         color: pane.mutedText
                         elide: Text.ElideRight
-                    }
-                    Label {
-                        visible: pane.active && pane.info.kind === "video" && !pane.previewOnly
-                        text: "Sound and keys"
-                        font.pixelSize: Math.round(12 * pane.u)
-                        color: pane.accent
                     }
                 }
             }

@@ -120,19 +120,20 @@ Pass a domain name for saved image or text options, or `--files` followed
 by media files or a folder. In Yazi, `g R` compares the selection or opens
 the current directory. A connected library can supply additional sources.
 
-The window is laid out by how often each action is used. The two items fill
-the screen. Each item has a full-width **Prefer** bar along the bottom (keys
-← and →, or 1 and 2); **Tie** (T) and **Skip** (S) sit between them. After
-each answer a short message says what happened and offers **Undo** (U). The
-title line names the collection, video type and order; click it to switch
-collection, choose VR, Non-VR, Needs review or All files, or change the order.
+The two items fill the screen on either side of a rail. At its top the rail
+names the collection, video type and order (click to switch any of them),
+shows progress through the pass, and keeps this sitting's tally: comparisons
+made, files deleted and space freed. Below that it lines up the pair's facts
+side by side (size, resolution, length, bitrate, codec, projection, plays)
+with the stronger value lit. In Largest first a card shows the file the next
+pair brings in, already prefetched. At the bottom are the choice buttons
+(**Prefer left** and **Prefer right**, keys ← and → or 1 and 2), **Tie** (T)
+and **Skip** (S), and the last few actions of the sitting with **Undo** (U).
 Largest first reviews files in size order and keeps the preferred file on its
-side. Most informative draws the next pair from the current evidence. The
-header shows progress through the pass, and **Keys** (?) lists every
-shortcut.
+side. Most informative draws the next pair from the current evidence.
+**Keys** (?) lists every shortcut.
 
-Each pane's header shows the file's size, resolution, codec, duration and play
-count. Before playback, a video shows six frames from across its length; click
+Each pane's header holds the file's title and its own actions. Before playback, a video shows six frames from across its length; click
 one to play from that point. During playback the frames shrink into a strip
 under the video that also serves as its timeline: drag along it to scrub. The
 selected pane has an outline and gets the sound and keyboard: click a pane or
