@@ -34,6 +34,10 @@ from .claims import SESSION_VARIABLES, parse_duration
 DEFAULT_IDLE = "2h"
 DEFAULT_TOUCHED = "30m"
 PARKED_LOG = Path("/realm/state/hub/parked-sessions.jsonl")
+# One marker per session being parked, left before its process is asked to
+# exit. The session's SessionEnd hook (dots/claude/hooks/sessionend-scratch.py)
+# consumes it and keeps the session's scratch for the resume.
+PARKING_DIR = Path("/realm/state/hub/parking")
 TAIL_BYTES = 1024 * 1024
 SUBAGENT_WINDOW_SECONDS = 24 * 3600
 EXIT_WAIT_SECONDS = 20.0
@@ -716,6 +720,7 @@ def park(
     screen: Callable[[Mapping[str, Any]], str | None] = read_screen,
     end: Callable[[Mapping[str, Any]], str | None] = end_session,
     log: Path | None = PARKED_LOG,
+    parking: Path | None = PARKING_DIR,
 ) -> dict[str, Any]:
     """Park the candidates; without ``apply`` only say which would be."""
     by_pid = {fact["pid"]: fact for fact in facts}
@@ -734,8 +739,15 @@ def park(
             elif state == "unknown":
                 reasons.append("its input box could not be read")
         if not reasons and apply:
+            marker = None
+            if parking is not None and row.get("session"):
+                parking.mkdir(parents=True, exist_ok=True)
+                marker = parking / str(row["session"])
+                marker.touch()
             if failure := end(fact):
                 reasons.append(failure)
+                if marker is not None:
+                    marker.unlink(missing_ok=True)
         if reasons:
             kept.append({**row, "candidate": False, "keep_because": reasons})
             continue

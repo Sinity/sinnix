@@ -632,50 +632,20 @@ class ManagedSweepTest(unittest.TestCase):
         self.assertTrue((self.root / "codex/lane").exists())
         self.assertTrue((self.root / "general/payload").exists())
 
-    def session_fixture(self):
-        """Three session trees and a session record of this test process."""
+    def test_claude_session_scratch_is_left_to_the_session(self):
+        """Its SessionEnd hook removes it; a resumable session keeps it."""
         ended = "11111111-1111-4111-8111-111111111111"
-        recorded = "22222222-2222-4222-8222-222222222222"
-        carried = "33333333-3333-4333-8333-333333333333"
         claude = self.root / f"claude-{self.uid}"
-        trees = {
-            "ended": claude / "-realm-project-example" / ended,
-            "tool": claude / "session-tmp" / ended,
-            "recorded": claude / "-realm-project-example" / recorded,
-            "carried": claude / "session-tmp" / carried,
-        }
-        for path in trees.values():
-            (path / "scratchpad" / "claude-notes").mkdir(parents=True)
-            (path / "scratchpad" / "claude-notes" / "file").write_text("scratch")
-        # Claude Code's own name for a non-session folder stays untouched.
-        (claude / "bash-edit-diff").mkdir()
-        home = self.root / "home"
-        records = home / ".config" / "claude" / "sessions"
-        records.mkdir(parents=True)
-        with open("/proc/self/stat") as source:
-            started = MODULE["parse_stat_start_time"](source.read())
-        (records / f"{os.getpid()}.json").write_text(
-            json.dumps({"pid": os.getpid(), "procStart": str(started), "sessionId": recorded})
-        )
-        # A stale record: the PID exists but started at another time.
-        (records / "1.json").write_text(
-            json.dumps({"pid": 1, "procStart": "0", "sessionId": ended})
-        )
-        return trees, home, carried
-
-    def run_sweep(self, home, carried, removed):
+        trees = [claude / "-realm-project-example" / ended, claude / "session-tmp" / ended]
+        for path in trees:
+            (path / "scratchpad").mkdir(parents=True)
+            (path / "scratchpad" / "file").write_text("scratch")
         fn = MODULE["main"]
+        removed = []
 
         def remove(path, budget, deadline):
             removed.append(path)
             return True
-
-        real_held_paths = MODULE["held_paths"]
-
-        def held_paths(process, **kwargs):
-            yield from real_held_paths(process, **kwargs)
-            if process == f"/proc/{os.getpid()}" and kwargs.get("environment") == MODULE["SESSION_VARS"]:
-                yield "env", carried
 
         with (
             patch.dict(
@@ -685,34 +655,16 @@ class ManagedSweepTest(unittest.TestCase):
                     "roots": lambda: [str(self.root)],
                     "drop_privileges": lambda *_: None,
                     "paced_remove": remove,
-                    "held_paths": held_paths,
                 },
             ),
-            patch("pwd.getpwuid", return_value=SimpleNamespace(pw_dir=str(home))),
             patch("subprocess.run"),
             contextlib.redirect_stdout(io.StringIO()) as output,
         ):
             if self.uid == 0:
                 self.skipTest("requires non-root fixture owner")
-            status = fn(["sweep"])
-        return status, output.getvalue()
-
-    def test_ended_claude_session_scratch_is_removed_and_live_sessions_kept(self):
-        trees, home, carried = self.session_fixture()
-        removed = []
-        status, output = self.run_sweep(home, carried, removed)
-        self.assertEqual(status, 0, output)
-        self.assertEqual(sorted(removed), sorted([str(trees["ended"]), str(trees["tool"])]))
-        self.assertIn("held=2", output)
-
-    def test_unreadable_session_record_retains_every_session_tree(self):
-        trees, home, carried = self.session_fixture()
-        (home / ".config/claude/sessions/broken.json").write_text("{")
-        removed = []
-        status, output = self.run_sweep(home, carried, removed)
+            self.assertEqual(fn(["sweep"]), 0, output.getvalue())
         self.assertEqual(removed, [])
-        self.assertEqual(status, 1)
-        self.assertTrue(trees["ended"].exists())
+        self.assertTrue(all(path.exists() for path in trees))
 
     def test_paced_removal_obeys_entry_budget_and_preserves_symlink_target(self):
         path = self.root / "lane"

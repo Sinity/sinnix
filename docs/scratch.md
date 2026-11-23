@@ -12,8 +12,8 @@ Every AgentCTL job runs with a private TMPDIR that agentctl removes when the
 job ends (`docs/agentctl.md`). Producers must honor inherited TMPDIR and keep
 retained output outside it.
 
-`sinnix-tmp-sweep` runs every 15 minutes. It recognizes Nix devshell scratch,
-Claude Code session scratch, and these invocation directories:
+`sinnix-tmp-sweep` runs every 15 minutes. It recognizes Nix devshell scratch
+and these invocation directories:
 
 - `sinnix-chatgpt-native.<pid>.<random>`
 - `sinnix-chatgpt-download.<pid>.<random>`
@@ -28,17 +28,22 @@ A Claude Code session owns two directories under
 that session's tool commands and MCP servers. Temporary files made by tools
 therefore land in a directory with a known owner instead of the shared root.
 
-A session is live while a Claude Code session record
-(`<config>/sessions/<pid>.json`, read from every `CLAUDE_CONFIG_DIR` a running
-process names) names it and that PID still has the recorded start time, or
-while any process carries it as `CLAUDE_CODE_SESSION_ID`. The sweeper removes
-both directories of a session that is not live once no process holds them
-(cwd, open file, mapping or scratch environment variable, as below), and a
-Git checkout inside them must pass the custody checks below. An unreadable
-session record or process environment keeps every session tree for that run.
-Resuming an ended session starts it with empty scratch. Other names under
-`claude-<uid>/` and other top-level `claude-*` folders have no recorded owner
-and are kept; whoever names a folder removes it.
+Both go when the session ends. The `SessionEnd` hook
+(`dots/claude/hooks/sessionend-scratch.py`) records the end in
+`claude-<uid>/.ended/<session-id>` and starts a detached remover at idle I/O
+priority, so the session's exit never waits on a deletion. The remover waits
+up to ten minutes while a process still carries the session's
+`CLAUDE_CODE_SESSION_ID` or works inside its directories, then renames each
+tree into `claude-<uid>/.released/` and deletes it. A tree still held after
+that stays recorded as ended and goes at the next session's end.
+
+A session that is meant to come back keeps its scratch. `sinnix sessions park`
+leaves `/realm/state/hub/parking/<session-id>` before it ends the process; the
+hook consumes that marker and removes nothing, so the resumed session finds
+its scratchpad. A session that never reaches its end hook (killed, crashed)
+is resumable and keeps its scratch too; once resumed and ended, it goes.
+Other names under `claude-<uid>/` and other top-level `claude-*` folders have
+no recorded owner; whoever names a folder removes it.
 
 ## PID-qualified producer scratch
 

@@ -103,9 +103,10 @@ Host `sinnix-prime`. Root storage is wear-limited; heavy work belongs on
 - `/realm/`: subject folders and service storage; read `/realm/INVENTORY.md`
   and mutate through the owning tools. `/realm/state/`: live service state and
   the external Beads databases.
-- `/realm/tmp/work/` is the managed `$TMPDIR`. Put scratch in a per-task
-  subdirectory and remove it when done; retained results go to their owning
-  store. `/tmp` is a small tmpfs.
+- `/realm/tmp/work/` is the managed temporary root. Put scratch in a per-task
+  subdirectory of `$TMPDIR`, which in a Claude Code session or an agentctl
+  job is that session's or job's own directory and is removed when it ends;
+  retained results go to their owning store. `/tmp` is a small tmpfs.
 - In unattended work, give `rm` literal absolute paths and use `git -C <path>`,
   `env -C <dir> <cmd>`, or absolute paths instead of `cd <dir> && …`; Claude
   Code stops for a person otherwise. The working directory may reset between

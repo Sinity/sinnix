@@ -462,11 +462,18 @@ def test_park_is_a_dry_run_and_never_ends_a_session_with_unsent_input(
         ended.append(int(fact["pid"]))  # type: ignore[arg-type]
 
     log = tmp_path / "parked.jsonl"
+    parking = tmp_path / "parking"
     dry = sessions.park(
-        facts, rows, apply=False, screen=lambda _: screen(""), end=end, log=log
+        facts,
+        rows,
+        apply=False,
+        screen=lambda _: screen(""),
+        end=end,
+        log=log,
+        parking=parking,
     )
     assert [entry["name"] for entry in dry["parked"]] == ["finished"] and ended == []
-    assert not log.exists()
+    assert not log.exists() and not parking.exists()
 
     for shown, reason in (
         (screen("draft"), "unsent input"),
@@ -479,17 +486,49 @@ def test_park_is_a_dry_run_and_never_ends_a_session_with_unsent_input(
             screen=lambda _, shown=shown: shown,
             end=end,
             log=log,
+            parking=parking,
         )
         assert kept["parked"] == [] and ended == []
         assert any(reason in " ".join(row["keep_because"]) for row in kept["kept"])
 
-    done = sessions.park(
-        facts, rows, apply=True, screen=lambda _: screen(""), end=end, log=log
-    )
     sid = machine["ids"]["finished"]  # type: ignore[index]
-    assert ended == [10]
+    # The session's end hook must find the marker while the process exits.
+    marked_at_end: list[bool] = []
+
+    def end_marked(fact: dict[str, object]) -> None:
+        marked_at_end.append((parking / sid).exists())
+        end(fact)
+
+    done = sessions.park(
+        facts,
+        rows,
+        apply=True,
+        screen=lambda _: screen(""),
+        end=end_marked,
+        log=log,
+        parking=parking,
+    )
+    assert ended == [10] and marked_at_end == [True]
     assert done["parked"][0]["resume"] == f"cd /x/project && claude --resume {sid}"
     assert json.loads(log.read_text())["session"] == sid
+
+
+def test_a_session_that_does_not_end_leaves_no_parking_marker(
+    machine: dict[str, object], tmp_path: Path
+) -> None:
+    """Breaks if a failed park leaves the marker that keeps scratch at the
+    session's next real end."""
+    parking = tmp_path / "parking"
+    result = sessions.park(
+        machine["facts"],  # type: ignore[arg-type]
+        list(machine["rows"].values()),  # type: ignore[union-attr]
+        apply=True,
+        screen=lambda _: screen(""),
+        end=lambda _: "asked to exit but still running",
+        log=None,
+        parking=parking,
+    )
+    assert result["parked"] == [] and list(parking.iterdir()) == []
 
 
 def test_ending_refuses_a_process_whose_id_was_reused(tmp_path: Path) -> None:

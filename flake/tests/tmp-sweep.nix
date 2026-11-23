@@ -104,6 +104,16 @@ in
         '';
       };
 
+      # A Claude Code session's scratch goes with the session's end, stays for
+      # a parked session and while a process still works in it.
+      checks.claude-session-scratch = mkRuntimeCheck system {
+        name = "claude-session-scratch";
+        nativeBuildInputs = [ inputs.nixpkgs.legacyPackages.${system}.python3 ];
+        script = ''
+          python3 ${./claude_session_scratch.py} ${../../dots/claude/hooks/sessionend-scratch.py}
+        '';
+      };
+
       # Anti-vacuity: a sweeper that removed nothing, or one that ignored a
       # live holder, both fail here. Holders cover cwd and environment paths
       # spelled directly, through symlinks, through symlink/.. and relative

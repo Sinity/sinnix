@@ -3,7 +3,7 @@
 # description: Reclaim abandoned scratch with process and Git custody checks
 # runtimeInputs: coreutils git openssh pueue util-linux
 # pythonPackages: @sinnix-lib
-"""Reclaim leaked devshell, PID-qualified producer and ended-session scratch.
+"""Reclaim leaked devshell and PID-qualified producer scratch.
 
 Nix creates `nix-shell.*` and `nix-develop-*` directories. Some `nix develop`
 paths leave them behind even on normal exit. The sweeper removes owned,
@@ -17,13 +17,8 @@ open-file probe cannot see: an idle devshell whose shell sits in another cwd
 still owns its scratch tree. Environment paths are resolved through symlinks,
 and relative values are interpreted against the owning process's cwd.
 
-Claude Code session scratch lives at <root>/claude-<uid>/<group>/<session-id>:
-Claude Code's own per-project directories and the per-session TMPDIR that
-claude-tool-scope gives tool commands (group `session-tmp`). Its owner is the
-session. A session is live while a Claude Code session record
-(<config>/sessions/<pid>.json) names it and that PID still has the recorded
-start time, or while any process carries it as CLAUDE_CODE_SESSION_ID. A tree
-whose session is not live, that no process holds, is removed.
+Claude Code session scratch under claude-<uid>/ is never a candidate: the
+session's own SessionEnd hook removes it (dots/claude/hooks/sessionend-scratch.py).
 
 /proc is walked once for holders, after the candidate list is taken. Once, because
 a probe repeated per candidate rescans every process on the host and turns a
@@ -45,7 +40,7 @@ import stat
 import sys
 import time
 
-from sinnix_lib.procfs import held_paths, parse_stat_start_time
+from sinnix_lib.procfs import held_paths
 
 HOLDER_VARS = (b"TMPDIR=", b"TMP=", b"TEMP=", b"NIX_BUILD_TOP=", b"AGENTCTL_SCRATCH=")
 PREFIXES = ("nix-shell.", "nix-develop-")
@@ -54,9 +49,6 @@ MANAGED_ROOT = "/realm/tmp/work"
 STALE_SECONDS = 7 * 86400
 DELETE_LIMIT = 20000
 DELETE_SECONDS = 45
-
-SESSION_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
-SESSION_VARS = (b"CLAUDE_CONFIG_DIR=", b"CLAUDE_CODE_SESSION_ID=")
 
 OWNED_MIN_AGE_SECONDS = 24 * 60 * 60
 # These producers allocate a private directory with their actual shell PID.
@@ -77,8 +69,8 @@ must also be at least 24 hours old and its allocating process must be dead.
 Dry-run also proposes old entries under /realm/tmp/work and its codex/
 children for owner classification: no file modified in seven days, no holders,
 no active queue lane, and no dirty or unpublished Git work. Real runs keep
-these unclassified entries. claude-* is retained, except Claude Code session
-trees under claude-<uid>/ whose session has ended.
+these unclassified entries. claude-* is retained; a Claude Code session's
+scratch is removed by its own SessionEnd hook.
 Dry-run reports candidates and logical bytes. Real runs use idle I/O
 and remove at most 20000 entries over 45 seconds, pacing each unlink.
 """
@@ -166,85 +158,6 @@ def collect_candidates(root: str, uid: int) -> tuple[dict[str, tuple[int, int, i
             continue
         candidates[entry.path] = directory_identity(observed)
     return candidates, skipped
-
-
-def session_candidates(root: str, uid: int) -> dict[str, tuple[int, int, int]]:
-    """Every Claude Code session tree: <root>/claude-<uid>/<group>/<session-id>."""
-    result: dict[str, tuple[int, int, int]] = {}
-    if root != MANAGED_ROOT:
-        return result
-    base = f"{root}/claude-{uid}"
-    if os.path.islink(base) or not os.path.isdir(base):
-        return result
-    for group in os.scandir(base):
-        if not group.is_dir(follow_symlinks=False):
-            continue
-        for entry in os.scandir(group.path):
-            if not SESSION_ID.fullmatch(entry.name) or not entry.is_dir(follow_symlinks=False):
-                continue
-            observed = entry.stat(follow_symlinks=False)
-            if observed.st_uid == uid:
-                result[entry.path] = directory_identity(observed)
-    return result
-
-
-def process_start(pid: int) -> int | None:
-    try:
-        with open(f"/proc/{pid}/stat") as source:
-            return parse_stat_start_time(source.read())
-    except OSError as error:
-        vanished_entry(error, f"/proc/{pid}/stat")
-        return None
-
-
-def live_sessions(home: str) -> set[str]:
-    """Session ids that a running Claude Code process or its children still own.
-
-    Session records are read from every Claude configuration directory a live
-    process names, plus the two default locations. A record whose PID is gone
-    or was reused (different start time) is stale. An unreadable process
-    environment or record is unknown, so the caller retains every session tree.
-    """
-    live: set[str] = set()
-    config_dirs = {os.path.join(home, ".claude"), os.path.join(home, ".config", "claude")}
-    for pid in os.listdir("/proc"):
-        if not pid.isdigit():
-            continue
-        try:
-            for _, value in held_paths("/proc/" + pid, links=(), descriptors=False,
-                                       environment=SESSION_VARS):
-                if SESSION_ID.fullmatch(value):
-                    live.add(value)
-                elif os.path.isabs(value):
-                    config_dirs.add(value)
-        except OSError as error:
-            where = error.filename or "/proc/" + pid
-            raise VisibilityError(f"cannot inspect {where}: {error.strerror}") from error
-    for config in sorted(config_dirs):
-        records = os.path.join(config, "sessions")
-        try:
-            names = os.listdir(records)
-        except FileNotFoundError:
-            continue
-        except OSError as error:
-            raise VisibilityError(f"cannot read {records}: {error.strerror}") from error
-        for name in names:
-            if not name.endswith(".json"):
-                continue
-            path = os.path.join(records, name)
-            try:
-                with open(path) as source:
-                    record = json.load(source)
-                pid = int(record["pid"])
-                started = int(record["procStart"])
-                session = record["sessionId"]
-            except FileNotFoundError:
-                continue
-            except (OSError, ValueError, KeyError, TypeError) as error:
-                raise VisibilityError(f"cannot read session record {path}: {error}") from error
-            if process_start(pid) == started and isinstance(session, str):
-                live.add(session)
-    return live
 
 
 def managed_candidates(root: str, uid: int) -> dict[str, tuple[int, int, int]]:
@@ -337,8 +250,8 @@ def mount_points() -> set[str]:
         }
 
 
-def inspect_tree(path: str, uid: int, aged: bool, mounts: set[str] | None = None,
-                 session: bool = False) -> tuple[int, int, bool]:
+def inspect_tree(path: str, uid: int, aged: bool,
+                 mounts: set[str] | None = None) -> tuple[int, int, bool]:
     """No symlink following or cross-device traversal; any uncertainty retains."""
     mounts = mount_points() if mounts is None else mounts
     if any(
@@ -367,8 +280,7 @@ def inspect_tree(path: str, uid: int, aged: bool, mounts: set[str] | None = None
             if (current == path or os.path.basename(current) != ".git") and {"HEAD", "objects", "refs"} <= names:
                 raise VisibilityError("bare Git repository requires owner reconciliation")
             for entry in entries:
-                # Inside an ended session's tree a claude-* name is just a name.
-                if entry.name.startswith("claude-") and not session:
+                if entry.name.startswith("claude-"):
                     raise VisibilityError("contains protected claude-* tree")
                 if entry.name == ".git":
                     has_git = True
@@ -547,24 +459,16 @@ def main(argv: list[str]) -> int:
     root_list = roots()
 
     general: set[str] = set()
-    sessions: set[str] = set()
-    live: set[str] = set()
     candidates: dict[str, dict[str, tuple[int, int, int]]] = {}
     skipped: dict[str, int] = {}
     try:
         for root in root_list:
             candidates[root], skipped[root] = collect_candidates(root, uid)
-            owned_by_session = session_candidates(root, uid)
-            sessions.update(owned_by_session)
-            candidates[root].update(owned_by_session)
             extra = managed_candidates(root, uid) if dry_run else {}
             general.update(set(extra) - set(candidates[root]))
             candidates[root].update(extra)
         every = {path for paths in candidates.values() for path in paths}
         held = held_directories(every, root_list) if every else set()
-        if sessions:
-            home = owner.pw_dir if owner else pwd.getpwuid(uid).pw_dir
-            live = live_sessions(home)
         # Scanning may require root; removal never does. This must precede
         # every mutation, including a run with no recognized holders.
         mounts = mount_points()
@@ -598,8 +502,7 @@ def main(argv: list[str]) -> int:
                 print("sinnix-tmp-sweep: deletion budget reached; remaining candidates deferred")
                 break
             if (path in held or queue_holds(path, queue_paths)
-                    or queue_unknown and path in general
-                    or path in sessions and os.path.basename(path) in live):
+                    or queue_unknown and path in general):
                 kept += 1
                 continue
             try:
@@ -624,8 +527,7 @@ def main(argv: list[str]) -> int:
                 failed = True
                 continue
             try:
-                size, entries, has_git = inspect_tree(path, uid, path in general, mounts,
-                                                      session=path in sessions)
+                size, entries, has_git = inspect_tree(path, uid, path in general, mounts)
                 if directory_identity(os.lstat(path)) != candidates[root][path]:
                     skipped[root] += 1
                     continue

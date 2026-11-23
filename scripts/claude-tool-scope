@@ -39,8 +39,8 @@ esac
 
 # Temporary files belong to the session that made them. Each session's tool
 # commands and MCP servers get their own TMPDIR beside Claude Code's own
-# per-session directories, and sinnix-tmp-sweep removes both once no live
-# Claude process has that session (docs/scratch.md). A lane worker never gets
+# per-session directories, and the session's SessionEnd hook removes both
+# (docs/scratch.md). A lane worker never gets
 # here: its job already has a private TMPDIR that ends with the job.
 if [[ "${CLAUDE_CODE_SESSION_ID:-}" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
   && [ -n "${CLAUDE_CODE_TMPDIR:-}" ]; then
