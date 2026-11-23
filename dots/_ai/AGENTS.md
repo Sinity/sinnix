@@ -21,28 +21,25 @@ project rules; runtime and task state stay with their owning tools.
   its findings, restate them in plain words, and leave its vocabulary and
   proposed machinery behind unless the design calls for them.
 
-Illustrative examples:
-
-- "I won't confuse an organized archive with benefit eligibility."
-  → "The archive is organized." Omit the eligibility comparison when irrelevant.
-- "I'll be careful not to assume the records are complete."
-  → "Coverage ends in August." State the actual limitation when it matters.
-
 ## Work
 
-- Carry authorized work to a verified result. Compaction continues the work; it
-  is not a deadline or a reason to defer.
+- Keep working until the requested end state holds and is verified. End a
+  turn only when it does, when the next step needs the operator (below), or
+  when all remaining scope waits on a job or check you started, named with its
+  expected end. A finished pass, milestone or compaction does not end a turn.
 - A request to inspect, diagnose, or advise authorizes read-only checks. A
   request to improve or implement authorizes scoped changes and their normal
   verification.
 - The operator decides product intent, privacy, spending and anything
-  published outward. Technical design, process, host tuning, deployment,
-  activation, service restarts, archive rebuilds and Sinnix changes are yours:
-  decide from the project's principles, record the decision and its reason on
-  the Bead, and continue. A step is irreversible only when no copy of the
-  original bytes survives it; deploys, activations, restarts and a new archive
-  built while the old one is set aside can all be undone. Hand the operator
-  only what needs his identity, his judgement of intent, or his hands.
+  published outward, and does what needs his identity (passwords, passkeys,
+  payment, personal accounts) or his hands (a physical device or login).
+  Everything else is yours, including design, process, host tuning, deploys,
+  activation, restarts, archive rebuilds, Sinnix changes, `sudo`, the
+  confirmations a tool asks for in a step that is yours, and reading his files
+  here for development and measurement. Decide from the project's principles,
+  record the decision and its reason on the Bead, and continue. A step is
+  irreversible only when no copy of the original bytes survives it; deploys,
+  activations, restarts and a rebuild that sets the old archive aside are not.
 - The operator's words point at intent. His later deliberate statement
   replaces an earlier one; a "maybe", a musing, or assent to an agent's
   proposal is not a ruling.
@@ -81,13 +78,12 @@ Load `writing-style` for prose people read and `writing-for-agents` for
 instructions, skills, and memory.
 
 - Report the outcome, changed files, exact verification, and residual risk.
-  Keep progress updates short.
+  Keep progress updates short. Give each estimate with its basis: recorded
+  durations of comparable finished work (job history, merged pull requests).
 - Explain IDs on first use. Use the Plannotator Inbox proactively for choices
   only the operator can make, changes that affect his plans, and finished work
-  worth reviewing. Use one thread per work stream. Attach the actual report or
-  comparison, explain the tradeoff, and link the thread in chat. Read replies
-  when resuming and continue independent work. Load `plannotator-inbox` for
-  delivery, visual comparisons and guided reviews.
+  worth reviewing, and link the thread in chat; load `plannotator-inbox` to
+  send.
 - Write each fact once, where it is owned: comments hold constraints, docs hold
   current behavior, Beads hold problems, decisions, and evidence. Incident
   history belongs in its task, never in always-loaded instructions.
@@ -131,8 +127,8 @@ Load `agent-runtime` before AgentCTL job or history work and `orchestrate` befor
 running agents in parallel.
 
 - State lives with its owners (pueue, Git and worktrunk, GitHub, Beads,
-  systemd); `agentctl` is a CLI over them. Reconcile those sources rather than
-  keeping another ledger.
+  systemd); `agentctl` is a CLI over them. Act on their recorded job, task and
+  worktree identities, not inferred process names, and keep no other ledger.
 - Short foreground commands run directly. Queued, heavy, detached, or shared work
   runs as a declared operation:
   `agentctl job start <project> <operation> [options] [-- <declared args>]`.
@@ -140,23 +136,22 @@ running agents in parallel.
   `/realm/project/sinnix/repo/docs/agentctl.md`. On an error, read the message and
   those sources; never guess syntax or repeat a mutation whose result is
   unclear.
-- Act on recorded job IDs, task IDs, and worktree paths, not inferred process
-  names. In `pgrep -f` patterns, bracket one character so the search cannot
-  match itself.
 - Sustained I/O or memory pressure, a long queue or a frozen desktop is a
   defect in agent work: find the process causing it and fix or stop the cause
-  before starting more heavy work. Retained telemetry (`sinnix-observe`,
-  `below`) and earlier notes answer what already happened; read them before
-  sampling live.
-- One accountable owner per concern, with one event watch; wait on completion
-  events rather than polling. Give long work an evidence-based duration and, at
-  about twice that, inspect it and decide to repair, cancel, or extend.
+  before starting more heavy work. Recorded telemetry (`sinnix-observe
+  --since`, `below dump`, the journal, earlier notes) answers what happened
+  and how values moved; read it instead of sampling live or waiting.
+- Wait on a job or check with one blocking command, acting on its exit
+  status: `agentctl job wait <task> --job-id <id>`, or `gh pr checks <n>
+  --required --watch --interval 60 && gh pr merge <n> --squash
+  --match-head-commit <sha>`; in Claude Code run it in the background and keep
+  doing in-scope work. A status read is not progress. At about twice the
+  duration recorded for comparable runs, inspect and decide to repair, cancel,
+  or extend.
 
 ## Delivery
 
-- Read the target checkout's `AGENTS.md` before dispatching or editing. Project
-  memory supplies decisions that code and Beads cannot; it never overrides
-  them.
+- Read the target checkout's `AGENTS.md` before dispatching or editing.
 - Use `bd` from the owning repository with an explicit `--actor`; load `beads`
   to read, change, or write tasks.
 - Integrate on the default branch: every change targets it and has landed
@@ -164,30 +159,30 @@ running agents in parallel.
   branches holds each finished change behind the slowest one.
 - The author reviews the coherent change and uses a static check or
   discriminating test as it goes. After fixes, revisit the delta and affected
-  invariants. The required check on the PR head is the verification. A change may land when
-  it fails no test that passes on the default branch; a test failing there is
-  fixed, or its causing commit reverted, as the next piece of work. Preserve
-  required checks and assertions; report failures and untested areas.
+  invariants. The required check on the PR head is the verification. A change
+  may land when it fails no test that passes on the default branch; a test
+  failing there is fixed, or its causing commit reverted, as the next piece of
+  work. Preserve required checks and assertions; report failures and untested
+  areas. Exercise a finished subsystem as its user would: its commands,
+  interface or client against a real store, through the repository's scenario
+  or run commands.
 - A second reviewer needs a named unresolved question. Stage explicit paths;
   preserve hooks and branch protection.
 - Where a forge runs a hosted reviewer on PRs, that review is the independent
   review; add a reviewer agent only for a named risk it cannot cover. Answer
   findings with a fix or a concrete refutation. Follow the repository's actual
-  required statuses and review-resolution rules. Where the forge enforces these,
-  wait for the required check and merge the tested head:
-  `gh pr checks <n> --required --watch --interval 60 && gh pr merge <n> --squash
-  --match-head-commit <sha>`; branch protection still gates the merge.
-  File substantial out-of-scope or post-merge findings as follow-up work.
+  required statuses and review-resolution rules, and merge the tested head
+  with the chained wait under Runtime. File substantial out-of-scope or
+  post-merge findings as follow-up work.
 - A partial delivery leaves its unmet acceptance criteria open.
 
 ## Desktop and host changes
 
-- The operator's Chrome is shared. Check `sinnix-chrome-control status`, and
-  retry and inspect `list-tabs` before concluding it is unavailable. Agent work
-  uses its own agent window or background tab by page ID; the operator's tabs
-  are touched only when a request is about them. Load `desktop-control`
-  for browser, Kitty, Hyprland, and screenshot work. `sinnix-observe` gives live
-  host evidence.
+- Agents drive Chrome, Kitty, Hyprland and screenshots through
+  `desktop-control`. Chrome is shared: work in the agent window or a
+  background tab by page ID, and touch the operator's tabs only when a request
+  is about them. Retry `sinnix-chrome-control status` and `list-tabs` before
+  concluding it is unavailable.
 - Sinnix activation changes the live machine; follow the Activation section of
   `/realm/project/sinnix/repo/AGENTS.md`. An edited source proves nothing about
   what is installed.
@@ -202,7 +197,8 @@ running agents in parallel.
   `sinnix-observe`, `/realm/activity/`, `/realm/device/sinnix-prime/`. Operator stream:
   `/realm/personal/journal/raw-log.md`.
 - Project memory (`~/.claude/projects/<project>/memory/MEMORY.md`) indexes
-  stable facts and pointers. Verify recalled mechanisms against current code;
+  stable facts and pointers that code and Beads do not hold, and never
+  overrides them. Verify recalled mechanisms against current code;
   archive superseded memories with their evidence. Beads owns current work
   and task lessons. Sanitize private memory before using it in public text.
 - In recovery, preserve volatile evidence first, then inspect live state, Git,
