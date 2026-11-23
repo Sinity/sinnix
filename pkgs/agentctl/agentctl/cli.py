@@ -36,6 +36,7 @@ from . import (
     job_queries,
     launch,
     operator_view,
+    owners,
     pools,
     worktree_cleanup,
 )
@@ -126,6 +127,20 @@ def parser() -> argparse.ArgumentParser:
         one.add_argument("selector", nargs="?", metavar="project", help=PROJECT_HELP)
         _project_option(one)
         _output_arguments(one)
+
+    owner_report = verbs.add_parser(
+        "owners",
+        help="each entry under the managed temporary root, the worktree roots "
+        "and the compiler cache with the owner that removes it; marks the "
+        "unowned and deletes nothing",
+    )
+    owner_report.add_argument(
+        "--sizes", action="store_true", help="also measure each entry with du"
+    )
+    owner_report.add_argument(
+        "--unowned", action="store_true", help="list only the entries with no owner"
+    )
+    _output_arguments(owner_report)
 
     worktree = verbs.add_parser(
         "worktree", help="retire completed checkouts, preserving their work"
@@ -812,6 +827,12 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
             out.write(expired, build_output.render_expiry(expired))
             return EXIT_OK
         raise AssertionError(arguments.worktree_verb)
+    if verb == "owners":
+        listing = owners.report(
+            config, sizes=arguments.sizes, unowned_only=arguments.unowned
+        )
+        out.read(listing, owners.render(listing))
+        return EXIT_OK
     if verb == "view":
         project = _select_project(config, arguments.project, arguments.selector)
         snapshot = operator_view.collect(config, project, now=out.now)
