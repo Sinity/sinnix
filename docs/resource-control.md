@@ -45,10 +45,10 @@ Each live service also has a ceiling that ends a leak inside its own unit:
 | sinexd                | -            | 8G          | 2G              | 6.0G resident, 2G swapped |
 | NATS                  | 1G           | 1.5G        | -               | 0.7G                      |
 | journald capture      | 1G           | 2G          | -               | 2G, page cache            |
-| Polylogue daemon      | 3.5G         | 4G          | 1G              | 5.3G resident             |
+| Polylogue daemon      | -            | 8G          | 1G              | 5.3G resident             |
 | User capture producers| -            | 3G          | -               | 0.3G                      |
 
-The Polylogue daemon, its index build included, must fit 4 GiB resident and
+The Polylogue daemon, its index build included, must fit 8 GiB resident and
 1 GiB swapped; beyond that the kernel kills it inside its own unit.
 
 PostgreSQL's huge pages (2,202 pages of 2 MiB, 4.3 GiB, reserved at boot for

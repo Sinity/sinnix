@@ -122,7 +122,7 @@ in
               jq -e '
                 .Slice == "live.slice" and (has("IOWeight") | not) and
                 (has("Nice") | not) and (has("IOSchedulingPriority") | not) and
-                .MemoryHigh == "3584M" and .MemoryMax == "4G" and
+                (has("MemoryHigh") | not) and .MemoryMax == "8G" and
                 .MemorySwapMax == "1G"
               ' <<<"$servicePolicy" >/dev/null
               jq -e --arg wrapper "$wrapper" --arg id "$id" '
