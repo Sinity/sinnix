@@ -15,7 +15,6 @@
 }:
 let
   runtimeInventory = config.sinnix.runtime.inventory;
-  memoryBudget = helpers.data.runtimeDefaults.memoryBudget;
   primaryUserUid = toString config.users.users.${config.sinnix.user.name}.uid;
   # The desktop's guarantee is only as large as every ancestor's, so the
   # user slice's values are repeated on the per-user slice and manager.
@@ -198,18 +197,18 @@ in
         # zram is the only swap; overcommit beyond it is killed because disk paging stalls the host.
         # Telemetry samples zram, PSI and refaults.
         # The zram store's RAM is a line of the host memory budget
-        # (runtime-defaults.nix, docs/resource-control.md). The resident limit
-        # holds it to that line whatever the pages compress to; 9 GiB of swap
-        # space fits it at the measured 3:1, so the space and the limit run
-        # out together. Disksize changes apply to /dev/zram0 only on reboot,
-        # not on a live switch.
+        # (runtime-defaults.nix, docs/resource-control.md): 9 GiB of swap
+        # space at the measured 3:1 is about 3 GiB of RAM. The device size is
+        # the only bound. A resident limit (zram mem_limit) below the space
+        # makes swap writes fail while swap still reads as free, so reclaim
+        # loops and no swap-based OOM rule ever fires. Disksize changes apply
+        # to /dev/zram0 only on reboot, not on a live switch.
         zramSwap = {
           enable = true;
           algorithm = "zstd";
           memoryMax = 9 * 1024 * 1024 * 1024;
           priority = 100;
         };
-        services.zram-generator.settings.zram0.zram-resident-limit = toString memoryBudget.zram;
 
         systemd.settings.Manager.StatusUnitFormat = "name";
 

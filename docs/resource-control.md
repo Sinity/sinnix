@@ -18,7 +18,7 @@ agent ceiling exceeds the remainder.
 | ----------------------------------- | ---- | -------------------------------------------------------------------------- |
 | Physical memory (`MemTotal`)        | 31.2 |                                                                            |
 | Kernel memory and free-page reserve | 2.0  | uncharged slab, vmalloc and stacks (~1.3), `min_free_kbytes` and watermarks |
-| zram store                          | 3.0  | zram `mem_limit` (`zram-resident-limit`)                                  |
+| zram store                          | 3.0  | zram device size at the measured 3:1 compression                           |
 | Desktop: apps, session, shell       | 6.5  | `MemoryMin` on app (4), session (1.5) and desktop-shell (1)               |
 | PostgreSQL                          | 5.5  | `MemoryLow`; 4.3 of it are the huge pages of shared buffers              |
 | sinexd                              | 1.0  | `MemoryLow`                                                                |
@@ -127,10 +127,12 @@ high.
 
 ### Swap
 
-zram is the only swap. Its store is part of the budget: the resident limit
-holds it to 3 GiB of RAM whatever the pages compress to, and the 9 GiB device
-fills at the measured 3:1 ratio together with that limit. A page that would push the store past its limit
-is not swapped and stays in its cgroup. Agent work may swap 4 GiB (about 1.3
+zram is the only swap. Its store is part of the budget: the 9 GiB device holds
+about 3 GiB of RAM at the measured 3:1 ratio. The device size is the only
+bound. A resident limit below it would make swap writes fail while swap still
+reads as free, so the kernel would keep reclaiming and no swap-based kill rule
+would fire. Pages that compress worse than 3:1 grow the store past its line,
+and that is paid for like any other overrun. Agent work may swap 4 GiB (about 1.3
 GiB of the store), sinexd 2 GiB, the Polylogue daemon 1 GiB.
 
 ## Disk

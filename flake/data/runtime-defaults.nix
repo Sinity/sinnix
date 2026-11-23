@@ -44,8 +44,8 @@ let
     # Kernel memory no cgroup is charged for (slab, vmalloc, stacks, about
     # 1.3 GiB) and the free-page watermarks (min_free_kbytes 256 MiB).
     kernel = 2048;
-    # The zram store's resident limit (workstation.nix): swapped pages of
-    # every cgroup, compressed about 3:1, are held in RAM here.
+    # The zram store (workstation.nix): 9 GiB of swapped pages from every
+    # cgroup, compressed about 3:1, held in RAM.
     zram = 3072;
     desktop = desktopMemory.totalMin;
     # The huge-page reservation for shared buffers (bridge.nix: 2,202 pages,
