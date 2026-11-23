@@ -1,11 +1,11 @@
 # Claude/Codex hook parity: the hooks both clients must run are checked
 # against the two real hook sources (dots/claude/managed-settings.json and the
 # generated Codex hooks), not restated as a list of expected names here.
-# Both clients invoke the live rewrite's hook (`polylogue hook EVENT`,
+# Both clients invoke the live rewrite's hook (`polylogue internal hook EVENT`,
 # with `--harness codex` for Codex), which writes the hook spool of the live
 # archive and brings the session-start brief.
 #
-# Provably fails when: a `polylogue hook <Event>` lane present in
+# Provably fails when: a `polylogue internal hook <Event>` lane present in
 # Claude's settings is dropped from the generated Codex hooks, when a writer
 # bakes a sidecar path, when a hook invocation stops appending a spool line
 # naming its harness, event and session, when either client loses the
@@ -117,7 +117,7 @@ in
                 | to_entries
                 | map(select(
                     .key as $event
-                    | any(.value[]?.hooks[]?.command; startswith("polylogue hook " + $event))
+                    | any(.value[]?.hooks[]?.command; startswith("polylogue internal hook " + $event))
                   ))
                 | map(.key)
                 | sort[]
@@ -126,7 +126,7 @@ in
             lanes "$claudeHooks" > claude-lanes
             lanes "$codexHooks" > codex-lanes
             test -s claude-lanes || {
-              echo "Claude settings declare no polylogue hook lane at all" >&2
+              echo "Claude settings declare no polylogue internal hook lane at all" >&2
               exit 1
             }
             missing="$(comm -23 claude-lanes codex-lanes)"
@@ -144,8 +144,8 @@ in
                 | to_entries[]
                 | .key as $event
                 | .value[]?.hooks[]?.command
-                | select(type == "string" and startswith("polylogue hook "))
-                | capture("^polylogue hook (?<event>[^ ]+)( --harness (?<harness>[^ ]+))?$")
+                | select(type == "string" and startswith("polylogue internal hook "))
+                | capture("^polylogue internal hook (?<event>[^ ]+)( --harness (?<harness>[^ ]+))?$")
                 | select(.event == $event)
                 | [$event, (.harness // "claude-code")]
                 | @tsv
@@ -154,11 +154,11 @@ in
             writer_rows "$claudeHooks" | sort > claude-writers
             writer_rows "$codexHooks" | sort > codex-writers
             test -s claude-writers || {
-              echo "Claude settings declare no polylogue hook row" >&2
+              echo "Claude settings declare no polylogue internal hook row" >&2
               exit 1
             }
             test -s codex-writers || {
-              echo "generated Codex hooks declare no polylogue hook row" >&2
+              echo "generated Codex hooks declare no polylogue internal hook row" >&2
               exit 1
             }
             cut -f1 claude-writers > claude-writer-lanes
@@ -189,8 +189,8 @@ in
               exit 1
             fi
 
-            require_text 'polylogue hook Stop' "$claudeHooks" claude-command-name
-            require_text 'polylogue hook Stop --harness codex' "$codexHooks" codex-command-name
+            require_text 'polylogue internal hook Stop' "$claudeHooks" claude-command-name
+            require_text 'polylogue internal hook Stop --harness codex' "$codexHooks" codex-command-name
 
             # Hook smoke: run the rewrite's hook for both harnesses with no
             # daemon. It fails open (no context) and appends one spool line
@@ -213,7 +213,7 @@ in
                   XDG_DATA_HOME="$smoke_root/xdg-data" \
                   XDG_STATE_HOME="$smoke_root/xdg-state" \
                   unshare --user --map-root-user --mount sh "$smoke_root/with-machine-id" \
-                  "$polylogueHook/bin/polylogue" hook "$1" --harness "$2" > "$smoke_root/$1.out"
+                  "$polylogueHook/bin/polylogue" internal hook "$1" --harness "$2" > "$smoke_root/$1.out"
               test ! -s "$smoke_root/$1.out" || {
                 echo "the $1 hook answered without a daemon" >&2
                 cat "$smoke_root/$1.out" >&2
@@ -254,7 +254,7 @@ in
             # The shared session-start script (which also carries Polylogue's
             # SessionStart lane) is configured independently for both
             # clients, so this verifies the intended cross-client agreement.
-            # It names its harness, as a direct `polylogue hook` row would.
+            # It names its harness, as a direct `polylogue internal hook` row would.
             for pair in "$claudeHooks claude-code" "$codexHooks codex"; do
               set -- $pair
               jq -e --arg harness "$2" '

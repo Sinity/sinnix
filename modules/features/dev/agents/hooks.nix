@@ -1,4 +1,4 @@
-# Codex session-lifecycle hooks: Polylogue's live hooks (`polylogue hook`)
+# Codex session-lifecycle hooks: Polylogue's live hooks (`polylogue internal hook`)
 # record every event; the shared session-start script injects one block
 # (Polylogue's brief first, then acknowledged outages and recent Sinex
 # sources); a pasted session ID brings its takeover context. Shell commands
@@ -39,7 +39,7 @@ jsonFormat.generate "codex-hooks.json" {
         hooks = [
           {
             type = "command";
-            command = "polylogue hook UserPromptSubmit --harness codex";
+            command = "polylogue internal hook UserPromptSubmit --harness codex";
           }
         ];
       }
@@ -53,7 +53,7 @@ jsonFormat.generate "codex-hooks.json" {
         hooks = [
           {
             type = "command";
-            command = "polylogue hook PreCompact --harness codex";
+            command = "polylogue internal hook PreCompact --harness codex";
           }
         ];
       }
@@ -73,7 +73,7 @@ jsonFormat.generate "codex-hooks.json" {
         hooks = [
           {
             type = "command";
-            command = "polylogue hook PreToolUse --harness codex";
+            command = "polylogue internal hook PreToolUse --harness codex";
           }
         ];
       }
@@ -83,7 +83,7 @@ jsonFormat.generate "codex-hooks.json" {
         hooks = [
           {
             type = "command";
-            command = "polylogue hook PostToolUse --harness codex";
+            command = "polylogue internal hook PostToolUse --harness codex";
           }
         ];
       }
@@ -93,7 +93,7 @@ jsonFormat.generate "codex-hooks.json" {
         hooks = [
           {
             type = "command";
-            command = "polylogue hook Stop --harness codex";
+            command = "polylogue internal hook Stop --harness codex";
           }
         ];
       }
