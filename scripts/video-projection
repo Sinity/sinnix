@@ -62,7 +62,7 @@ def probe_stream(path):
         completed = subprocess.run(
             [
                 "ffprobe", "-v", "error", "-select_streams", "V:0",
-                "-show_entries", "stream_side_data:stream_tags=stereo_mode,projection",
+                "-show_entries", "stream=width,height:stream_side_data:stream_tags=stereo_mode,projection",
                 "-of", "json", str(path),
             ],
             check=True, capture_output=True, timeout=5,
@@ -109,6 +109,34 @@ def classify(path, stream):
     return projection_data(projection, layout, swap, hfov, known_vr or bool(mapping))
 
 
+def assume_from_shape(result, vr=False, size=None):
+    """Fill in an undetermined VR projection from the frame shape.
+
+    A VR file whose name and metadata leave the projection open is almost
+    always 180-degree equirectangular: a 2:1 frame holds two square eyes side
+    by side, a 1:1 frame holds them top and bottom. Other shapes stay
+    undetermined for review. `vr` carries outside evidence, such as a library
+    tag, that a file which looks flat is VR; a name that marks stereo with
+    square eyes counts as the same evidence.
+    """
+    if result.get("source") == "override":
+        return result
+    undetermined = result["projection"] == "unknown" or (vr and result["projection"] == "flat")
+    width, height = size or (0, 0)
+    ratio = width / height if width and height else 0
+    # Named stereo with square eyes (2:1 side by side, 1:1 top and bottom) is
+    # VR in practice; flat 3D keeps the 16:9 shape of each eye.
+    square_eyes = (result["layout"] == "sbs" and 1.9 <= ratio <= 2.1) or (
+        result["layout"] == "tb" and 0.95 <= ratio <= 1.05)
+    if not undetermined or not (vr or result["kind"] == "vr" or square_eyes):
+        return result
+    if 1.9 <= ratio <= 2.1 and result["layout"] in ("mono", "sbs"):
+        return {**projection_data("equirect", "sbs", result["swap"], 180), "source": "shape"}
+    if 0.95 <= ratio <= 1.05 and result["layout"] in ("mono", "tb"):
+        return {**projection_data("equirect", "tb", result["swap"], 180), "source": "shape"}
+    return {**result, "projection": "unknown", "kind": "vr"}
+
+
 def storage_dir(variable, default):
     return Path(os.environ.get(variable) or Path.home() / default) / "video-projection"
 
@@ -140,7 +168,7 @@ def override_path(path):
     return storage_dir("XDG_STATE_HOME", ".local/state") / "overrides" / (path_key(path) + ".json")
 
 
-def inspect(path, quick=False):
+def inspect(path, quick=False, vr=False, size=None):
     path = path.resolve()
     override = read_json(override_path(path))
     if override is not None:
@@ -150,19 +178,31 @@ def inspect(path, quick=False):
     try:
         stat = path.stat()
     except OSError:
-        return classify(path, {})
+        return assume_from_shape(classify(path, {}), vr, size)
     identity = [stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns]
     cached = read_json(cache)
-    if isinstance(cached, dict) and cached.get("identity") == identity:
-        return cached.get("result") or classify(path, {})
+    fresh = isinstance(cached, dict) and cached.get("identity") == identity
+    # Entries written before frame sizes were recorded are probed again.
+    if fresh and (quick or cached.get("size")):
+        result = cached.get("result") or classify(path, {})
+        return assume_from_shape(result, vr, size or cached.get("size"))
     if not quick and path.is_file() and (stream := probe_stream(path)) is not None:
         result = classify(path, stream)
+        probed = [stream.get("width") or 0, stream.get("height") or 0]
         try:
-            write_json(cache, {"identity": identity, "result": result})
+            write_json(cache, {"identity": identity, "result": result, "size": probed})
         except OSError:
             pass
-        return result
-    return classify(path, {})
+        return assume_from_shape(result, vr, size or probed)
+    return assume_from_shape(classify(path, {}), vr, size)
+
+
+def inspect_entry(entry, quick):
+    """Inspect one stdin entry: a path, or {path, vr, width, height}."""
+    if isinstance(entry, str):
+        return entry, inspect(Path(entry), quick)
+    size = (entry.get("width") or 0, entry.get("height") or 0)
+    return entry["path"], inspect(Path(entry["path"]), quick, bool(entry.get("vr")), size if all(size) else None)
 
 
 def thumbnail_filter(settings):
@@ -192,7 +232,9 @@ def main():
     query = commands.add_parser("inspect", help="report projection and eye layout as JSON")
     query.add_argument("path", type=Path, nargs="?")
     query.add_argument("--quick", action="store_true", help="use overrides, cache and names without probing")
-    query.add_argument("--paths-from-stdin", action="store_true", help="read a JSON array of paths")
+    query.add_argument("--paths-from-stdin", action="store_true",
+                       help="read a JSON array of paths or {path, vr, width, height} objects")
+    query.add_argument("--vr", action="store_true", help="treat PATH as VR even when it looks flat")
     change = commands.add_parser("set", help="save a projection override for a file")
     change.add_argument("path", type=Path)
     change.add_argument("--projection", choices=PROJECTIONS, required=True)
@@ -207,12 +249,16 @@ def main():
         if args.paths_from_stdin == (args.path is not None):
             query.error("specify PATH or --paths-from-stdin")
         if args.paths_from_stdin:
-            paths = json.load(sys.stdin)
-            if not isinstance(paths, list) or not all(isinstance(path, str) for path in paths):
-                query.error("expected a JSON array of paths")
-            result = {path: inspect(Path(path), args.quick) for path in paths}
+            entries = json.load(sys.stdin)
+            valid = isinstance(entries, list) and all(
+                isinstance(entry, str) or (isinstance(entry, dict) and isinstance(entry.get("path"), str))
+                for entry in entries
+            )
+            if not valid:
+                query.error("expected a JSON array of paths or {path, vr, width, height} objects")
+            result = dict(inspect_entry(entry, args.quick) for entry in entries)
         else:
-            result = inspect(args.path, args.quick)
+            result = inspect(args.path, args.quick, args.vr)
         print(json.dumps(result))
     elif args.command == "thumbnail-filter":
         print(thumbnail_filter(inspect(args.path)))

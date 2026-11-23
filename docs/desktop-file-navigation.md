@@ -32,7 +32,13 @@ Yazi requests thumbnails for the selected video. To precompute thumbnails
 for a directory, run `media-preview-cache warm DIR`.
 
 Use `video-projection inspect FILE` to see how a local file was identified.
-If a video is missing projection or eye layout information, save the correction
+Projection comes from a saved correction, then embedded metadata, then the
+filename. A video known to be VR whose projection is still open is assumed
+to be 180° equirectangular from its frame shape: a 2:1 frame holds two eyes
+side by side, a 1:1 frame holds them top and bottom (`"source": "shape"` in
+the output). A name marking side-by-side or top-and-bottom with such square
+eyes counts as VR. `--vr` adds outside evidence, such as a library tag, for a
+file that otherwise looks flat. Other shapes stay `unknown`. If a video is missing projection or eye layout information, save the correction
 with `video-projection set`. Other local players using this command share the
 correction. The field of view describes the source image per eye.
 

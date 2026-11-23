@@ -52,12 +52,12 @@ def source_url(value):
     return QUrl.fromLocalFile(str(Path(name).expanduser().absolute())).toString()
 
 
-def probe_video(path, duration):
+def probe_video(path, duration, vr=False):
     """Read projection and the video facts shown in the pane header."""
     projection = {}
     try:
         result = subprocess.run(
-            ["video-projection", "inspect", path],
+            ["video-projection", "inspect", path, *(["--vr"] if vr else [])],
             capture_output=True, check=True, timeout=8, text=True,
         )
         projection = json.loads(result.stdout)
@@ -427,7 +427,7 @@ class Controller(QObject):
                                      background=background, percentages=pending)
             if key == self._prefetch or key in self._metadata_by_item or key in self._video_requests:
                 continue
-            task = self._metadata.submit(probe_video, key, item.duration)
+            task = self._metadata.submit(probe_video, key, item.duration, item.projection_kind == "vr")
             self._video_requests[key] = task
 
             def probed(future, path=key):
@@ -480,8 +480,6 @@ class Controller(QObject):
         path = str(item.path) if item.path else ""
         projection, duration, video = self._metadata_by_item.get(path, ({}, item.duration, {}))
         video = {key: item.identity.get(key) or video.get(key) for key in ("width", "height", "video_codec")}
-        if item.projection_kind == "vr" and projection.get("kind") == "flat" and projection.get("source") != "override":
-            projection = {**projection, "projection": "unknown"}
         kind = item.kind
         media = path
         if item.image and kind != "video":

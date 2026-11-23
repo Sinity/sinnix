@@ -279,3 +279,62 @@ def test_embedded_projection_and_eye_order_merge_with_filename_span(cache):
     )
     assert json.loads(bulk.stdout)[str(source)] == expected
     assert not (calls / "probe").exists()
+
+
+def stub_probe(root, width, height):
+    probe = root / "bin/ffprobe"
+    probe.write_text(
+        f"#!{sys.executable}\n"
+        f"print('{{\"streams\": [{{\"width\": {width}, \"height\": {height}}}]}}')\n"
+    )
+    probe.chmod(0o755)
+
+
+@pytest.mark.parametrize(
+    ("size", "expected"),
+    [
+        ((8192, 4096), ("equirect", "sbs", 180, "shape")),
+        ((3840, 3840), ("equirect", "tb", 180, "shape")),
+        ((1920, 1080), ("unknown", "mono", 180, None)),
+    ],
+)
+def test_undetermined_vr_projection_follows_frame_shape(cache, size, expected):
+    root, videos, _calls, _env = cache
+    stub_probe(root, *size)
+    source = videos / "scene_vr.mp4"
+    source.touch()
+    actual = json.loads(projection(cache, "inspect", source))
+    assert (actual["projection"], actual["layout"], actual["hfov"], actual.get("source")) == expected
+    assert actual["kind"] == "vr"
+
+
+@pytest.mark.parametrize(("size", "projection_name"), [((8192, 4096), "equirect"), ((3840, 1080), "unknown")])
+def test_named_side_by_side_with_square_eyes_is_vr(cache, size, projection_name):
+    root, videos, _calls, _env = cache
+    stub_probe(root, *size)
+    source = videos / "scene_LR.mp4"
+    source.touch()
+    actual = json.loads(projection(cache, "inspect", source))
+    assert (actual["projection"], actual["layout"]) == (projection_name, "sbs")
+
+
+def test_library_vr_evidence_and_overrides_with_frame_shape(cache):
+    root, videos, _calls, env = cache
+    stub_probe(root, 1920, 1080)
+    tagged, plain, corrected = (videos / name for name in ("tagged.mp4", "plain.mp4", "corrected_vr.mp4"))
+    for path in (tagged, plain, corrected):
+        path.touch()
+    projection(cache, "set", corrected, "--projection", "flat")
+    entries = [
+        {"path": str(tagged), "vr": True, "width": 5400, "height": 2700},
+        {"path": str(corrected), "vr": True, "width": 5400, "height": 2700},
+        str(plain),
+    ]
+    bulk = json.loads(subprocess.run(
+        [str(SCRIPT.with_name("video-projection")), "inspect", "--quick", "--paths-from-stdin"],
+        env=env, input=json.dumps(entries), check=True, capture_output=True, text=True, timeout=10,
+    ).stdout)
+    assert (bulk[str(tagged)]["projection"], bulk[str(tagged)]["layout"]) == ("equirect", "sbs")
+    assert bulk[str(corrected)]["projection"] == "flat"
+    assert bulk[str(plain)]["kind"] == "flat"
+    assert json.loads(projection(cache, "inspect", "--vr", plain))["projection"] == "unknown"
