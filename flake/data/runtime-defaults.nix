@@ -68,17 +68,14 @@ let
       desktop + systemLive + userLive + systemServices + systemCritical + captureProducers;
     agents = ram - kernel - zram - protected;
   };
-  # The ceiling actually set on agent.slice, rounded down from the remainder.
+  # Ceilings on agent work that can run away: tool commands and the job
+  # plane (builds, tests, checks). Interactive sessions have no ceiling.
   agentMemory = rec {
-    max = 9216;
     # Interactive sessions: protected up to their measured p95 (3.0 GiB).
     cliLow = 3072;
-    cliMax = 7168;
     toolMax = 5120;
     # The job plane: room for the largest single job (a Sinnix check peaks
-    # at 6.1-6.4G, a Sinex focused build at 6.9G); the sessions' protection,
-    # not this ceiling, keeps them resident when the plane and the sessions
-    # together reach the agent ceiling.
+    # at 6.1-6.4G, a Sinex focused build at 6.9G).
     planeMax = 8192;
   };
   mib = value: "${toString value}M";
@@ -205,11 +202,8 @@ rec {
   # work's ceiling never exceeds what the budget leaves it.
   memoryBudget =
     assert lib.assertMsg (
-      agentMemory.max <= hostMemory.agents
-      && agentMemory.cliMax <= agentMemory.max
-      && agentMemory.planeMax <= agentMemory.max
-      && agentMemory.toolMax <= agentMemory.max
-    ) "agent memory ceilings exceed what the host memory budget leaves for agent work";
+      agentMemory.planeMax <= hostMemory.agents && agentMemory.toolMax <= hostMemory.agents
+    ) "a job-plane or tool ceiling exceeds what the host memory budget leaves for agent work";
     hostMemory;
 
   # Global earlyoom is only the last-resort floor. Per-scope cgroups own
@@ -341,20 +335,20 @@ rec {
       };
     };
     user = {
-      # The agent budget: every kind of agent work runs below this one slice
-      # (interactive CLIs, their tool commands and MCP servers, and the
-      # agentctl job plane). Its MemoryMax is the remainder of the host
-      # budget (memoryBudget above, docs/resource-control.md), so agent work
-      # meets this ceiling before the host runs short: reclaim and the
-      # out-of-memory killer then act inside this slice, where the victim is
-      # the job or tool with the highest OOM score (agentctl sets 900 on job
-      # units, claude-tool-scope 800 on tool commands, the CLIs 300).
+      # Every kind of agent work runs below this slice: interactive CLIs,
+      # their tool commands and MCP servers, and the agentctl job plane.
+      # Only work that can run away has a ceiling: the tool slice and the
+      # job plane, each sized to fit what the host budget leaves for agent
+      # work (memoryBudget above, docs/resource-control.md). Interactive
+      # sessions have none. When the host as a whole runs short, the
+      # kernel's OOM killer picks by score: job units 900, tool commands
+      # 800, the CLIs 300.
       # No slice under it has a MemoryHigh. Here a MemoryHigh held runaway
       # allocators, and on the CLI slice every session, throttled for
-      # minutes to hours without ever reaching the ceiling, while oomd's pressure
-      # rule killed bystanders that were being reclaimed (a build, another
-      # session's tool command). At a MemoryMax the kernel reclaims and
-      # swaps first and then kills the largest of the highest-scored
+      # minutes to hours without ever reaching a ceiling, while oomd's
+      # pressure rule killed bystanders that were being reclaimed (a build,
+      # another session's tool command). At a MemoryMax the kernel reclaims
+      # and swaps first and then kills the largest of the highest-scored
       # processes at once.
       agent = {
         IOAccounting = true;
@@ -365,10 +359,6 @@ rec {
         CPUQuota = "1600%";
         # IOCost lends idle shares while favoring the desktop under contention.
         IOWeight = 25;
-        MemoryMax = mib agentMemory.max;
-        # Idle sessions compress into zram (about 3:1) instead of pinning RAM;
-        # 4G of swapped agent pages hold about 1.3G of the zram store.
-        MemorySwapMax = "4G";
         TasksMax = 16384;
       };
       # Interactive agents run here; their tools and declared jobs use sibling slices.
@@ -381,22 +371,18 @@ rec {
         # The sessions' measured p95 (all sessions, 3.0G) stays resident, so
         # reclaim inside the budget lands on jobs and tools first.
         MemoryLow = mib agentMemory.cliLow;
-        # No MemoryHigh. A High below the ceiling throttles without ever
-        # killing: with the slice's swap full and its anonymous memory over
-        # High, the kernel evicts the CLIs' own code and re-reads it at
-        # hundreds of MB/s while every session sleeps in the throttle, for
-        # as long as the load lasts. At MemoryMax the kernel reclaims and
-        # swaps, then kills the largest single process, which for a runaway
-        # build is the build, not a ~1 GB agent process. No oomd policy:
-        # every in-process subagent shell is a child of the coordinator's
-        # Claude process in the same scope, so oomd would take the session
-        # down with its runaway child.
-        MemoryMax = mib agentMemory.cliMax;
-        MemorySwapMax = "4G";
+        # No ceiling, no swap limit and no MemoryHigh. A MemoryHigh here
+        # held every session asleep for 90 minutes while the kernel evicted
+        # and re-read the CLIs' own code; a ceiling would kill a session to
+        # protect builds. Runaway work is bounded where it runs (the tool
+        # slice and the job plane), and host-wide shortage kills by OOM
+        # score, which ranks the CLIs last. No oomd policy: every in-process
+        # subagent shell is a child of the coordinator's Claude process in
+        # the same scope, so oomd would take the session down with it.
         TasksMax = 8192;
       };
-      # Tool commands and MCP servers use a sibling slice, so their memory
-      # does not count against agent-cli.slice's ceiling.
+      # Tool commands and MCP servers use a sibling slice with its own
+      # ceiling, so a runaway command never counts against the sessions.
       agent-tool = {
         IOAccounting = true;
         # Just below agent-cli.slice, so the coordinator wins CPU contention

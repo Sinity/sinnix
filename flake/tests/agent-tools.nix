@@ -414,10 +414,11 @@ in
         ) "the earlyoom fallback must not exempt agents, browsers, runtimes, or generic shells";
         assert lib.assertMsg
           (
-            # One budget holds every kind of agent work. Its ceiling plus the
-            # kernel reserve, the zram store and every protected line of the
-            # host budget fit in physical memory, and the desktop's guarantee
-            # in that budget is the one its slices carry.
+            # Agent work's runaway-prone slices each fit, with the kernel
+            # reserve, the zram store and every protected line of the host
+            # budget, in physical memory; the sessions have no ceiling; and
+            # the desktop's guarantee in that budget is the one its slices
+            # carry.
             lib.all (name: userSlices ? ${name}) [
               "agent-cli"
               "agent-tool"
@@ -426,14 +427,14 @@ in
             && budget.CPUWeight < userSlices.app.CPUWeight
             && budget.IOWeight * 10 <= userSlices.app.IOWeight
             && budget ? CPUQuota
-            && budget ? MemoryMax
+            && !(budget ? MemoryMax)
             && !(budget ? MemoryHigh)
-            && budget ? MemorySwapMax
+            && !(budget ? MemorySwapMax)
             && budget ? TasksMax
             && !(budget ? ManagedOOMMemoryPressure)
             && !(budget ? ManagedOOMSwap)
             &&
-              sliceBytes budget.MemoryMax
+              lib.max (sliceBytes managedWork.MemoryMax) (sliceBytes userSlices.agent-tool.MemoryMax)
               + (hostBudget.kernel + hostBudget.zram + hostBudget.protected) * 1024 * 1024
               <= hostBudget.ram * 1024 * 1024
             && hostBudget.desktop * 1024 * 1024 == sliceBytes runtimeDefaults.slices.system.user.MemoryMin
@@ -446,8 +447,6 @@ in
             && managedWork.CPUWeight < userSlices.app.CPUWeight
             && !(managedWork ? MemoryHigh)
             && !(userSlices.agent-tool ? MemoryHigh)
-            && sliceBytes managedWork.MemoryMax <= sliceBytes budget.MemoryMax
-            && sliceBytes managedWork.MemorySwapMax <= sliceBytes budget.MemorySwapMax
             && managedWork.ManagedOOMSwap == "kill"
             && managedWork.ManagedOOMMemoryPressure == "kill"
             && managedWork.ManagedOOMMemoryPressureLimit == "40%"
@@ -466,12 +465,12 @@ in
                   "desktop"
                   "desktop-shell"
                 ]
-            # Interactive agents and whatever they shell out to are bounded:
-            # they throttle before swapping, and never carry a pressure kill
-            # that would take the coordinator.
+            # Interactive agents are protected and never capped, throttled
+            # or given a pressure kill that would take the coordinator.
             && userSlices.agent-cli ? MemoryLow
-            && userSlices.agent-cli ? MemoryHigh
-            && userSlices.agent-cli ? MemoryMax
+            && !(userSlices.agent-cli ? MemoryHigh)
+            && !(userSlices.agent-cli ? MemoryMax)
+            && !(userSlices.agent-cli ? MemorySwapMax)
             && !(userSlices.agent-cli ? ManagedOOMMemoryPressure)
             && userSlices.agent-cli.CPUWeight > userSlices.agent-tool.CPUWeight
             && !(poolSlices.agent-ctl-agent ? ManagedOOMPreference)

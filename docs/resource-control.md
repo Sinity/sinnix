@@ -9,10 +9,10 @@ weights. Pool widths only make builds efficient inside the budget
 ## Memory budget
 
 Every consumer outside agent work has a line: memory the kernel keeps for it
-(`MemoryMin`, or `MemoryLow` sized to its measured working set). Agent work's
-hard ceiling is what the lines leave. The numbers live in `hostMemory` and
-`agentMemory` in `flake/data/runtime-defaults.nix`; evaluation fails if the
-agent ceiling exceeds the remainder.
+(`MemoryMin`, or `MemoryLow` sized to its measured working set). Agent work
+gets what the lines leave. The numbers live in `hostMemory` and `agentMemory`
+in `flake/data/runtime-defaults.nix`; evaluation fails if the job plane's or
+the tool slice's ceiling exceeds that remainder.
 
 | Line                                | GiB  | Mechanism                                                                  |
 | ----------------------------------- | ---- | -------------------------------------------------------------------------- |
@@ -29,10 +29,9 @@ agent ceiling exceeds the remainder.
 | Recovery services                   | 0.25 | `MemoryLow` on `system-critical.slice`                                    |
 | User capture producers              | 0.5  | `MemoryLow` on the user `background.slice`                                |
 | **Left for agent work**             | 9.4  |                                                                            |
-| Agent work ceiling                  | 9.0  | `MemoryMax` on `agent.slice`                                              |
 
-Inside agent work: interactive CLIs (`agent-cli.slice`) keep 3 GiB protected,
-stop at 7; tool commands and MCP servers (`agent-tool.slice`)
+Inside agent work: interactive CLIs (`agent-cli.slice`) keep 3 GiB protected
+and have no ceiling; tool commands and MCP servers (`agent-tool.slice`)
 stop at 5; the job plane (`agent-ctl.slice`) stops at 8, room for the largest
 single job (a Sinnix check peaks at 6.4 GiB). A pool slice sets its own limit only where it is tighter than
 the plane's.
@@ -78,7 +77,7 @@ consumer.
 
 ### What is killed
 
-At a ceiling (`agent.slice`, the job plane, the tool slice) the kernel first
+At a ceiling (the job plane, the tool slice) the kernel first
 reclaims and swaps inside it, which slows the work down, and then kills
 inside it at once. No agent slice has a `MemoryHigh`: a `MemoryHigh` below a
 ceiling throttles without ever killing. On the job and tool slices it held
@@ -134,8 +133,9 @@ about 3 GiB of RAM at the measured 3:1 ratio. The device size is the only
 bound. A resident limit below it would make swap writes fail while swap still
 reads as free, so the kernel would keep reclaiming and no swap-based kill rule
 would fire. Pages that compress worse than 3:1 grow the store past its line,
-and that is paid for like any other overrun. Agent work may swap 4 GiB (about 1.3
-GiB of the store), sinexd 2 GiB, the Polylogue daemon 1 GiB.
+and that is paid for like any other overrun. The tool slice and the job plane
+may each swap 2 GiB, sinexd 2 GiB, the Polylogue daemon 1 GiB; interactive
+sessions are not limited, so idle ones compress into zram.
 
 ## Disk
 
