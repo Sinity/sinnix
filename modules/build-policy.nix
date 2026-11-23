@@ -148,6 +148,10 @@ in
           # single source of its CPU/IO weights, memory ceilings, and oomd
           # policy; do not duplicate caps here.
           Slice = "nix-build.slice";
+          # Builders inherit this: a failed build is retried, so under host
+          # OOM a builder goes before the desktop and services, like an
+          # agentctl job (docs/resource-control.md, What is killed).
+          OOMScoreAdjust = 900;
         };
       };
     };

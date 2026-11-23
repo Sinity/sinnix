@@ -1611,7 +1611,19 @@ def main(argv: list[str] | None = None) -> int:
     os.umask(0o077)
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["desktop"]:
-        os.execvp("sinnix-rank-desktop", ["sinnix-rank-desktop", *argv[1:]])
+        command = ["sinnix-rank-desktop", *argv[1:]]
+        # Compare is a desktop app whatever starts it (Stash's plugin, Yazi,
+        # a terminal): run it in its own scope in app.slice so its memory is
+        # counted on the apps line, not the caller's. Two 8K videos playing
+        # measured 1.7 GiB resident (2026-11-23); the ceiling ends a leak
+        # inside the scope instead of pushing the host into swap.
+        if shutil.which("systemd-run") and os.environ.get("XDG_RUNTIME_DIR"):
+            command = [
+                "systemd-run", "--user", "--scope", "--quiet", "--collect",
+                "--slice=app.slice", f"--unit=app-sinnix-compare-{os.getpid()}",
+                "-p", "MemoryHigh=3G", "-p", "MemoryMax=4G", "--", *command,
+            ]
+        os.execvp(command[0], command)
     parser = build_parser()
     args = parser.parse_args(argv)
     for name in [getattr(args, "domain", None), *getattr(args, "domains", [])]:

@@ -89,9 +89,21 @@ of agent work:
 1. agentctl job units, `OOMScoreAdjust=900` (measurement jobs 100). A job unit
    carries `OOMPolicy=kill`, so the whole job ends, and agentctl reports it as
    `out-of-memory` with `killed: out of memory in the agent budget` in its
-   log.
+   log. Retryable work outside the agent slice ranks with them at 900:
+   rebuilds (their `nix-build.slice` unit), the Nix daemon's builders, and
+   Borg drains, which resume on their next run.
 2. Tool commands, 800 (`claude-tool-scope`).
 3. The agent CLIs themselves, 300.
+
+Within a rank the kernel kills the largest process. Rebuilds, builders and
+drains have no line of their own, so without that rank a host OOM with them
+running found only tiny tool commands at the top and killed those, freeing
+nothing, while the memory stayed with the build and the drain.
+
+Compare (`sinnix rank desktop`) runs in its own scope in `app.slice`, so its
+memory counts on the apps line whatever launched it, with `MemoryHigh=3G`
+and `MemoryMax=4G`. Playing two 8K videos measured 1.7 GiB resident: on this
+GPU each hardware decode that copies frames back to RAM costs 0.7-1 GiB.
 
 systemd-oomd ends sustained thrash before the kernel has to: it kills the job
 with the most reclaim when the job plane's memory pressure stays above 40% for

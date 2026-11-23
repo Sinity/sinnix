@@ -166,6 +166,9 @@ let
       ''--setenv=SINNIX_SECRET_DECLARATIONS="$SINNIX_SECRET_DECLARATIONS"''
       "--slice=nix-build.slice"
       "-p CPUSchedulingPolicy=other"
+      # A rebuild is retryable agent-tier work: under host OOM it goes before
+      # the desktop and services, like an agentctl job (docs/resource-control.md).
+      "-p OOMScoreAdjust=900"
       "-p KillMode=control-group"
       "-p ExitType=main"
       "-p TimeoutStopSec=5s"

@@ -618,6 +618,9 @@ let
     # The file and chunk caches use the admitted memory before swap.
     MemoryHigh = "6G";
     MemoryMax = "6G";
+    # A drain resumes on its next run, so under host OOM it goes before the
+    # desktop and services, like an agentctl job (docs/resource-control.md).
+    OOMScoreAdjust = 900;
   };
 in
 {

@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 
+import pytest
+
 
 def test_a_session_page_posts_rank_judgments_for_its_domain(
     rank_module, domain, store, tmp_path
@@ -127,3 +129,23 @@ def test_next_json_carries_item_metadata(rank_module, domain, store, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert {item["meta"]["path"] for item in payload["set"]} == {"/x/a", "/x/b"}
     assert payload["evidence"]["items"] == 2
+
+
+def test_desktop_runs_compare_in_its_own_app_scope(rank_module, monkeypatch):
+    launched = []
+    monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/1000")
+    monkeypatch.setattr(rank_module.shutil, "which", lambda name: "/bin/" + name)
+    class Replaced(Exception):
+        pass
+
+    def execvp(path, argv):
+        launched.append(argv)
+        raise Replaced
+
+    monkeypatch.setattr(rank_module.os, "execvp", execvp)
+    with pytest.raises(Replaced):
+        rank_module.main(["desktop", "--stash"])
+    (argv,) = launched
+    assert argv[:2] == ["systemd-run", "--user"]
+    assert "--slice=app.slice" in argv and "MemoryMax=4G" in argv
+    assert argv[argv.index("--") + 1:] == ["sinnix-rank-desktop", "--stash"]
