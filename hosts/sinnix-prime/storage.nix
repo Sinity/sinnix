@@ -91,7 +91,7 @@ let
 
       mountpoint=/realm
       if findmnt --mountpoint "$mountpoint" >/dev/null; then
-        fstrim --minimum 64MiB --verbose "$mountpoint"
+        fstrim --verbose "$mountpoint"
       fi
     '';
   };
@@ -107,9 +107,14 @@ let
       {
         resourceClass = "background";
         execStart = "${fstrimCanonical}/bin/sinnix-fstrim-canonical";
+        # Daily, over every free extent: /realm's free space lies mostly in
+        # small gaps inside allocated chunks, which a minimum extent size
+        # skipped, and a QLC drive that is not told what is free behaves as
+        # nearly full. 05:00 keeps it off the midnight snapshot and index
+        # jobs and the drain's 03:05 start.
         timer = {
-          onCalendar = "weekly";
-          randomizedDelaySec = "1h";
+          onCalendar = "*-*-* 05:00";
+          randomizedDelaySec = "30min";
           persistent = true;
         };
       };
@@ -132,12 +137,13 @@ in
     '';
 
     # Keep online discard disabled on this host; run batched trim from a
-    # low-priority timer instead. Do not use the stock all-filesystems fstrim
-    # unit: this host has many Btrfs bind mounts and snapshot mounts, and the
-    # root/Nix MX500 has shown very long FITRIM latency even after backlog
-    # cleanup. Scheduled trim therefore covers large extents on the NVMe realm
-    # filesystem only; root trim remains an explicit off-hours maintenance
-    # action.
+    # low-priority daily timer instead, which takes effect without a remount
+    # and gives one measurable event a night. Do not use the stock
+    # all-filesystems fstrim unit: this host has many Btrfs bind mounts and
+    # snapshot mounts, and the root/Nix MX500 has shown very long FITRIM
+    # latency even after backlog cleanup. Scheduled trim therefore covers the
+    # NVMe realm filesystem only; root trim remains an explicit off-hours
+    # maintenance action.
     fstrim.enable = false;
     gvfs.enable = true; # dynamic mount
 

@@ -14,8 +14,8 @@
         assert service.Nice == 10;
         assert service.IOSchedulingClass == "best-effort";
         assert service.IOSchedulingPriority == 7;
-        assert timer.timerConfig.OnCalendar == "weekly";
-        assert timer.timerConfig.RandomizedDelaySec == "1h";
+        assert timer.timerConfig.OnCalendar == "*-*-* 05:00";
+        assert timer.timerConfig.RandomizedDelaySec == "30min";
         assert timer.timerConfig.Persistent == true;
         assert timer.wantedBy == [ "timers.target" ];
         assert surface.resourceClass == "background";
