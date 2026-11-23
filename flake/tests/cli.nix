@@ -52,9 +52,9 @@ in
         nativeBuildInputs = [ pkgs.gnugrep ];
         script = ''
           polylogue --help > help
-          grep -q 'Usage: polylogue' help
-          polylogue read --help > read-help
-          grep -q 'Read one session' read-help
+          grep -q '^polylogue SELECTION' help
+          polylogue help read > read-help
+          grep -q '^read(' read-help
           polylogue mcp --help > mcp-help
           grep -q 'MCP' mcp-help
         '';

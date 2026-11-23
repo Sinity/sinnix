@@ -42,20 +42,13 @@ def main():
         send(process, {"jsonrpc": "2.0", "method": "notifications/initialized"})
         send(process, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         tools = {tool["name"]: tool for tool in response(process, 2)["tools"]}
-        assert {
-            "polylogue_read",
-            "polylogue_context",
-            "polylogue_note",
-            "polylogue_chat",
-            "polylogue_act",
-        } <= tools.keys()
+        assert {"polylogue_read", "polylogue_write", "polylogue_act"} <= tools.keys()
         read = tools["polylogue_read"]["inputSchema"]
-        assert {"query", "read", "status"} <= set(read["properties"]["operation"]["enum"])
+        assert {"rows", "status", "help"} <= set(read["properties"]["operation"]["enum"])
         arguments = read["properties"]["arguments"]["properties"]
-        assert {"query", "session"} <= arguments.keys()
-        assert {"operation", "arguments", "request_id"} <= set(read["required"])
-        context = tools["polylogue_context"]["inputSchema"]["properties"]
-        assert {"brief", "recall", "takeover"} <= set(context["operation"]["enum"])
+        assert {"selection", "steps"} <= arguments.keys()
+        assert "arguments" in read["required"]
+        assert tools["polylogue_read"]["annotations"]["readOnlyHint"] is True
         process.stdin.close()
         assert process.wait(timeout=30) == 0
     finally:
