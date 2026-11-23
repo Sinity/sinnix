@@ -8,6 +8,7 @@
   backupConfig,
   borgRepoRoot,
   genomeRoot,
+  archiveEnable,
   genomeSnapshots,
   dumpUnits,
   archiveUnits,
@@ -41,24 +42,34 @@ let
 
   # Activation never restarts a job: a switch mid-run would abandon a bind
   # mount and a held Borg lock. Resources come from the unit's own surface.
+  # With archive backups off, only btrbk (snapshots and their deletion by
+  # count) keeps its timer; every other timer is disabled, so its job starts
+  # only by hand. The switch is a disabled timer rather than a missing one:
+  # the attribute set's shape cannot depend on config here.
   mkBackupJob =
     name:
     { description, ... }@job:
-    lib.sinnix.mkScheduledJob
-      {
-        inherit config description;
-        unitName = name;
-        surface = config.sinnix.runtime.units.${name};
-      }
-      (
-        lib.removeAttrs job [ "description" ]
-        // {
-          unit = {
-            restartIfChanged = false;
-          }
-          // (job.unit or { });
+    lib.mkMerge [
+      (lib.sinnix.mkScheduledJob
+        {
+          inherit config description;
+          unitName = name;
+          surface = config.sinnix.runtime.units.${name};
         }
-      );
+        (
+          lib.removeAttrs job [ "description" ]
+          // {
+            unit = {
+              restartIfChanged = false;
+            }
+            // (job.unit or { });
+          }
+        )
+      )
+      (lib.optionalAttrs (job ? timer && name != "btrbk") {
+        systemd.timers.${name}.enable = lib.mkIf (!archiveEnable) false;
+      })
+    ];
 
   maintenanceJob = {
     description = "Prune and compact Borg backup repositories";

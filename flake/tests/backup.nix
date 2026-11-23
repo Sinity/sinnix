@@ -292,6 +292,32 @@ assert lib.assertMsg (
         ];
         assertions = _: [ ];
       };
+      archiveOffEval = evalTestSpec system {
+        name = "backup-archive-off";
+        modules = [
+          mountTmpfsRoots
+          baseTestConfig
+          inputs.sinex.nixosModules.default
+          ../../modules/services/sinex/bridge.nix
+          (_: {
+            sinnix.backup.enable = true;
+            sinnix.backup.archive.enable = false;
+            sinnix.backup.genomeRoot = "/neo-outer-realm/content/genome";
+            sinnix.services = {
+              "machine-telemetry".enable = true;
+              polylogue.enable = true;
+              sinex.enable = true;
+            };
+            sinnix.services.sinex.retainedStores = [ "/var/lib/sinex/retained" ];
+            services.sinex = {
+              enable = true;
+              storeDir = "/var/lib/sinex/daemon/store";
+              nats.daemonPasswordFile = "/run/agenix/sinex-nats-daemon";
+            };
+          })
+        ];
+        assertions = _: [ ];
+      };
       telemetryOnlyEval = evalTestSpec system {
         name = "telemetry-without-backups";
         modules = [
@@ -444,6 +470,22 @@ assert lib.assertMsg (
           && telemetryOnlyEval.config.systemd.timers.machine-telemetry-sqlite-backup.enable
           && telemetryOnlyEval.config.sinnix.runtime.units ? machine-telemetry-sqlite-backup-timer
         ) "Optional or disabled producer jobs must not become dangling coordinator calls";
+        assert lib.assertMsg
+          (
+            let
+              inherit (archiveOffEval) config;
+              enabledTimers = lib.attrNames (lib.filterAttrs (_: timer: timer.enable) config.systemd.timers);
+              borgSurfaces = lib.filterAttrs (
+                name: _: lib.hasPrefix "borgbackup-" name || name == "sinnix-borg-beads-check"
+              ) config.sinnix.runtime.units;
+            in
+            !(lib.any (name: lib.hasInfix "borg" name || lib.hasPrefix "sinex-backup" name) enabledTimers)
+            && config.systemd.timers.btrbk.timerConfig.OnCalendar == "*-*-* 00,06,12,18:00:00"
+            && lib.all (name: config.systemd.services ? ${name}) backupJobNames
+            && lib.all (surface: surface.captures == [ ]) (lib.attrValues borgSurfaces)
+            && config.sinnix.runtime.units.btrbk.captures != [ ]
+          )
+          "With archive backups off, every Borg unit stays defined with no timer or freshness lane, and btrbk keeps its schedule";
         assert lib.assertMsg
           (
             let

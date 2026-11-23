@@ -121,6 +121,9 @@ let
 in
 {
   sinnix.backup.genomeRoot = "${neoOuterRealm}/content/genome";
+  # 2026-11-23: the operator turned archive backups off for now. Borg units
+  # stay defined for manual starts; btrbk snapshots keep their schedule.
+  sinnix.backup.archive.enable = false;
 
   # The QLC NVMe needs latency targets for IO weights to take effect;
   # QoS allows higher rates while those targets hold.

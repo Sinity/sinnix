@@ -25,6 +25,9 @@ let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   username = config.sinnix.user.name;
   backupCfg = config.sinnix.backup;
+  # Without archive backups the Borg units stay defined for manual starts,
+  # and their freshness lanes go, so an unscheduled archive raises no alarm.
+  archiveCaptures = captures: lib.optionals backupCfg.archive.enable captures;
   genomeSnapshots = "${neoOuterRealm}/.btrfs/genome-snapshots";
 
   # A nested subvolume outside the /realm snapshots, dumped and archived directly.
@@ -628,6 +631,18 @@ in
     enable = (lib.mkEnableOption "workstation snapshot and archive backups") // {
       default = config.sinnix.machine.isDesktop;
     };
+    archive.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Schedule the Borg archive units: the nightly drain coordinator (which
+        starts the dumps, drains and the Sinex backup pair), the hourly jobs,
+        capacity, verification and the Beads restore check. When false every
+        unit stays defined and starts by hand, nothing starts Borg on its own,
+        and the archive freshness lanes are dropped. btrbk snapshots and their
+        deletion by count stay scheduled either way.
+      '';
+    };
     genomeRoot = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
       default = null;
@@ -688,38 +703,38 @@ in
               notifyOnFailure = true;
             };
             borgbackup-job-persist = watchedUnit "borgbackup-job-persist" {
-              captures = [ (drainCapture "persist" "freshness persist") ];
+              captures = archiveCaptures [ (drainCapture "persist" "freshness persist") ];
             };
             borgbackup-job-persist-hourly = watchedUnit "borgbackup-job-persist-hourly" {
               resources = hourlyResources;
-              captures = [ (markerCapture "persist-hourly" borgHourlyMaxAgeSec) ];
+              captures = archiveCaptures [ (markerCapture "persist-hourly" borgHourlyMaxAgeSec) ];
             };
             borgbackup-job-live-small = watchedUnit "borgbackup-job-live-small" {
               resources = hourlyResources;
-              captures = [ (markerCapture "live-small" borgHourlyMaxAgeSec) ];
+              captures = archiveCaptures [ (markerCapture "live-small" borgHourlyMaxAgeSec) ];
             };
             borgbackup-job-realm = watchedUnit "borgbackup-job-realm" {
               resources = drainResources;
-              captures = [ (drainCapture "realm" "freshness realm") ];
+              captures = archiveCaptures [ (drainCapture "realm" "freshness realm") ];
             };
             borgbackup-job-genome = lib.mkIf (backupCfg.genomeRoot != null) (
               watchedUnit "borgbackup-job-genome" {
                 resources = drainResources;
-                captures = [ (drainCapture "genome" "acquisition-freshness") ];
+                captures = archiveCaptures [ (drainCapture "genome" "acquisition-freshness") ];
               }
             );
             # Declared only when units.nix builds the job.
             borgbackup-job-sinex-blobs = lib.mkIf (sinexStorePaths != [ ]) (
               watchedUnit "borgbackup-job-sinex-blobs" {
-                captures = [ (markerCapture "sinex-blobs" borgDailyMaxAgeSec) ];
+                captures = archiveCaptures [ (markerCapture "sinex-blobs" borgDailyMaxAgeSec) ];
               }
             );
             polylogue-sqlite-backup = watchedUnit "polylogue-sqlite-backup" { };
             borgbackup-job-polylogue-state = watchedUnit "borgbackup-job-polylogue-state" {
-              captures = [ (markerCapture "polylogue-state" borgDailyMaxAgeSec) ];
+              captures = archiveCaptures [ (markerCapture "polylogue-state" borgDailyMaxAgeSec) ];
             };
             borgbackup-coverage-audit-realm = watchedUnit "borgbackup-coverage-audit-realm" {
-              captures = [
+              captures = archiveCaptures [
                 (
                   capture "borg-realm-independent-coverage-audit" backupConfig.jobs.audit.record 691200
                   // probe "audit-status" 10
@@ -728,26 +743,26 @@ in
             };
             # Three times the weekly cadence, so one late run is not stale.
             borgbackup-verify = watchedUnit "borgbackup-verify" {
-              captures = [
+              captures = archiveCaptures [
                 (capture "borg-check" "${config.sinnix.paths.machineRoot}/borg_drill.jsonl" 1814400)
                 (capture "borg-integrity-receipt" backupConfig.jobs.integrity.record 1814400)
               ];
             };
             borgbackup-maintenance = watchedUnit "borgbackup-maintenance" {
-              captures = [
+              captures = archiveCaptures [
                 (capture "backup-maintenance" backupConfig.jobs.maintenance.marker 172800)
               ];
             };
             borgbackup-local-dumps = watchedUnit "borgbackup-local-dumps" { };
             borgbackup-retention-plan = backupUnit "borgbackup-retention-plan" { };
             borgbackup-capacity = watchedUnit "borgbackup-capacity" {
-              captures = [
+              captures = archiveCaptures [
                 (capture "backup-capacity" "${borgDrainStateRoot}/capacity.json" 86400)
               ];
             };
             borgbackup-root-snapshots = backupUnit "borgbackup-root-snapshots" { };
             sinnix-borg-beads-check = backupUnit "sinnix-borg-beads-check" {
-              captures = [ (capture "borg-beads-check" beadsCheckLog 1814400) ];
+              captures = archiveCaptures [ (capture "borg-beads-check" beadsCheckLog 1814400) ];
             };
           };
 
@@ -774,6 +789,7 @@ in
           finalUnits
           ;
         inherit (backupCfg) genomeRoot;
+        archiveEnable = backupCfg.archive.enable;
       }
     )
   );

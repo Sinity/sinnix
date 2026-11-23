@@ -16,6 +16,14 @@ exclusions and settings from `/etc/sinnix/backup.json`, which
 `modules/backup.nix` builds; `modules/lib/backup/units.nix` declares the
 units, their dependencies, deadlines and timers.
 
+`sinnix.backup.archive.enable = false` pauses archive backups: every Borg
+unit stays defined and starts by hand (`systemctl start <unit>`), but no
+timer starts the drain coordinator, the hourly jobs, capacity, verification
+or the Beads restore check, and the Borg freshness lanes leave the health
+sweep. `btrbk.timer` keeps taking snapshots and deleting them by count. The
+nightly dumps (Polylogue, telemetry) and the Sinex backup pair are started
+only by the coordinator, so they pause too.
+
 `sinnix-backup plan <label>` (`persist`, `realm` or `genome`) shows what the
 drain would do, without taking the Borg lock or changing anything: the policy
 hash, each queued snapshot with the archive name and complete `borg create`
