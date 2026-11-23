@@ -86,7 +86,8 @@ release_entry() {
 checkout_gone() { [ ! -e "$1" ] && [ ! -L "$1" ]; }
 
 release() {
-  local dir="$cache_root/$(id -u)" checkout entry name status=0
+  local dir checkout entry name status=0
+  dir="$cache_root/$(id -u)"
   for checkout in "$@"; do
     [[ "$checkout" = /* ]] || {
       echo "sinnix-cargo-target: not an absolute path: $checkout" >&2
@@ -114,7 +115,8 @@ release() {
 # made, so the cache never holds more than the live checkouts plus whatever a
 # running build still locks.
 release_orphans() {
-  local dir="$cache_root/$(id -u)" entry checkout
+  local dir entry checkout
+  dir="$cache_root/$(id -u)"
   [ -d "$dir" ] || return 0
   for entry in "$dir"/*/ "$dir"/.evicting.*/; do
     [ -d "$entry" ] || continue
