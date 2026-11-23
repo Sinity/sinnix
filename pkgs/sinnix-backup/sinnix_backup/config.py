@@ -44,6 +44,9 @@ class SnapshotSource:
     # (realm, genome); False when a content comparison checks it (persist).
     create_check: bool
     files_cache_suffix: str | None
+    # How many of the newest local snapshots `take-snapshots` keeps, whether
+    # or not the drain has archived them; None leaves deletion to the drain.
+    local_snapshots: int | None
 
     def marker(self, state_directory: Path, kind: str) -> Path:
         """`<label>.<kind>` in the state directory (latest-archived, last-success, ...)."""
@@ -104,6 +107,7 @@ def _source(label: str, raw: dict[str, Any]) -> SnapshotSource:
         coverage=raw["coverage"],
         create_check=raw["create_check"],
         files_cache_suffix=raw["files_cache_suffix"],
+        local_snapshots=raw["local_snapshots"],
     )
 
 

@@ -1037,3 +1037,66 @@ def test_stable_host_identity_and_explicit_override(
     identity.write_text("invalid\n")
     with pytest.raises(ValueError):
         borg.host_identity({})
+
+
+def test_local_snapshots_are_kept_by_count_whether_or_not_archived(
+    backup_root, monkeypatch, capfd
+):
+    """Breaks if deletion waits for an archive, deletes a newer cut, deletes a
+    snapshot a backup holds, or touches a source that is not counted."""
+    config_path, config = write_fixture_config(backup_root)
+    host = FakeHost(backup_root, config.lock_path)
+    host.apply(monkeypatch)
+    realm = config.source("realm")
+    assert realm.local_snapshots is not None
+    assert config.source("genome").local_snapshots is None
+    keep = realm.local_snapshots
+    realm.snapshot_directory.mkdir(parents=True)
+    cuts = [
+        host.snapshot(realm.snapshot_directory, f"realm.202604{day:02d}T000000+0000", {})
+        for day in range(1, keep + 4)
+    ]
+    held = os.open(cuts[1], os.O_RDONLY | os.O_DIRECTORY)
+    fcntl.flock(held, fcntl.LOCK_SH)
+    try:
+        deleted = drain.retain_newest(realm)
+    finally:
+        os.close(held)
+    # Nothing was ever archived; the oldest go anyway, except the held one.
+    assert deleted == [cuts[0].name, cuts[2].name]
+    assert [path.exists() for path in cuts] == [False, True, False] + [True] * keep
+    assert "in use by a backup" in capfd.readouterr().out
+    assert drain.retain_newest(realm) == [cuts[1].name]
+    assert sorted(p.name for p in realm.snapshot_directory.iterdir()) == [
+        path.name for path in cuts[3:]
+    ]
+
+
+def test_a_drain_skips_a_queued_snapshot_deleted_by_count(backup_root, monkeypatch):
+    config_path, config = write_fixture_config(backup_root)
+    host = FakeHost(backup_root, config.lock_path)
+    host.apply(monkeypatch)
+    monkeypatch.setenv("TMPDIR", str(config.scratch_directory))
+    pressure = backup_root / "io-pressure"
+    pressure.write_text(SETTLED)
+    monkeypatch.setattr(drain, "IO_PRESSURE", pressure)
+    source = config.source("realm")
+    repo = config.repository("realm").path
+    repo.parent.mkdir(parents=True, exist_ok=True)
+    borg_output("init", "--encryption=none", str(repo))
+    source.snapshot_directory.mkdir(parents=True)
+    older = host.snapshot(source.snapshot_directory, "realm.20260401T000000+0000", {"f": "1"})
+    newest = host.snapshot(source.snapshot_directory, "realm.20260402T000000+0000", {"f": "2"})
+    archive = drain.archive_snapshot
+
+    def archive_then_count(config, source, snapshot, lock):
+        archive(config, source, snapshot, lock)
+        if snapshot == newest.name:
+            shutil.rmtree(older)  # the count-based deletion ran meanwhile
+
+    monkeypatch.setattr(drain, "archive_snapshot", archive_then_count)
+    assert cli.main(["drain", "realm", "--config", str(config_path)]) == 0
+    assert newest.exists()
+    created = [cmd for cmd in host.commands() if cmd[:2] == ["borg", "create"]]
+    assert len(created) == 1
+    assert any("::realm-" + newest.name in part for part in created[0])

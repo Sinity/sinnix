@@ -189,8 +189,8 @@ proof every source has an accepted archive; inspect the per-source receipts.
 
 Daily direct-path archives run before complete historical snapshot queues so
 a multi-day Realm/genome backlog cannot consume their daily start window.
-That trades their runtime before Realm's space-sensitive drain; no historical
-cut is dropped, and each drain still processes its whole finite queue.
+That trades their runtime before Realm's space-sensitive drain; each drain
+processes the finite queue of cuts still kept locally, newest first.
 
 The Realm, Persist and genome drains take the global Borg lock once per
 snapshot: for one cut's create, verification and acknowledgement, and again
@@ -205,25 +205,34 @@ waits for the Btrfs cleaner and for I/O pressure to settle after a deletion.
 Markers are written to a temporary file, fsynced, renamed into place, and the
 parent directory is fsynced; nothing else on the filesystem is flushed.
 
-The drain keeps the newest archived snapshot for the independent audit.
-When no cuts are queued it validates existing acknowledgements and leaves a
+The drain keeps the newest archived snapshot for the independent audit,
+within the local count. When no cuts are queued it validates existing acknowledgements and leaves a
 running repository integrity check alone. A pending snapshot, or a receipt it
 cannot read, can preempt the resumable weekly check; the independent coverage
 audit is never preempted. The coordinator decides this from local receipts
 only; the drains check archives themselves under the Borg lock.
 
-### Snapshots are kept until their archive is checked
+### Local snapshots are kept by count
 
-A snapshot is deleted only after its own archive exists and a coverage check
-confirms every path that should be in it is there. Paths deliberately excluded
-from the archive are listed for the check too, so an exclusion is never read
-as missing data. If the check fails, the snapshot stays and the job fails,
-which keeps local snapshots piling up rather than losing data. Backup failures
-are therefore also disk-space problems on `/realm`.
+`sinnix-backup take-snapshots`, which runs btrbk, keeps the newest eight
+`/realm` and `/persist` snapshots (`localSnapshots` in `modules/backup.nix`)
+and deletes older ones whether or not Borg has archived them, so a paused or
+failing backup never pins deleted data on those filesystems. A snapshot the
+drain is archiving or the independent audit is reading holds a shared lock on
+its directory and stays until a later run. The drain archives the newest
+snapshot first and skips a queued one that has meanwhile been deleted.
 
-The newest archived cut stays until a newer one is archived, so the
-independent audit always has an unchanging source. Only the Borg drain deletes
-these snapshots.
+The drain also releases a cut as soon as its own archive exists and a coverage
+check confirms every path that should be in it is there. Paths deliberately
+excluded from the archive are listed for the check too, so an exclusion is
+never read as missing data. If the check fails, the snapshot stays until the
+count removes it. The newest archived cut stays until a newer one is archived
+or the count removes it, so the independent audit has an unchanging source
+while backups keep up; when they fall two days behind, the audit and the local
+dump expiry wait for a new archive.
+
+Genome cuts are not counted: the genome drain deletes each only after its own
+checked archive.
 
 The live Polylogue archive and every directory in
 `sinnix.services.polylogue.retainedArchives` exclude only their derived
@@ -274,8 +283,8 @@ before and after. A missing, changed or unreadable archive leaves the local file
 Partial files, unknown names and sealed legacy artifacts are retained. The job
 shares Borg's global lock and skips a night when it is held; it never delays
 or makes a new dump depend on the backup disk. Run it through the declared
-`backup_local_dumps` operation. Released bytes can stay pinned by the latest
-source snapshot until the next one is archived.
+`backup_local_dumps` operation. Released bytes stay pinned by the local
+snapshots until they are deleted (see the local count above).
 
 The collector writes `/realm/state/machine-telemetry/telemetry.sqlite`. Every
 Sunday `machine-telemetry-seal` closes that file, makes it immutable under a
@@ -381,7 +390,7 @@ exclusion covers a Beads task store, the ranking domains or
 The boot migration puts downloaded GGUF weights and Steam's installed game
 files in nested subvolumes. New Realm snapshots then stop holding their
 blocks after removal. Steam's Proton data stays in the Realm snapshot.
-Existing snapshots retain their original contents until the backup drain retires them.
+Existing snapshots retain their original contents until they are deleted.
 
 `/persist` leaves out, marked `mayBeMissing`: user caches (`~/.cache`, Hugging
 Face, Spotify) and Borg's cache in `/root/.cache`; package registries and

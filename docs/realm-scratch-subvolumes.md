@@ -4,8 +4,8 @@
 on Realm into nested Btrfs subvolumes during early boot. Btrbk snapshots the
 Realm top subvolume (`subvolume .`); nested subvolumes appear as empty directory
 boundaries in those snapshots. Subsequent writes and deletions in scratch no
-longer stay pinned by Realm snapshots awaiting the Borg drain. Existing
-snapshots retain their original contents until the normal backup drain removes
+longer stay pinned by Realm snapshots. Existing
+snapshots retain their original contents until the normal snapshot deletion removes
 them.
 
 The path list is declared in `modules/lib/storage/scratch-roots.nix`; the

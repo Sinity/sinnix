@@ -45,6 +45,10 @@ let
   polylogueArchiveRoot = config.sinnix.runtime.inventory.polylogue.archiveRoot;
 
   borgSnapshotBindRoot = "/run/borgbackup-snapshot-inputs";
+  # Local /realm and /persist snapshots kept by count: two days at four cuts a
+  # day. The count holds whether or not Borg has archived them, so a paused
+  # backup cannot pin deleted data; the drain archives the newest it finds.
+  localSnapshots = 8;
   borgDrainStateRoot = "/persist/root/.cache/borg-drain";
   repositoryUrls = lib.mapAttrs (_: directory: "file://${borgRepoRoot}/${directory}") {
     persist = "borg-persist-v1";
@@ -375,6 +379,7 @@ let
         coverage = persistCoverage;
         create_check = false;
         files_cache_suffix = null;
+        local_snapshots = localSnapshots;
       };
       realm = {
         repository = "realm";
@@ -386,6 +391,7 @@ let
         coverage = realmCoverage;
         create_check = true;
         files_cache_suffix = null;
+        local_snapshots = localSnapshots;
       };
       # Relative to the top-level subvolume of jobs.root_snapshots.device.
       root = {
@@ -398,6 +404,7 @@ let
         coverage = rootSnapshotExcludes;
         create_check = false;
         files_cache_suffix = null;
+        local_snapshots = null;
       };
     }
     // lib.optionalAttrs (backupCfg.genomeRoot != null) {
@@ -412,6 +419,7 @@ let
         create_check = true;
         # A separate files cache, so realm backlogs cannot age genome entries out.
         files_cache_suffix = "genome";
+        local_snapshots = null;
       };
     };
     nightly = {
@@ -551,7 +559,9 @@ let
     transaction_log         /var/log/btrbk.log
     lockfile                /var/lock/btrbk.lock
 
-    # Only the Borg drains delete snapshots, each after its own checked archive.
+    # btrbk never deletes: `sinnix-backup take-snapshots` keeps the newest
+    # local /realm and /persist snapshots by count, and the drains release
+    # archived ones sooner; genome cuts go only after their checked archive.
 
     volume ${realmRoot}
       snapshot_dir   .btrfs/snapshot

@@ -12,7 +12,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import create_record, hook_cut, markers, snapshots
+from . import create_record, drain, hook_cut, markers, snapshots
 from .borg import (
     BorgError,
     BorgLock,
@@ -77,6 +77,9 @@ def publish_daily_marker(
 
 def take_snapshots(config: BackupConfig) -> int:
     subprocess.run(["btrbk", "--quiet", "--preserve-snapshots", "run"], check=True)
+    for source in config.sources.values():
+        if source.local_snapshots is not None:
+            drain.retain_newest(source)
     genome = config.sources.get("genome")
     if genome is None:
         return 0

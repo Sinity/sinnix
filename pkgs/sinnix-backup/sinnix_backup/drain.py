@@ -163,7 +163,14 @@ def drain(config: BackupConfig, label: str) -> int:
             # behind it run between snapshots and between deletions.
             for index, snapshot in enumerate(queue):
                 lock.wait()
-                archive_snapshot(config, source, snapshot, lock)
+                try:
+                    archive_snapshot(config, source, snapshot, lock)
+                except FileNotFoundError:
+                    # Taking snapshots keeps only the newest few; an older
+                    # queued one can be gone before the drain reaches it.
+                    if (source.snapshot_directory / snapshot).exists():
+                        raise
+                    print(f"Snapshot no longer kept locally: {snapshot}", flush=True)
                 lock.release()
 
                 # The newest pending cut goes first. Release earlier verified
@@ -322,6 +329,27 @@ def archive_snapshot(
     snapshot_path = source.snapshot_directory / snapshot
     bind_path = source.bind_path
     original = f"{source.archive_prefix}-{snapshot}"
+    # A shared lock on the snapshot, as the independent audit takes: the
+    # count-based deletion in `retain_newest` passes over a pinned snapshot.
+    pin = os.open(snapshot_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        fcntl.flock(pin, fcntl.LOCK_SH)
+        _archive_pinned(config, source, snapshot, snapshot_path, bind_path, original)
+    finally:
+        os.close(pin)
+
+
+def _archive_pinned(
+    config: BackupConfig,
+    source: SnapshotSource,
+    snapshot: str,
+    snapshot_path: Path,
+    bind_path: Path,
+    original: str,
+) -> None:
+    latest = _latest(config, source)
+    pending_record = _pending_record(config, source)
+    acknowledgement = snapshots.acknowledgement_directory(latest) / snapshot
     details = snapshots.snapshot_details(snapshot_path)
     filesystem = snapshots.filesystem_identity(snapshot_path)
     subprocess.run(["mount", "--bind", str(snapshot_path), str(bind_path)], check=True)
@@ -583,6 +611,40 @@ def retire_snapshot(
     finally:
         os.close(descriptor)
     return True
+
+
+def retain_newest(source: SnapshotSource) -> list[str]:
+    """Delete the source's local snapshots beyond its newest `local_snapshots`.
+
+    The count holds whether or not the drain has archived them, so a paused
+    or failing backup never pins deleted data on the source filesystem; the
+    drain archives the newest snapshot it finds. A snapshot that the drain or
+    the independent audit holds (a shared lock on its directory) stays until
+    a later run. Returns the deleted names.
+    """
+    assert source.local_snapshots is not None and source.local_snapshots >= 1
+    names = snapshots.snapshot_names(source.snapshot_directory, source.name_glob)
+    deleted = []
+    for name in names[: max(0, len(names) - source.local_snapshots)]:
+        path = source.snapshot_directory / name
+        descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                print(f"Retaining snapshot in use by a backup: {name}", flush=True)
+                continue
+            # Only an identified read-only subvolume is ever deleted.
+            snapshots.snapshot_details(path)
+            subprocess.run(["btrfs", "subvolume", "delete", str(path)], check=True)
+        finally:
+            os.close(descriptor)
+        deleted.append(name)
+        print(
+            f"Deleted local snapshot beyond the newest {source.local_snapshots}: {name}",
+            flush=True,
+        )
+    return deleted
 
 
 def _full_io_pressure() -> int:
