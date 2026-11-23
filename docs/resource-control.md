@@ -102,8 +102,12 @@ nothing, while the memory stayed with the build and the drain.
 
 Compare (`sinnix rank desktop`) runs in its own scope in `app.slice`, so its
 memory counts on the apps line whatever launched it, with `MemoryHigh=3G`
-and `MemoryMax=4G`. Playing two 8K videos measured 1.7 GiB resident: on this
-GPU each hardware decode that copies frames back to RAM costs 0.7-1 GiB.
+and `MemoryMax=4G`. Compare decodes with `nvdec`, which keeps frames on the
+GPU; each playing 8K video still costs about 640 MiB resident for its CUDA
+context and decoder (half NVIDIA driver mappings, half heap), so two
+playing measure 1.7 GiB and frames alone 0.4 GiB. Closing a player returns
+that memory; its launcher sets `MALLOC_ARENA_MAX=2` so glibc does not keep
+an arena per finished decoder thread.
 
 systemd-oomd ends sustained thrash before the kernel has to: it kills the job
 with the most reclaim when the job plane's memory pressure stays above 40% for

@@ -44,6 +44,10 @@ stdenv.mkDerivation {
       categories = [ "Utility" ];
     })
   ];
+  # Every video opened spawns mpv decoder threads, and glibc keeps a malloc
+  # arena per thread after it exits: idle memory grew about 80 MiB per pair
+  # of videos opened and closed (390 MiB to 1 GiB over eight). Two arenas
+  # hold it near 5 MiB per pair (2026-11-23, two 8K HEVC files, nvdec).
   postInstall = ''
     mkdir -p "$out/share/sinnix-rank" "$out/bin"
     cp "$src"/*.py "$src"/*.qml "$out/share/sinnix-rank/"
@@ -55,6 +59,7 @@ stdenv.mkDerivation {
     test -s "$shader"
     makeWrapper ${python}/bin/python3 "$out/bin/sinnix-rank-desktop" \
       --set LC_NUMERIC C \
+      --set MALLOC_ARENA_MAX 2 \
       --suffix LD_LIBRARY_PATH : /run/opengl-driver/lib \
       --set QSG_RHI_BACKEND opengl \
       --prefix QML_IMPORT_PATH : "$out/lib/qt-6/qml" \
