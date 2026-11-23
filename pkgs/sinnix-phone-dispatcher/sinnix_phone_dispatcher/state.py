@@ -42,7 +42,7 @@ TOKENS_DIR = STATE_DIR / "tokens"
 MAX_BODY = 8 << 20  # a shared image can be large; an intent never is
 
 # Bulk capture files the phone uploads itself, rather than waiting to be
-# pulled. A 5-minute ambient chunk is ~3.6 MB; the cap is generous enough for
+# pulled. A 5-minute ambient chunk is under 1 MB; the cap is generous enough for
 # a long orphan recovered after a crash and small enough that a confused
 # client cannot fill the disk in one request.
 MAX_UPLOAD = 128 << 20
@@ -78,7 +78,7 @@ EVENTS_DAY_RE = re.compile(r"[0-9]{8}")
 MAX_EVENT_BATCH = 8 << 20
 
 # One path segment of an upload name. Chunk names are minted by the app from
-# a UTC stamp (`ambient-20260817T103201Z.m4a`, `.orphan` when a crash
+# a UTC stamp (`ambient-20260817T103201Z.opus`, `.orphan` when a crash
 # truncated one) and would fit a far tighter pattern, but the same check now
 # guards the mirror lanes, where the segments are whatever the operator's own
 # camera, browser and file manager wrote -- `Samsung Health`, `IMG_20260817

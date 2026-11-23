@@ -86,7 +86,7 @@
 
     # The non-flake phone app is sourced from GitHub; flake/scripts.nix calls its pkg.nix.
     phone-app = {
-      url = "github:Sinity/sinnix-phone-app/f4a97957529b0896411d73f5c55cd70c1f84f0f6";
+      url = "github:Sinity/sinnix-phone-app/9bda94c2d6e62c441da9832505c4683b72164f34";
       flake = false;
     };
 

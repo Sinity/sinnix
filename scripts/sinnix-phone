@@ -617,7 +617,7 @@ drain_ambient_adb() {
   fi
   while IFS= read -r -d '' remote; do
     name=${remote##*/}
-    case "$name" in *.m4a | *.m4a.orphan) ;; *) continue ;; esac
+    case "$name" in *.webm | *.webm.orphan | *.opus | *.opus.orphan | *.m4a | *.m4a.orphan) ;; *) continue ;; esac
     if ! digest=$(adb_shell_args sha256sum "$remote" </dev/null); then
       failed=$((failed + 1)); continue
     fi
@@ -1523,10 +1523,11 @@ app-status)
   if ! chunk_listing=$(adb_any shell '
     directory=/sdcard/sinnix-ambient
     [ -d "$directory" ] && [ -r "$directory" ] && [ -x "$directory" ] || exit 1
-    set -- "$directory"/*.m4a
-    if [ "$#" -eq 1 ] && [ "$1" = "$directory/*.m4a" ] && [ ! -e "$1" ]; then
-      exit 0
-    fi
+    set --
+    for chunk in "$directory"/*.opus "$directory"/*.webm "$directory"/*.m4a; do
+      [ -e "$chunk" ] && set -- "$@" "$chunk"
+    done
+    [ "$#" -gt 0 ] || exit 0
     ls -1t -- "$@"
   '); then
     echo "last chunk: phone recording directory unavailable; retained lake data does not establish its current contents" >&2
@@ -1535,7 +1536,7 @@ app-status)
   chunk_listing=${chunk_listing//$'\r'/}
   latest_chunk=${chunk_listing%%$'\n'*}
   if [ -n "${latest_chunk:-}" ]; then
-    tmp_chunk="$(mktemp --tmpdir="${TMPDIR:-/realm/tmp/work}" --suffix=.m4a sinnix-phone-status.XXXXXX)"
+    tmp_chunk="$(mktemp --tmpdir="${TMPDIR:-/realm/tmp/work}" --suffix=".${latest_chunk##*.}" sinnix-phone-status.XXXXXX)"
     trap 'rm -f -- "$tmp_chunk"' EXIT
     if adb_any pull "$latest_chunk" "$tmp_chunk" >/dev/null 2>&1; then
       dur=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$tmp_chunk" 2>/dev/null || true)
@@ -1554,7 +1555,8 @@ app-status)
     # not establish why the phone has no closed chunks. Measure the retained
     # lake file separately; the asynchronous audit ledger can lag recovery.
     lake_chunk=""
-    for f in "$LAKE_ROOT"/ambient/ambient-*.m4a; do
+    # Ogg Opus chunks (current) come last, after the AAC and WebM generations.
+    for f in "$LAKE_ROOT"/ambient/ambient-*.m4a "$LAKE_ROOT"/ambient/ambient-*.webm "$LAKE_ROOT"/ambient/ambient-*.opus; do
       [ -e "$f" ] && lake_chunk="$f"
     done
     if [ -n "$lake_chunk" ]; then
@@ -1820,8 +1822,8 @@ app-soak)
   workdir=$(mktemp -d --tmpdir="${TMPDIR:-/realm/tmp/work}" sinnix-phone-soak.XXXXXX)
   trap 'rm -rf -- "$workdir"' EXIT
   printf '%-40s %10s %12s %s\n' CHUNK SECONDS BYTES MEAN_dB
-  adb_any shell ls -1 /sdcard/sinnix-ambient/ 2>/dev/null | tr -d '\r' | grep -E '^ambient-.*\.m4a$' | while read -r f; do
-    stamp="${f#ambient-}"; stamp="${stamp%.m4a}"
+  adb_any shell ls -1 /sdcard/sinnix-ambient/ 2>/dev/null | tr -d '\r' | grep -E '^ambient-.*\.(opus|webm|m4a)$' | while read -r f; do
+    stamp="${f#ambient-}"; stamp="${stamp%.*}"
     fe=$(date -u -d "${stamp:0:4}-${stamp:4:2}-${stamp:6:2} ${stamp:9:2}:${stamp:11:2}:${stamp:13:2}" +%s 2>/dev/null || echo 0)
     [ "$fe" -ge "$start_epoch" ] || continue
     adb_any pull "/sdcard/sinnix-ambient/$f" "$workdir/$f" >/dev/null 2>&1 || continue
@@ -1934,7 +1936,7 @@ logcat)
   drain_bcr_calls_adb || bcr_rc=$?
 
   # This scheduled probe also checks whether the capture app's uploads land.
-  backlog=$(adb_any shell 'ls /sdcard/sinnix-ambient/*.m4a 2>/dev/null | wc -l' 2>/dev/null | tr -d '\r')
+  backlog=$(adb_any shell 'ls /sdcard/sinnix-ambient/*.webm /sdcard/sinnix-ambient/*.opus /sdcard/sinnix-ambient/*.m4a 2>/dev/null | wc -l' 2>/dev/null | tr -d '\r')
   if [ -n "${backlog:-}" ] && [ "$backlog" -gt 12 ]; then
     echo "logcat: WARNING -- $backlog finished chunks still on the phone; uploads are not landing." >&2
     echo "  Ask the app why: adb shell grep chunk_upload_blocked in today's events file." >&2
@@ -2059,7 +2061,7 @@ ambient-audit)
     if [ "$((added % 100))" -eq 0 ]; then
       echo "ambient-audit: progress $added inspected"
     fi
-  done < <(find "$LAKE_ROOT/ambient" -maxdepth 1 -type f \( -name '*.m4a' -o -name '*.m4a.orphan' \) | sort)
+  done < <(find "$LAKE_ROOT/ambient" -maxdepth 1 -type f \( -name '*.webm' -o -name '*.webm.orphan' -o -name '*.opus' -o -name '*.opus.orphan' -o -name '*.m4a' -o -name '*.m4a.orphan' \) | sort)
   echo "ambient-audit: measured $added new chunk(s), $silent captured nothing"
   # The ledger is append-only and a chunk may be measured more than once (a
   # repaired transfer is a different file under the same name), so the newest

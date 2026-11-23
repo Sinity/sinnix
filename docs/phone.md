@@ -136,7 +136,7 @@ refused.
 
 | File on the phone                         | Direction | Route and destination                                 |
 | ----------------------------------------- | --------- | ----------------------------------------------------- |
-| `ambient-*.m4a`                           | out       | `POST /chunk?lane=ambient` → capture store            |
+| `ambient-*.opus`                          | out       | `POST /chunk?lane=ambient` → capture store            |
 | `sensor-*.bin` + `.json`                  | out       | `POST /chunk?lane=outbox`                             |
 | `events/events-*.jsonl`                   | out       | `POST /events?day=&offset=` → that day's file         |
 | `outbox/intent-*.json`                    | out       | `POST /intent` → executed, receipt sent back          |
@@ -173,21 +173,27 @@ app's history.
 
 ## Ambient capture
 
-Mono 48 kHz AAC at 96 kbps in 300 s chunks (about 3.6 MB), the same grade as
-the desktop audio lanes, so the archive keeps the full band (speech
-recognition works from it on prime). A microphone foreground service with a
-persistent notification is the only way to record with the screen off, which is
-why this is an app.
+Mono 48 kHz Ogg Opus, encoder at 16 kbps, in 300 s chunks (about 1 MB).
+Speech recognition on prime finds the same speech spans and text as it did
+from the earlier 96 kbps AAC. Android's MP4 writer takes no Opus track, and
+its WebM writer holds the whole file until the recorder stops, which would
+blind the growth check below; Ogg grows live but spends a page per 20 ms
+packet (about 11 kbps), so the file runs near 27 kbps. The lake's older
+`.m4a` chunks were re-encoded in place to 24 kbps Opus in MP4 under their
+original names; a few `.webm` chunks date from the changeover.
 
-Files are named `ambient-<UTC basic ISO time>.m4a` (the storage layer rejects
-colons). A chunk is written as `.m4a.part` in private storage and published only
+A microphone foreground service with a persistent notification is the only way
+to record with the screen off, which is why this is an app.
+
+Files are named `ambient-<UTC basic ISO time>.opus` (the storage layer rejects
+colons). A chunk is written as `.opus.part` in private storage and published only
 after the muxer closes it and its duration is checked; a `.part` left by a
-crashed recorder becomes `.m4a.orphan` and is still uploaded.
+crashed recorder becomes `.opus.orphan` and is still uploaded.
 
 The app checks amplitude and file growth every 20 s. Four exact-zero
 samples in a row restart the recorder. No growth for 90 s, or growth under
-half the expected bitrate, also restarts it. Each closed chunk's encoded
-duration is compared with elapsed time. On prime, `sinnix phone ambient-audit`
+1 kbps, also restarts it. Each closed chunk's encoded duration is compared
+with elapsed time. On prime, `sinnix phone ambient-audit`
 decodes every chunk into
 `ambient-levels.jsonl` and flags all-zero audio.
 

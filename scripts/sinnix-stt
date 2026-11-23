@@ -388,7 +388,7 @@ def default_lanes() -> list[str]:
     """
     return [n for n in lanes() if not n.startswith("snk-")]
 
-AUDIO_SUFFIXES = {".m4a", ".opus", ".wav", ".flac", ".mp3", ".ogg"}
+AUDIO_SUFFIXES = {".m4a", ".opus", ".webm", ".wav", ".flac", ".mp3", ".ogg"}
 
 
 def ledger_seen() -> set[tuple[str, str, int]]:
