@@ -217,9 +217,11 @@ only; the drains check archives themselves under the Borg lock.
 `sinnix-backup take-snapshots`, which runs btrbk, keeps the newest eight
 `/realm` and `/persist` snapshots (`localSnapshots` in `modules/backup.nix`)
 and deletes older ones whether or not Borg has archived them, so a paused or
-failing backup never pins deleted data on those filesystems. A snapshot the
-drain is archiving or the independent audit is reading holds a shared lock on
-its directory and stays until a later run. The drain archives the newest
+failing backup never pins deleted data on those filesystems. It deletes under
+the Borg lock, taken without waiting: while a backup job holds it, the
+deletion waits for the next snapshot run. A snapshot the drain is archiving or
+the independent audit is reading also holds a shared lock on its directory and
+stays until a later run. The drain archives the newest
 snapshot first and skips a queued one that has meanwhile been deleted.
 
 The drain also releases a cut as soon as its own archive exists and a coverage

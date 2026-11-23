@@ -79,7 +79,7 @@ def take_snapshots(config: BackupConfig) -> int:
     subprocess.run(["btrbk", "--quiet", "--preserve-snapshots", "run"], check=True)
     for source in config.sources.values():
         if source.local_snapshots is not None:
-            drain.retain_newest(source)
+            drain.retain_newest(config, source)
     genome = config.sources.get("genome")
     if genome is None:
         return 0

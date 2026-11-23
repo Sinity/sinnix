@@ -613,19 +613,37 @@ def retire_snapshot(
     return True
 
 
-def retain_newest(source: SnapshotSource) -> list[str]:
+def retain_newest(config: BackupConfig, source: SnapshotSource) -> list[str]:
     """Delete the source's local snapshots beyond its newest `local_snapshots`.
 
     The count holds whether or not the drain has archived them, so a paused
     or failing backup never pins deleted data on the source filesystem; the
-    drain archives the newest snapshot it finds. A snapshot that the drain or
-    the independent audit holds (a shared lock on its directory) stays until
-    a later run. Returns the deleted names.
+    drain archives the newest snapshot it finds. Deletion happens under the
+    Borg lock, which every job reading a snapshot holds, taken without
+    waiting: when a backup job holds it, this run deletes nothing and the next
+    snapshot run (six hours later) tries again. A snapshot the independent
+    audit reads holds a shared lock on its directory and stays too. Returns
+    the deleted names.
     """
     assert source.local_snapshots is not None and source.local_snapshots >= 1
     names = snapshots.snapshot_names(source.snapshot_directory, source.name_glob)
+    excess = names[: max(0, len(names) - source.local_snapshots)]
+    if not excess:
+        return []
+    lock = BorgLock(config.lock_path)
+    if not lock.try_take():
+        print(f"A Borg job is running; {len(excess)} {source.label} snapshot(s) "
+              "beyond the local count wait for the next run", flush=True)
+        return []
+    try:
+        return _delete_snapshots(source, excess)
+    finally:
+        lock.release()
+
+
+def _delete_snapshots(source: SnapshotSource, excess: list[str]) -> list[str]:
     deleted = []
-    for name in names[: max(0, len(names) - source.local_snapshots)]:
+    for name in excess:
         path = source.snapshot_directory / name
         descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
         try:

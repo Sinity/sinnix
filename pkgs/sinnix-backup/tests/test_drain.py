@@ -964,6 +964,7 @@ def test_choose_archive_name():
             coverage={"borg_excludes": []},
             create_check=create_check,
             files_cache_suffix=None,
+            local_snapshots=None,
         )
 
     realm = source("realm", "-coverage-v3", True)
@@ -1059,14 +1060,17 @@ def test_local_snapshots_are_kept_by_count_whether_or_not_archived(
     held = os.open(cuts[1], os.O_RDONLY | os.O_DIRECTORY)
     fcntl.flock(held, fcntl.LOCK_SH)
     try:
-        deleted = drain.retain_newest(realm)
+        deleted = drain.retain_newest(config, realm)
     finally:
         os.close(held)
     # Nothing was ever archived; the oldest go anyway, except the held one.
     assert deleted == [cuts[0].name, cuts[2].name]
     assert [path.exists() for path in cuts] == [False, True, False] + [True] * keep
     assert "in use by a backup" in capfd.readouterr().out
-    assert drain.retain_newest(realm) == [cuts[1].name]
+    with borg.BorgLock(config.lock_path):
+        assert drain.retain_newest(config, realm) == []
+    assert cuts[1].exists() and "A Borg job is running" in capfd.readouterr().out
+    assert drain.retain_newest(config, realm) == [cuts[1].name]
     assert sorted(p.name for p in realm.snapshot_directory.iterdir()) == [
         path.name for path in cuts[3:]
     ]
