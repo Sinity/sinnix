@@ -183,6 +183,11 @@ in
                 type = lib.types.nullOr lib.types.int;
                 default = null;
               };
+              OOMScoreAdjust = lib.mkOption {
+                type = lib.types.nullOr lib.types.int;
+                default = null;
+                description = "Kernel OOM rank; retryable work uses 900 like agentctl jobs (docs/resource-control.md).";
+              };
               TimeoutStartSec = lib.mkOption {
                 type = lib.types.nullOr lib.types.str;
                 default = null;
