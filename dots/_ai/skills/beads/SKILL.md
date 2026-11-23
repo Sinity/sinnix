@@ -59,10 +59,16 @@ A store has three levels: a release milestone, area epics, work items.
 - **Spec:** `--spec-id docs/<page>.md#<heading>`, the section that owns the
   behaviour.
 - **Acceptance:** the native field, numbered lines, each observable and
-  naming its check (a test or a command). Read them adversarially: could an
-  executor satisfy the words and miss the point?
+  naming its check: a test, a command, or a query of recorded data
+  (`sinnix-observe --since`, `below dump`, the journal, Polylogue or Sinex
+  history). A question about behaviour over time names the recorded series
+  and the span it must cover; once that span exists, one query answers it.
+  A scheduled run (a nightly backup) is started on purpose rather than waited
+  for. A waiting period ("stable for 24 hours") is not a check. Read the rows
+  adversarially: could an executor satisfy the words and miss the point?
 - **Estimate:** `--estimate` minutes of one worker, from comparable finished
-  changes; unset without evidence.
+  changes (created-to-merged times of similar merged pull requests, recorded
+  job durations); unset without evidence.
 - **Notes:** one dated paragraph of current state, replaced when the state
   changes. `--notes` and `--design` replace the field.
 - **Comments:** dated evidence that outlives the current state (a measurement

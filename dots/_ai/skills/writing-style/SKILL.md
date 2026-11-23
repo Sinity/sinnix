@@ -12,8 +12,17 @@ follow the repository's own rules.
 - Write for a reader who has read none of the source material. Explain each
   reference on first mention and why it matters; include an identifier only
   when useful.
+- A report written from inside a long working session inherits that
+  session's internal names: task codes, module and plan names, coined labels.
+  Before sending, reread it as that reader and replace each with what the
+  thing is, or have a fresh agent write it from the facts and this skill.
+  A plan or status gives each open item's remaining time.
 - Write plain, specific, declarative sentences. Lead with the point; a claim
   earns an adjective only with the evidence beside it.
+- State the fact in place of a defensive caveat or a promise of care:
+  "I'll be careful not to assume the records are complete" becomes "Coverage
+  ends in August"; "I won't confuse an organized archive with benefit
+  eligibility" becomes "The archive is organized".
 - Do not use em or en dashes as punctuation. Use a period, comma, colon,
   semicolon, or parentheses. An en dash is fine inside a numeric range
   (`3.10-3.18`).

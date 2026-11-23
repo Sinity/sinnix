@@ -17,6 +17,12 @@ reading cost. `skill-authoring` owns skill packaging and validation.
   Skills hold procedures only some sessions need.
   Beads hold tasks, decisions, and their evidence. Memory holds stable facts
   and pointers nothing else records.
+- Codex also loads memory it generates from past sessions
+  (`~/.codex/memories/memory_summary.md`, consolidated into `MEMORY.md` from
+  per-session extracts). A direct edit lasts only until the next
+  consolidation; a correction goes in a dated note under
+  `~/.codex/memories/extensions/ad_hoc/notes/`, which consolidation treats as
+  authoritative. Read the summary when auditing what an agent was told.
 - Resolve an installed file to its source before editing. Live symlinks
   change on the next read, though a running agent keeps what it loaded;
   generated or copied files change only after their install or activation.

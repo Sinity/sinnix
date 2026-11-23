@@ -28,6 +28,15 @@ and [the command contract](../../../../docs/agentctl.md) for syntax.
   repeated `job get`, `logs`, `tail` or `sleep` costs a turn and learns nothing
   new. Read original artifacts; a successful transport proves only what its
   payload covers.
+- Expect durations from the record, not a guess. Typical run times here
+  (November 2026): a type check (`compile`, `fast`) about 1 minute, p90 up to
+  5; a focused test about 3 minutes, p90 about 7; a PR's hosted check about 19
+  minutes for Polylogue, 13 for Sinex, 4 for the shared crates; queue waits
+  in a busy pool can add as much again. Current figures come from the
+  started and finished events per `job_id` in
+  `/realm/state/agentctl/events.jsonl`, the devkit history
+  (`~/.local/state/devkit/history.db`, build and test stage times per run),
+  and `gh run list --json createdAt,updatedAt,conclusion`.
 - Pools run one heavy job at a time, so queue order decides wall time. Give
   short jobs that unblock others (an activation, a compile or fast check, a
   focused rerun) `--priority 50`; leave full checks and package builds at the
@@ -35,6 +44,8 @@ and [the command contract](../../../../docs/agentctl.md) for syntax.
 - Bound log reads: `journalctl` takes an exact unit and `--since` within the
   job's lifetime, plus `-n`; a glob unit over days of journal can read for
   hours.
+- In `pgrep -f` patterns, bracket one character so the search cannot match
+  itself.
 - Keep one `agentctl events tail --follow --project <project>` watch per
   concern. Reuse its live handle and stop a watch you own when its purpose ends.
 - A queued job is already running work. Wait for its completion event before
