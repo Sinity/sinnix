@@ -73,7 +73,6 @@ let
     max = 9216;
     # Interactive sessions: protected up to their measured p95 (3.0 GiB).
     cliLow = 3072;
-    cliHigh = 6144;
     cliMax = 7168;
     toolMax = 5120;
     # The job plane: room for the largest single job (a Sinnix check peaks
@@ -350,9 +349,9 @@ rec {
       # out-of-memory killer then act inside this slice, where the victim is
       # the job or tool with the highest OOM score (agentctl sets 900 on job
       # units, claude-tool-scope 800 on tool commands, the CLIs 300).
-      # Only the CLIs have a MemoryHigh. On this slice, the job plane and the
-      # tool slice a MemoryHigh held runaway allocators throttled for
-      # minutes without ever reaching the ceiling, while oomd's pressure
+      # No slice under it has a MemoryHigh. Here a MemoryHigh held runaway
+      # allocators, and on the CLI slice every session, throttled for
+      # minutes to hours without ever reaching the ceiling, while oomd's pressure
       # rule killed bystanders that were being reclaimed (a build, another
       # session's tool command). At a MemoryMax the kernel reclaims and
       # swaps first and then kills the largest of the highest-scored
@@ -382,21 +381,22 @@ rec {
         # The sessions' measured p95 (all sessions, 3.0G) stays resident, so
         # reclaim inside the budget lands on jobs and tools first.
         MemoryLow = mib agentMemory.cliLow;
-        # Throttle, never kill: every in-process subagent shell is a child of
-        # the coordinator's Claude process in the same scope, so an oomd
-        # policy here would take the session down with its runaway child.
-        # The band between Low and High keeps page cache for the CLIs
-        # themselves, so a keystroke never re-reads the CLI from disk.
-        MemoryHigh = mib agentMemory.cliHigh;
-        # Hard backstop only if throttling cannot hold: the kernel's
-        # cgroup-local OOM then picks the largest single process, which for
-        # a runaway build is the build, not a ~1 GB agent process.
+        # No MemoryHigh. A High below the ceiling throttles without ever
+        # killing: with the slice's swap full and its anonymous memory over
+        # High, the kernel evicts the CLIs' own code and re-reads it at
+        # hundreds of MB/s while every session sleeps in the throttle, for
+        # as long as the load lasts. At MemoryMax the kernel reclaims and
+        # swaps, then kills the largest single process, which for a runaway
+        # build is the build, not a ~1 GB agent process. No oomd policy:
+        # every in-process subagent shell is a child of the coordinator's
+        # Claude process in the same scope, so oomd would take the session
+        # down with its runaway child.
         MemoryMax = mib agentMemory.cliMax;
         MemorySwapMax = "4G";
         TasksMax = 8192;
       };
       # Tool commands and MCP servers use a sibling slice, so their memory
-      # does not count against agent-cli.slice MemoryHigh.
+      # does not count against agent-cli.slice's ceiling.
       agent-tool = {
         IOAccounting = true;
         # Just below agent-cli.slice, so the coordinator wins CPU contention
