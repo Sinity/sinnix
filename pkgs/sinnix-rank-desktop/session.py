@@ -365,6 +365,8 @@ class Session:
             raise RuntimeError("This comparison source is already open.") from None
         self.items = {}
         self.status = ""
+        self.progress = (0, 0)
+        self.progress_label = ""
         try:
             try:
                 self.state = json.loads(self.path.read_text())
@@ -451,17 +453,20 @@ class Session:
             self.advance()
         self.finish()
 
-    def finish(self, status=None):
+    def finish(self, status=""):
+        """Record what the last action did and recompute progress through the pass."""
         current = sum(item is not None for item in self.pair)
-        if status is None:
-            if self.order == "largest":
-                reviewed = len(set(self.slot["seen"]).intersection(self.items))
-                remaining = len(self.items) - reviewed
-                status = f"{reviewed} of {len(self.items)} shown"
-                if remaining == 0 and current < 2:
-                    status += " · Pass complete"
-            else:
-                status = f"{len(self.items)} items · {len(self.slot['pairs'])} comparisons shown"
+        if self.order == "largest":
+            reviewed = len(set(self.slot["seen"]).intersection(self.items))
+            self.progress = (reviewed, len(self.items))
+            self.progress_label = f"{reviewed} of {len(self.items)} shown"
+            if reviewed == len(self.items) and current < 2:
+                self.progress_label += " · pass complete"
+        else:
+            self.progress = (0, 0)
+            self.progress_label = (
+                f"{len(self.slot['pairs'])} pairs shown · {len(self.items)} items"
+            )
         self.status = status
         self.save()
 
@@ -566,14 +571,13 @@ class Session:
             for item in pair
         ]
         self.advance()
+        status = {"skip": "Skipped", "tie": "Recorded a tie"}.get(
+            action, "Preferred " + action.removeprefix("prefer "))
         if winner and self.order == "largest":
             kept = 0 if pair[0].id == winner else 1
-            status = ["Left preferred", "Right preferred"][kept]
             if self.pair[1 - kept]:
                 status += " · next file on " + ["right", "left"][kept]
-            self.finish(status)
-        else:
-            self.finish()
+        self.finish(status)
 
     def prefer(self, side):
         if side not in (0, 1) or self.pair[side] is None:
@@ -603,7 +607,7 @@ class Session:
         )
         if not self.slot["failed"]:
             self.advance()
-        self.finish()
+        self.finish("Undid " + previous["action"])
 
     def delete(self, ids):
         if not self.can_delete:

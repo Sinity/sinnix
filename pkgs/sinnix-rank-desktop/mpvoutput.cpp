@@ -268,10 +268,11 @@ void MpvOutput::stop() {
     setDuration(0);
 }
 
-void MpvOutput::seek(qreal milliseconds) {
+void MpvOutput::seek(qreal milliseconds, bool exact) {
     if (!std::isfinite(milliseconds))
         return;
     m_pendingSeek = std::max<qreal>(0, milliseconds);
+    m_pendingExact = exact;
     applySeek();
 }
 
@@ -279,7 +280,8 @@ void MpvOutput::applySeek() {
     if (!m_loaded || !m_pendingSeek || m_duration <= 0)
         return;
     const QByteArray seconds = QByteArray::number(std::min<qreal>(*m_pendingSeek, m_duration) / 1000);
-    const char *command[] = {"seek", seconds.constData(), "absolute", nullptr};
+    const char *command[] = {"seek", seconds.constData(),
+                             m_pendingExact ? "absolute+exact" : "absolute+keyframes", nullptr};
     mpv_command_async(m_mpv->handle, 0, command);
     m_pendingSeek.reset();
 }

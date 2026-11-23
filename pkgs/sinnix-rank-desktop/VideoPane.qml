@@ -23,7 +23,8 @@ Item {
     function play() { video.play() }
     function pause() { video.pause() }
     function stop() { video.stop() }
-    function seek(ms) { video.seek(ms) }
+    function seek(ms) { video.seek(ms, true) }
+    function scrub(ms) { video.seek(ms, false) }
     function recenter() {
         yaw = 0
         pitch = 0
@@ -57,9 +58,7 @@ Item {
 
     ShaderEffect {
         id: perspectiveView
-        anchors.centerIn: parent
-        width: Math.min(parent.width, parent.height * 16 / 9)
-        height: width * 9 / 16
+        anchors.fill: parent
         visible: pane.perspective
         fragmentShader: "shaders/perspective.frag.qsb"
 
@@ -73,6 +72,7 @@ Item {
                                : pane.projection?.layout === "tb" ? 2 : 0
         property int swapEye: pane.projection?.swap ? 1 : 0
         property size sourcePixels: videoTexture.textureSize
+        property real viewAspect: height / Math.max(1, width)
 
         MouseArea {
             anchors.fill: parent

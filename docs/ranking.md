@@ -120,19 +120,35 @@ Pass a domain name for saved image or text options, or `--files` followed
 by media files or a folder. In Yazi, `g R` compares the selection or opens
 the current directory. A connected library can supply additional sources.
 
-Choose a video frame to play from that moment. Preference buttons and the
-1 and 2 keys record the judgment. Largest first keeps the preferred item
-on its side. Most informative draws the next pair from the current evidence.
+The window is laid out by how often each action is used. The two items fill
+the screen. Each item has a full-width **Prefer** bar along the bottom (keys
+← and →, or 1 and 2); **Tie** (T) and **Skip** (S) sit between them. After
+each answer a short message says what happened and offers **Undo** (U). The
+title line names the collection, video type and order; click it to switch
+collection, choose VR, Non-VR, Needs review or All files, or change the order.
+Largest first reviews files in size order and keeps the preferred file on its
+side. Most informative draws the next pair from the current evidence. The
+header shows progress through the pass, and **Keys** (?) lists every
+shortcut.
 
-In a file library, select **VR** and **Largest first** to review the biggest
-files in size order. Each side shows six frames. Click a frame to start at
-that point. Click the six moments below the player to jump, or choose **Back to frames**. Click a pane to select its sound and keyboard controls. Space pauses or resumes it and F expands it. If the lens looks wrong,
-open that pane’s projection settings. Saved per-file corrections also apply
-to mpv and Yazi previews.
+Each pane's header shows the file's size, resolution, codec, duration and play
+count. Before playback, a video shows six frames from across its length; click
+one to play from that point. During playback the frames shrink into a strip
+under the video that also serves as its timeline: drag along it to scrub. The
+selected pane has an outline and gets the sound and keyboard: click a pane or
+press Tab to switch. Space pauses or resumes, J and L step back or forward ten
+seconds, F expands the pane and Esc returns to the frames. VR video fills the
+pane; drag to look around and scroll to zoom. If the lens looks wrong, use the
+pane's **More** menu to set projection and eyes. Saved per-file corrections
+also apply to mpv and Yazi previews.
 
-Preferring a file records a vote. The separate delete buttons permanently
-remove the left file, the right file, or both in one click. Each button shows
-the size of its selection. Open the versions list to inspect and remove an
-alternate file individually. Undo reverses a ranking decision.
+Preferring a file records a vote. To permanently remove a file, hold its
+**Delete** button in the pane header until the bar fills; releasing early
+cancels. When a scene has other versions, the header offers them; each can be
+played or deleted from that list. Undo reverses a ranking decision, not a
+deletion.
 
-The Compare window title identifies the displayed left and right files. For Stash it includes both file IDs. Open **Comment…** from a video’s **Options** menu to save or edit a private comment. Comments follow the file across pairs, filters, and restarts.
+The Compare window title identifies the displayed left and right files. For
+Stash it includes both file IDs. Open **Comment…** from a video's **More**
+menu to save or edit a private comment. Comments follow the file across pairs,
+filters, and restarts.

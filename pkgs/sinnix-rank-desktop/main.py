@@ -30,8 +30,9 @@ def file_size(bytes_count):
 
 
 def timestamp(seconds):
-    minutes, seconds = divmod(int(seconds), 60)
-    return f"{minutes}:{seconds:02d}"
+    hours, rest = divmod(int(seconds), 3600)
+    minutes, seconds = divmod(rest, 60)
+    return f"{hours}:{minutes:02d}:{seconds:02d}" if hours else f"{minutes}:{seconds:02d}"
 
 
 def stash_adapter():
@@ -52,6 +53,7 @@ def source_url(value):
 
 
 def probe_video(path, duration):
+    """Read projection and the video facts shown in the pane header."""
     projection = {}
     try:
         result = subprocess.run(
@@ -61,16 +63,21 @@ def probe_video(path, duration):
         projection = json.loads(result.stdout)
     except (OSError, ValueError, subprocess.SubprocessError):
         pass
-    if not duration:
-        try:
-            result = subprocess.run(
-                ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
-                capture_output=True, check=True, timeout=8, text=True,
-            )
-            duration = float(result.stdout)
-        except (OSError, ValueError, subprocess.SubprocessError):
-            pass
-    return projection, duration
+    video = {}
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width,height,codec_name:format=duration", "-of", "json", path],
+            capture_output=True, check=True, timeout=8, text=True,
+        )
+        probe = json.loads(result.stdout)
+        stream = (probe.get("streams") or [{}])[0]
+        video = {"width": stream.get("width"), "height": stream.get("height"),
+                 "video_codec": stream.get("codec_name")}
+        duration = duration or float(probe.get("format", {}).get("duration") or 0) or None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return projection, duration, video
 
 
 def version_info(entry):
@@ -460,10 +467,10 @@ class Controller(QObject):
 
     @Slot(str, object)
     def _receive_video(self, path, payload):
-        job, projection, duration = payload
+        job, projection, duration, video = payload
         if self._video_requests.get(path) is job:
             del self._video_requests[path]
-            self._metadata_by_item[path] = (projection, duration)
+            self._metadata_by_item[path] = (projection, duration, video)
             self._publish_items(path)
 
     def _describe(self, item):
@@ -471,7 +478,8 @@ class Controller(QObject):
             return {}
         item_id = str(item.id)
         path = str(item.path) if item.path else ""
-        projection, duration = self._metadata_by_item.get(path, ({}, item.duration))
+        projection, duration, video = self._metadata_by_item.get(path, ({}, item.duration, {}))
+        video = {key: item.identity.get(key) or video.get(key) for key in ("width", "height", "video_codec")}
         if item.projection_kind == "vr" and projection.get("kind") == "flat" and projection.get("source") != "override":
             projection = {**projection, "projection": "unknown"}
         kind = item.kind
@@ -479,11 +487,15 @@ class Controller(QObject):
         if item.image and kind != "video":
             kind = "image"
             media = item.image
-        overview = [file_size(item.size)] if item.size else []
+        facts = []
+        if video["width"] and video["height"]:
+            facts.append(f"{video['width']} × {video['height']}")
+        if video["video_codec"]:
+            facts.append(str(video["video_codec"]).upper())
         if duration:
-            overview.append(timestamp(duration))
+            facts.append(timestamp(duration))
         if item.scene_id is not None:
-            overview.append(f"{item.play_count} scene plays")
+            facts.append(f"{item.play_count} plays")
         frames = [{"pct": pct, "fraction": pct / 100,
                    "label": timestamp(duration * pct / 100) if duration else f"{pct}%"}
                   for pct in PERCENTAGES] if kind == "video" else []
@@ -505,7 +517,8 @@ class Controller(QObject):
             ),
             "kind": kind, "media": source_url(media), "text": text, "duration": (duration or 0) * 1000,
             "projection": projection or item.projection or {}, "size_label": file_size(item.size),
-            "details": " · ".join(overview), "frames": frames,
+            "details": " · ".join(facts), "frames": frames,
+            "aspect": (video["width"] / video["height"]) if video["width"] and video["height"] else 16 / 9,
             "versions": [version_info(entry) for entry in item.versions],
         }
 
@@ -580,6 +593,15 @@ class Controller(QObject):
     def both_size(self):
         return file_size(sum(int(item.size or 0) for item in self._pair() if item))
 
+    @Property(str, notify=changed)
+    def progress_label(self):
+        return self._session.progress_label if self._session else ""
+
+    @Property(float, notify=changed)
+    def progress_fraction(self):
+        done, total = self._session.progress if self._session else (0, 0)
+        return done / total if total else -1.0
+
     @Property(bool, notify=changed)
     def busy(self):
         return self._busy
@@ -590,8 +612,6 @@ class Controller(QObject):
 
     @Property(str, notify=changed)
     def message(self):
-        if self._busy:
-            return "Working…"
         return self._error or (self._session.status if self._session else "")
 
 

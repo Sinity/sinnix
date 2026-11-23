@@ -14,13 +14,14 @@ layout(std140, binding = 0) uniform Projection {
     int layoutMode;
     int swapEye;
     vec2 sourcePixels;
+    float viewAspect;
 };
 
 layout(binding = 1) uniform sampler2D source;
 
 void main() {
     vec2 view = qt_TexCoord0 * 2.0 - 1.0;
-    vec2 plane = view * tan(radians(viewFov * 0.5)) * vec2(1.0, 9.0 / 16.0);
+    vec2 plane = view * tan(radians(viewFov * 0.5)) * vec2(1.0, viewAspect);
     vec3 ray = normalize(vec3(plane, 1.0));
     float p = radians(pitch);
     ray.yz = mat2(cos(p), sin(p), -sin(p), cos(p)) * ray.yz;

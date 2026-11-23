@@ -47,7 +47,9 @@ public:
     Q_INVOKABLE void play();
     Q_INVOKABLE void pause();
     Q_INVOKABLE void stop();
-    Q_INVOKABLE void seek(qreal milliseconds);
+    // A scrub jumps to the nearest keyframe so pointer-driven seeking keeps up
+    // with 8K sources; an exact seek decodes to the requested frame.
+    Q_INVOKABLE void seek(qreal milliseconds, bool exact = true);
 
 signals:
     void sourceChanged();
@@ -86,6 +88,7 @@ private:
     bool m_playing = false;
     bool m_eof = false;
     std::optional<qreal> m_pendingSeek;
+    bool m_pendingExact = true;
     QString m_error;
     QString m_hardwareDecoder;
 };

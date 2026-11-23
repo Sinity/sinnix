@@ -20,9 +20,12 @@ def test_largest_local_reopens_with_winner_and_supports_undo(tmp_path, monkeypat
     session = Session(source, state_root=state)
     largest, second = session.pair
     assert (Path(largest.path).name, Path(second.path).name) == ("4.png", "3.png")
+    assert (session.status, session.progress, session.progress_label) == ("", (2, 5), "2 of 5 shown")
     with pytest.raises(RuntimeError, match="already open"):
         Session(source, state_root=state)
     session.prefer(1)
+    assert session.status == "Preferred right · next file on left"
+    assert session.progress == (3, 5)
     assert session.pair[1] == second
     assert Path(session.pair[0].path).name == "2.png"
     assert len(source.comparisons()) == 1
@@ -33,6 +36,7 @@ def test_largest_local_reopens_with_winner_and_supports_undo(tmp_path, monkeypat
     assert displayed(resumed) == prior
     assert resumed.can_undo
     resumed.undo()
+    assert resumed.status == "Undid prefer right"
     assert displayed(resumed) == (largest.id, second.id)
     assert not source.comparisons()
     resumed.skip()
@@ -47,6 +51,8 @@ def test_informative_domain_uses_existing_store_for_tie(tmp_path, monkeypatch):
     session = Session(source, state_root=tmp_path / "state")
     initial = displayed(session)
     session.tie()
+    assert session.status == "Recorded a tie"
+    assert session.progress_label == "2 pairs shown · 4 items"
     (judgment,) = source.comparisons()
     assert tuple(judgment.set) == initial
     assert judgment.winner is None
