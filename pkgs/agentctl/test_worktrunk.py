@@ -90,7 +90,7 @@ def test_agentctl_remove_uses_scoped_worktrunk_remove_contract(
     worktrunk_remove(Path("/repo"), "feature/owned", reap=False)
 
     assert calls == [
-        ("remove", "feature/owned", "--foreground", "-y", "--format", "json")
+        ("remove", "feature/owned", "--foreground", "--no-hooks", "-y", "--format", "json")
     ]
 
 

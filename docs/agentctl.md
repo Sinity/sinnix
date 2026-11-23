@@ -294,7 +294,7 @@ belongs outside the checkout. Job input, attempts and output in agentctl's
 state directory remain available.
 
 See [compiler targets](worktree-cleanup.md#compiler-targets) for per-checkout
-Cargo caches, dependency seeding and later cache eviction. Reserve a checkout
+Cargo caches, dependency seeding and their release with the checkout. Reserve a checkout
 between jobs with `git worktree lock --reason "owner and purpose" <path>`;
 release it with `git worktree unlock <path>` before requesting retirement.
 

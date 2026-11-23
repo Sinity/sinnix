@@ -11,8 +11,8 @@ import time
 import unittest
 from pathlib import Path
 
-PROVISION, SELECTOR, DIRENV, EVICT = map(Path, sys.argv[1:5])
-del sys.argv[1:5]
+PROVISION, SELECTOR, DIRENV = map(Path, sys.argv[1:4])
+del sys.argv[1:4]
 
 
 class CargoCache(unittest.TestCase):
@@ -497,103 +497,90 @@ class CargoCache(unittest.TestCase):
         self.run_bash(script)
         self.assertFalse(self.cache.exists())
 
-    def test_selection_records_its_checkout_for_eviction(self):
+    def test_selection_records_its_checkout_for_release(self):
         self.provision()
         target = Path(self.select().stdout.strip())
         marker = target.parent / "checkout"
         self.assertEqual(marker.read_text(), f"{self.checkout.resolve()}\n")
 
-    def make_target(self, checkout, *, idle_hours, marked=True):
+    def make_target(self, checkout, *, marked=True):
         name = hashlib.sha256(str(checkout).encode()).hexdigest()[:32]
         entry = self.cache / str(os.getuid()) / name
         (entry / "target" / "debug" / "deps").mkdir(parents=True)
         (entry / "target" / "debug" / ".cargo-lock").touch()
         if marked:
             (entry / "checkout").write_text(f"{checkout}\n")
-        stamp = time.time() - idle_hours * 3600
-        for path in [entry, *entry.rglob("*")]:
-            os.utime(path, (stamp, stamp))
         return entry
 
-    def evict(self):
-        env = dict(self.env, SINNIX_CARGO_MIN_IDLE_SECONDS=str(2 * 3600))
-        return self.run_bash(f'bash "{EVICT}"', env=env)
+    def release(self, *checkouts, check=True):
+        return self.select("--release", *map(str, checkouts), check=check)
 
-    def test_eviction_keeps_existing_checkouts_regardless_of_age_or_pressure(self):
+    def release_orphans(self):
+        return self.select("--release-orphans")
+
+    def test_existing_checkouts_keep_their_targets(self):
         self.provision()
-        # Both the old age rule and pressure rule must keep existing source.
-        old = self.make_target(self.checkout.resolve(), idle_hours=1000)
-        another = self.root / "another"
-        subprocess.run(["git", "init", "-q", str(another)], check=True)
-        idle = self.make_target(another, idle_hours=24)
+        own = self.make_target(self.checkout.resolve())
         no_git = self.root / "source-without-git"
         no_git.mkdir()
-        source = self.make_target(no_git, idle_hours=1000)
+        source = self.make_target(no_git)
         link = self.root / "retained-link"
         link.symlink_to(self.root / "unavailable-source", target_is_directory=True)
-        linked = self.make_target(link, idle_hours=1000)
-        (self.bin / "df").write_text(
-            f"#!{shutil.which('bash')}\nprintf 'Use%%\\n99%%\\n'\n"
-        )
-        (self.bin / "df").chmod(0o755)
-        self.evict()
-        for entry in (old, idle, source, linked):
+        linked = self.make_target(link)
+        self.release_orphans()
+        refused = self.release(self.checkout.resolve(), no_git, link, check=False)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("still exists", refused.stderr)
+        for entry in (own, source, linked):
             self.assertTrue((entry / "target" / "debug" / ".cargo-lock").exists())
 
-    def test_eviction_preserves_unknown_checkout_markers(self):
+    def test_unknown_checkout_markers_are_kept(self):
         self.provision()
-        unmarked = self.make_target(
-            self.root / "unmarked", idle_hours=1000, marked=False
-        )
-        mismatched = self.make_target(self.root / "mismatched", idle_hours=1000)
+        unmarked = self.make_target(self.root / "unmarked", marked=False)
+        mismatched = self.make_target(self.root / "mismatched")
         (mismatched / "checkout").write_text(str(self.root / "other") + "\n")
-        blank = self.make_target(self.root / "blank", idle_hours=1000)
+        blank = self.make_target(self.root / "blank")
         (blank / "checkout").write_text("")
-        relative = self.make_target(Path("relative"), idle_hours=1000)
-        linked = self.make_target(self.root / "linked-marker", idle_hours=1000)
+        relative = self.make_target(Path("relative"))
+        linked = self.make_target(self.root / "linked-marker")
         marker = linked / "checkout"
         contents = marker.read_text()
         marker.unlink()
         external = self.root / "external-marker"
         external.write_text(contents)
         marker.symlink_to(external)
-        # Marker edits must not make these unknown entries merely recent.
-        entries = (unmarked, mismatched, blank, relative, linked)
-        stamp = time.time() - 1000 * 3600
-        for entry in entries:
-            for path in [entry, *entry.rglob("*")]:
-                os.utime(path, (stamp, stamp), follow_symlinks=False)
-        self.evict()
-        for entry in entries:
+        self.release_orphans()
+        self.release(self.root / "mismatched", self.root / "linked-marker")
+        for entry in (unmarked, mismatched, blank, relative, linked):
             self.assertTrue(entry.exists())
 
-    def test_eviction_removes_only_old_removed_unlocked_targets(self):
+    def test_a_removed_checkout_releases_its_target_unless_a_build_holds_it(self):
         self.provision()
-        orphan = self.make_target(self.root / "removed", idle_hours=3)
-        recent = self.make_target(self.root / "just-removed", idle_hours=1)
-        built = self.make_target(self.root / "recent-build", idle_hours=3)
-        os.utime(built / "target" / "debug" / "deps", None)
-        busy = self.make_target(self.root / "busy", idle_hours=3)
+        removed = self.make_target(self.root / "removed")
+        other = self.make_target(self.root / "other-removed")
+        busy = self.make_target(self.root / "busy")
         lock = (busy / "target" / "debug" / ".cargo-lock").open()
         self.addCleanup(lock.close)
         fcntl.flock(lock, fcntl.LOCK_EX)
-        output = self.evict().stdout
-        self.assertFalse(orphan.exists())
-        for entry in (recent, built, busy):
-            self.assertTrue(entry.exists())
-        self.assertIn("checkout removed", output)
+        output = self.release(self.root / "removed").stdout
+        self.assertFalse(removed.exists())
+        self.assertTrue(other.exists(), "a named release touches only its checkout")
+        self.assertIn("released the target of removed checkout", output)
+        self.assertNotEqual(self.release(self.root / "busy", check=False).returncode, 0)
+        self.release_orphans()
+        self.assertFalse(other.exists())
+        self.assertTrue(busy.exists())
         self.assertFalse(
-            any(p.name.startswith(".evicting.") for p in orphan.parent.iterdir())
+            any(p.name.startswith(".evicting.") for p in removed.parent.iterdir())
         )
 
-    def test_interrupted_eviction_uses_the_same_checkout_and_holder_checks(self):
+    def test_an_interrupted_release_gets_the_same_checks(self):
         self.provision()
         entries = [
-            self.make_target(self.checkout.resolve(), idle_hours=1000),
-            self.make_target(self.root / "unknown", idle_hours=1000, marked=False),
-            self.make_target(self.root / "removed", idle_hours=3),
-            self.make_target(self.root / "recent", idle_hours=1),
-            self.make_target(self.root / "locked", idle_hours=3),
+            self.make_target(self.checkout.resolve()),
+            self.make_target(self.root / "unknown", marked=False),
+            self.make_target(self.root / "removed"),
+            self.make_target(self.root / "locked"),
         ]
         renamed = []
         for entry in entries:
@@ -603,10 +590,22 @@ class CargoCache(unittest.TestCase):
         lock = (renamed[-1] / "target" / "debug" / ".cargo-lock").open()
         self.addCleanup(lock.close)
         fcntl.flock(lock, fcntl.LOCK_EX)
-        self.evict()
+        self.release_orphans()
         self.assertFalse(renamed[2].exists())
-        for index in (0, 1, 3, 4):
+        for index in (0, 1, 3):
             self.assertTrue(renamed[index].exists())
+
+    def test_making_a_new_target_releases_those_of_removed_checkouts(self):
+        self.provision()
+        orphan = self.make_target(self.root / "removed-earlier")
+        kept = self.make_target(self.checkout.resolve())
+        shutil.rmtree(kept)  # this checkout's target is the one being made
+        (self.checkout / "Cargo.toml").write_text("")
+        self.select()
+        deadline = time.monotonic() + 10
+        while orphan.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertFalse(orphan.exists())
 
 
 if __name__ == "__main__":

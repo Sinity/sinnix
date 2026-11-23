@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # @sinnix-package
-# description: Select an isolated compiler target in the provisioned Realm cache subvolume
+# description: Select, and release with its checkout, an isolated compiler target in the provisioned Realm cache subvolume
 # runtimeInputs: bash coreutils findutils gawk git gnused util-linux
 set -euo pipefail
 
@@ -30,24 +30,124 @@ cargo_needs_target() {
   return 1
 }
 
+usage() {
+  echo "usage: sinnix-cargo-target [--select-only | --cargo ARGS... | --release CHECKOUT... | --release-orphans]" >&2
+  exit 2
+}
+
+cache_root="${SINNIX_CARGO_CACHE_ROOT:-/realm/state/cache/cargo}"
+hash_of() { printf '%s' "$1" | sha256sum | cut -c1-32; }
+
+# A target belongs to its checkout and goes when the checkout goes. Each entry
+# is <cache>/<uid>/<hash of the checkout path>/{target,checkout}; the
+# `checkout` marker names the path. An entry whose marker is missing, a link,
+# or names a path with another hash is not ours to judge and stays.
+entry_checkout() {
+  local entry="$1" name checkout
+  name="$(basename "$entry")"
+  name="${name#.evicting.}"
+  [[ "$name" =~ ^[0-9a-f]{32}$ ]] || return 1
+  [ -f "$entry/checkout" ] && [ ! -L "$entry/checkout" ] || return 1
+  checkout="$(head -n 1 "$entry/checkout")"
+  [[ "$checkout" = /* ]] || return 1
+  [ "$(hash_of "$checkout")" = "$name" ] || return 1
+  printf '%s\n' "$checkout"
+}
+
+# Remove one entry while none of its Cargo build locks is held. The entry is
+# renamed under the primary lock first, so a build that starts afterwards
+# selects a fresh target instead of writing into one being deleted; an
+# interrupted removal leaves the `.evicting.` name, which the same checks
+# release later.
+release_entry() {
+  local entry="$1" checkout="$2" lock trash name
+  while IFS= read -r lock; do
+    if ! flock --nonblock "$lock" true; then
+      echo "sinnix-cargo-target: a build holds the target of $checkout; kept" >&2
+      return 1
+    fi
+  done < <(find "$entry/target" -maxdepth 3 -name .cargo-lock 2>/dev/null)
+  name="$(basename "$entry")"
+  trash="$(dirname "$entry")/.evicting.${name#.evicting.}"
+  lock="$entry/target/debug/.cargo-lock"
+  if [ "$entry" != "$trash" ]; then
+    if [ -e "$lock" ]; then
+      flock --nonblock "$lock" mv -T -- "$entry" "$trash" || return 1
+    else
+      mv -T -- "$entry" "$trash"
+    fi
+  fi
+  rm -rf -- "$trash"
+  echo "sinnix-cargo-target: released the target of removed checkout $checkout"
+}
+
+# Source left without Git metadata, or a dangling symlink, still counts as the
+# checkout: only a path that is gone has released its build output.
+checkout_gone() { [ ! -e "$1" ] && [ ! -L "$1" ]; }
+
+release() {
+  local dir="$cache_root/$(id -u)" checkout entry name status=0
+  for checkout in "$@"; do
+    [[ "$checkout" = /* ]] || {
+      echo "sinnix-cargo-target: not an absolute path: $checkout" >&2
+      status=1
+      continue
+    }
+    checkout="${checkout%/}"
+    if ! checkout_gone "$checkout"; then
+      echo "sinnix-cargo-target: $checkout still exists; its target stays" >&2
+      status=1
+      continue
+    fi
+    name="$(hash_of "$checkout")"
+    for entry in "$dir/$name" "$dir/.evicting.$name"; do
+      [ -d "$entry" ] && [ ! -L "$entry" ] || continue
+      [ "$(entry_checkout "$entry" || true)" = "$checkout" ] || continue
+      release_entry "$entry" "$checkout" || status=1
+    done
+  done
+  return "$status"
+}
+
+# Targets whose checkout was removed by something other than `wt remove` (a
+# bare `git worktree remove`, `rm -rf`): released whenever a new target is
+# made, so the cache never holds more than the live checkouts plus whatever a
+# running build still locks.
+release_orphans() {
+  local dir="$cache_root/$(id -u)" entry checkout
+  [ -d "$dir" ] || return 0
+  for entry in "$dir"/*/ "$dir"/.evicting.*/; do
+    [ -d "$entry" ] || continue
+    entry="${entry%/}"
+    checkout="$(entry_checkout "$entry")" || continue
+    checkout_gone "$checkout" || continue
+    release_entry "$entry" "$checkout" || true
+  done
+}
+
 populate=1
 case "${1:-}" in
 --select-only)
-  [ "$#" -eq 1 ] || {
-    echo "usage: sinnix-cargo-target [--select-only | --cargo ARGS...]" >&2
-    exit 2
-  }
+  [ "$#" -eq 1 ] || usage
   populate=0
   ;;
 --cargo)
   shift
   if ! cargo_needs_target "$@"; then populate=0; fi
   ;;
-"") ;;
-*)
-  echo "usage: sinnix-cargo-target [--select-only | --cargo ARGS...]" >&2
-  exit 2
+--release)
+  shift
+  [ "$#" -ge 1 ] || usage
+  release "$@"
+  exit
   ;;
+--release-orphans)
+  [ "$#" -eq 1 ] || usage
+  release_orphans
+  exit 0
+  ;;
+"") ;;
+*) usage ;;
 esac
 
 if [ -n "${CARGO_TARGET_DIR:-}" ]; then
@@ -55,7 +155,6 @@ if [ -n "${CARGO_TARGET_DIR:-}" ]; then
   exit 0
 fi
 
-cache_root="${SINNIX_CARGO_CACHE_ROOT:-/realm/state/cache/cargo}"
 # Btrfs subvolume roots have inode 256. `subvolume show` also searches trees
 # that require privileges unavailable to the developer process.
 if [ -L "$cache_root" ] || [ ! -d "$cache_root" ] ||
@@ -65,8 +164,7 @@ if [ -L "$cache_root" ] || [ ! -d "$cache_root" ] ||
   exit 1
 fi
 target_of() {
-  printf '%s/%s/%s/target' "$cache_root" "$(id -u)" \
-    "$(printf '%s' "$1" | sha256sum | cut -c1-32)"
+  printf '%s/%s/%s/target' "$cache_root" "$(id -u)" "$(hash_of "$1")"
 }
 
 checkout="$(git rev-parse --show-toplevel)"
@@ -77,6 +175,8 @@ if [ "$populate" -eq 0 ]; then
   printf '%s\n' "$target"
   exit 0
 fi
+new_target=0
+[ -d "$target" ] || new_target=1
 mkdir -p "$target"
 
 # Artifact filenames are not content hashes: two builds can use the same
@@ -175,8 +275,8 @@ if [ -f "$checkout/Cargo.lock" ] &&
   done
 fi
 
-# sinnix-cargo-target-evict reads the checkout from this marker, and its mtime
-# as the last selection; rewriting it on every selection keeps both current.
+# Release reads the checkout from this marker; `agentctl worktree build-output`
+# reads its mtime as the last selection. Rewriting it keeps both current.
 printf '%s\n' "$checkout" >"$(dirname "$target")/checkout"
 # Cargo tags only a target directory it creates itself, and this one exists
 # before Cargo runs. Worktree cleanup retires only a tagged target.
@@ -185,5 +285,11 @@ if [ ! -e "$target/CACHEDIR.TAG" ]; then
     '# A Cargo target selected by sinnix-cargo-target.' \
     '# For information about cache directory tags see https://bford.info/cachedir/' \
     >"$target/CACHEDIR.TAG"
+fi
+if [ "$new_target" -eq 1 ]; then
+  # Detached at idle priority: the build that asked for a target never waits
+  # on deleting another checkout's.
+  setsid -f ionice -c 3 "$(realpath "${BASH_SOURCE[0]}")" --release-orphans \
+    >/dev/null 2>&1 </dev/null || true
 fi
 printf '%s\n' "$target"

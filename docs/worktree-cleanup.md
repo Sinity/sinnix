@@ -17,7 +17,7 @@ removal; the result names its task ID, job label and state. Other processes are
 neither inspected nor stopped and can lose their working directory.
 
 The command saves HEAD under
-`refs/agentctl/recovery/checkouts/<path-hash>/<HEAD>`, runs `wt remove` in the
+`refs/agentctl/recovery/checkouts/<path-hash>/<HEAD>`, runs `wt remove --no-hooks` in the
 foreground without terminating processes, then removes the checkout's exact
 Cargo cache directory and its local and remote branches. Branch deletion
 requires each branch still to name the published HEAD. A failure leaves its
@@ -77,17 +77,21 @@ Without reflinks or an idle source the target keeps what it has. The selector wr
 exists first), and on every selection rewrites `checkout` beside the target
 with the checkout path. That marker's mtime is the target's last selection.
 
-The hourly `sinnix-cargo-target-evict` user service removes a target only after
-its marked checkout path is gone. An existing checkout keeps its target,
-regardless of idle age or filesystem use; a source directory without `.git`
-still counts as existing. Unknown or mismatched checkout markers are retained.
-Interrupted renamed entries meet the same checks.
+A target goes with its checkout. `sinnix-cargo-target --release CHECKOUT`
+removes the target of a checkout path that is gone; worktrunk's user
+`post-remove` hook runs it for every `wt remove`, and `agentctl worktree clean`
+removes the target itself as part of its result. A checkout removed another
+way (a bare `git worktree remove`, `rm -rf`) leaves its target until the next
+new target is made: making one starts `sinnix-cargo-target --release-orphans`
+in the background at idle I/O priority, which releases every target whose
+marked checkout path is gone.
 
-The grace period uses the newest marker, target and profile `deps/` mtime.
-`sinnix.features.dev.languages.cargoCache.minIdleHours` keeps recently selected
-or built targets after checkout removal. Cargo build locks also prevent removal.
-A removable target is renamed under its build lock before deletion, so a build
-that starts later selects a fresh target.
+An existing checkout keeps its target, regardless of idle age or filesystem
+use; a source directory without `.git` or a dangling symlink still counts as
+existing. Unknown or mismatched checkout markers are retained, and a held Cargo
+build lock keeps a target. A released target is renamed under its build lock
+before deletion, so a build that starts later selects a fresh target; an
+interrupted removal leaves the `.evicting.` name, which meets the same checks.
 
 Managed sessions and Cargo direnv environments default to `CARGO_INCREMENTAL=0`.
 An explicit `CARGO_INCREMENTAL=1` enables incremental rebuilds. Declared AgentCTL operation values
@@ -115,7 +119,7 @@ target lock.
 and were last used at least N days ago, and lists it; `--apply` removes it.
 Sources, Git state and the checkout itself are never touched, and the next
 build recreates what was removed. A compiler cache entry is renamed under its
-build lock before deletion, as the evict service does.
+build lock before deletion, as `sinnix-cargo-target --release` does.
 
 Names matching `sinnix.services.agentctl.buildOutputExempt` (shell patterns)
 are listed as exempt and nothing under them is read, sized or removed. The

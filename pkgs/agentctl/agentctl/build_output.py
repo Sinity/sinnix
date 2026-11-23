@@ -262,7 +262,7 @@ def _remove_cache_entry(entry: Path) -> None:
     """Remove one compiler cache entry no build is using.
 
     The entry is renamed while its primary build lock is held, as
-    `sinnix-cargo-target-evict` does, so a build that starts afterwards
+    `sinnix-cargo-target --release` does, so a build that starts afterwards
     selects a fresh target instead of writing into one being deleted.
     """
     trash = entry.with_name(f".evicting.{entry.name.removeprefix('.evicting.')}")

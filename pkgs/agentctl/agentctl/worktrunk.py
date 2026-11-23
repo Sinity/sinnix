@@ -32,7 +32,10 @@ from .limits import CALL_TIMEOUT_SECONDS
 
 # Removal is asynchronous by default; a caller that drops a workspace and then
 # reports it gone must observe the removal, so every call passes --foreground.
-_REMOVE_ARGUMENTS = ("--foreground", "-y", "--format", "json")
+# Worktree cleanup releases the checkout's compiler target itself and reports
+# it, so the user's post-remove hook, which does the same for a plain
+# `wt remove`, does not race it in the background.
+_REMOVE_ARGUMENTS = ("--foreground", "--no-hooks", "-y", "--format", "json")
 
 # `--porcelain -z` terminates every attribute with a NUL and every worktree
 # with an empty one, so a path is read exactly as Git holds it.

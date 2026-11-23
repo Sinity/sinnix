@@ -115,6 +115,8 @@ mkFeatureModule {
             };
             # Worktrees for every repo land under /realm/worktree as
             # <repo>-<branch>; project hooks live in each repo's .config/wt.toml.
+            # A removed worktree takes its compiler target with it: the target
+            # lives in the Cargo cache subvolume, keyed by the checkout path.
             xdg.configFile."worktrunk/config.toml".text = ''
               worktree-path = "/realm/worktree/{{ repo }}-{{ branch | sanitize }}"
 
@@ -123,6 +125,9 @@ mkFeatureModule {
 
               [remove]
               delete-branch = true
+
+              [post-remove]
+              build-output = "if command -v sinnix-cargo-target >/dev/null; then sinnix-cargo-target --release {{ worktree_path }}; fi"
             '';
             systemd.user.services.pueued = {
               # The daemon is only the queue coordinator. Each task's

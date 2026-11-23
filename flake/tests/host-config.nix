@@ -90,7 +90,7 @@
             provision = pkgs.writeText "cargo-cache-provision" unit.script;
           }
           ''
-            python ${./cargo_cache.py} "$provision" ${../../scripts/sinnix-cargo-target} ${../../scripts/sinnix-direnvrc} ${../../scripts/sinnix-cargo-target-evict}
+            python ${./cargo_cache.py} "$provision" ${../../scripts/sinnix-cargo-target} ${../../scripts/sinnix-direnvrc}
             explicit="$TMPDIR/explicit-target"
             test "$(CARGO_TARGET_DIR="$explicit" sinnix-cargo-target)" = "$explicit"
             test ! -e "$explicit"
