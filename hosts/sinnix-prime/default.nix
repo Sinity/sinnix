@@ -125,11 +125,12 @@
     polylogue = {
       enable = true;
       # A fresh archive, filled by the daemon from the inputs on this host.
-      # The archive of October and November stays whole at its own path,
-      # read by nothing, until the history import brings it in.
-      dataHome = "/realm/state/polylogue-live/data-20261123";
+      # Earlier archives stay whole at their own paths, read by nothing,
+      # until the history import brings them in.
+      dataHome = "/realm/state/polylogue-live/data-20261124";
       retainedArchives = [
         "/realm/state/polylogue-live/data-20261111/polylogue"
+        "/realm/state/polylogue-live/data-20261123/polylogue"
       ];
       # The Python archive lives on the realm NVMe volume, not in the
       # impermanent home-directory default.
