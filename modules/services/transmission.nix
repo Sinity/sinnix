@@ -1,6 +1,6 @@
 # Transmission BitTorrent Client
 #
-# Downloads to torrentInbox/tdown, uses systemd hardening, and exposes RPC
+# Downloads to torrentInbox/torrent, uses systemd hardening, and exposes RPC
 # only on localhost for remote-only desktop clients.
 # RPC accessible only on localhost (no auth required).
 {
@@ -40,8 +40,8 @@ mkServiceModule {
       username = config.sinnix.user.name;
       neoOuterRealmMount = "neo\\x2douter\\x2drealm.mount";
       transmissionConfigDir = "/var/lib/transmission/.config/transmission-daemon";
-      torrentDownloadDir = "${torrentInbox}/tdown";
-      torrentPartialDir = "${torrentInbox}/tdown_partial";
+      torrentDownloadDir = "${torrentInbox}/torrent";
+      torrentPartialDir = "${torrentDownloadDir}/partial";
       torrentMoveDir = "${realmRoot}/inbox";
     in
     {

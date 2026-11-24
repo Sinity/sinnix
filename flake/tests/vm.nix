@@ -118,7 +118,7 @@ in
             machine.succeed("systemctl is-enabled --quiet transmission.service")
             machine.fail("systemctl status transmission-autostart.timer")
             machine.fail("systemctl status transmission-autostart.service")
-            machine.wait_until_succeeds("test -d /neo-outer-realm/inbox")
+            machine.wait_until_succeeds("test -d /neo-outer-realm/inbox/torrent/partial")
 
             machine.wait_until_succeeds("curl -sS -D /tmp/transmission.headers -o /tmp/transmission.body http://127.0.0.1:9091/transmission/rpc || true; grep -q '409 Conflict' /tmp/transmission.headers")
             machine.succeed('session_id=$(awk -F": " \'/X-Transmission-Session-Id/ {print $2}\' /tmp/transmission.headers | tr -d "\\r"); test -n "$session_id"')

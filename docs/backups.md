@@ -272,7 +272,8 @@ source/WIP and analysis results stay covered. Exclusions name the public
 reference/catalogue caches, downloaded tools and dependency environments;
 unclassified cache children remain covered.
 
-`/neo-outer-realm/inbox/p2` is unbacked bulk intake by operator choice.
+`/neo-outer-realm/inbox/clips` (formerly `inbox/p2`, the media intake moved
+off `/realm/inbox/download/p`) is unbacked bulk intake by operator choice.
 
 Polylogue hooks are read directly from a verified read-only Btrfs cut through
 a private temporary path view that preserves `realm/state/polylogue/hooks` in
