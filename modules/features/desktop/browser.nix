@@ -269,6 +269,10 @@ mkFeatureModule {
                   --same-dir
                   --property=ExitType=cgroup
                   --property=MemoryMin=${toString helpers.data.runtimeDefaults.desktopMemory.chromeMin}M
+                  # Trial (2026-11-24): over a hundred renderers of mostly
+                  # same-site tabs; keep only if ksm/general_profit reaches
+                  # 1 GiB at under 2% of a core for ksmd (workstation.nix).
+                  --property=MemoryKSM=yes
                   --setenv=SINNIX_CHROME_SCOPED=1
                 )
 

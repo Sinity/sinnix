@@ -18,7 +18,7 @@ the tool slice's ceiling exceeds that remainder.
 | ----------------------------------- | ---- | -------------------------------------------------------------------------- |
 | Physical memory (`MemTotal`)        | 31.2 |                                                                            |
 | Kernel memory and free-page reserve | 2.0  | uncharged slab, vmalloc and stacks (~1.3), `min_free_kbytes` and watermarks |
-| zram store                          | 3.0  | zram device size at the measured 3:1 compression                           |
+| zram store                          | 4.75 | zram device size (16 GiB) at the measured 3.3:1 compression                |
 | Desktop: apps, session, shell       | 6.5  | `MemoryMin` on app (4), session (1.5) and desktop-shell (1)               |
 | PostgreSQL                          | 5.5  | `MemoryLow`; 4.3 of it are the huge pages of shared buffers              |
 | sinexd                              | 1.0  | `MemoryLow`                                                                |
@@ -28,12 +28,12 @@ the tool slice's ceiling exceeds that remainder.
 | Other system services               | 1.0  | `MemoryLow` on `system.slice`                                             |
 | Recovery services                   | 0.25 | `MemoryLow` on `system-critical.slice`                                    |
 | User capture producers              | 0.5  | `MemoryLow` on the user `background.slice`                                |
-| **Left for agent work**             | 9.4  |                                                                            |
+| **Left for agent work**             | 7.65 |                                                                            |
 
 Inside agent work: interactive CLIs (`agent-cli.slice`) keep 3 GiB protected
 and have no ceiling; tool commands and MCP servers (`agent-tool.slice`)
-stop at 5; the job plane (`agent-ctl.slice`) stops at 8, room for the largest
-single job (a Sinnix check peaks at 6.4 GiB). A pool slice sets its own limit only where it is tighter than
+stop at 5; the job plane (`agent-ctl.slice`) stops at 7.5, room for the largest
+single job (a Sinex focused build peaks at 6.9 GiB). A pool slice sets its own limit only where it is tighter than
 the plane's.
 
 Each live service also has a ceiling that ends a leak inside its own unit:
@@ -128,11 +128,13 @@ high.
 
 ### Swap
 
-zram is the only swap. Its store is part of the budget: the 9 GiB device holds
-about 3 GiB of RAM at the measured 3:1 ratio. The device size is the only
+zram is the only swap. Its store is part of the budget: the 16 GiB device holds
+about 4.75 GiB of RAM at the measured 3.3:1 ratio. Swapping to it is far
+cheaper than re-reading files, so `vm.swappiness` is 170: the kernel compresses
+cold anonymous memory before it drops page cache. The device size is the only
 bound. A resident limit below it would make swap writes fail while swap still
 reads as free, so the kernel would keep reclaiming and no swap-based kill rule
-would fire. Pages that compress worse than 3:1 grow the store past its line,
+would fire. Pages that compress worse than 3.3:1 grow the store past its line,
 and that is paid for like any other overrun. The tool slice and the job plane
 may each swap 2 GiB, sinexd 2 GiB, the Polylogue daemon 1 GiB; interactive
 sessions are not limited, so idle ones compress into zram.

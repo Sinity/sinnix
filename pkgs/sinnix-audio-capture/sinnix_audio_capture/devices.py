@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import subprocess
 import threading
@@ -288,6 +289,41 @@ def write_device_sidecar(output_dir: Path, device: AudioDevice) -> None:
     )
 
 
+def _segment_stamp(name: str) -> str:
+    """The UTC-hour stamp of a segment name (its last dash-separated part)."""
+    return name.rsplit("-", 1)[-1].split(".", 1)[0]
+
+
+def _newest_segment_mtime(channel_dir: Path) -> float:
+    """Latest mtime among the newest hour's segments, 0.0 if there are none.
+
+    A channel holds one file per hour or more, thousands over its life. The
+    probe runs every few minutes, and stat-ing all of them re-read the
+    directory's metadata from disk on every run; the names alone say which
+    hour is newest, so only that hour's parts are stat-ed.
+    """
+    try:
+        names = [
+            entry.name
+            for entry in os.scandir(channel_dir)
+            if entry.name.startswith("audio-") and ".opus" in entry.name
+        ]
+    except OSError:
+        return 0.0
+    if not names:
+        return 0.0
+    latest = max(_segment_stamp(name) for name in names)
+    newest = 0.0
+    for name in names:
+        if _segment_stamp(name) != latest:
+            continue
+        try:
+            newest = max(newest, (channel_dir / name).stat().st_mtime)
+        except OSError:
+            continue
+    return newest
+
+
 def probe_coverage(
     *,
     capture_root: Path,
@@ -318,14 +354,7 @@ def probe_coverage(
         if matches_any(device, patterns.get(device.kind, [])) is not None:
             excluded.append(device.key)
             continue
-        channel_dir = audio_dir / device.channel
-        newest = 0.0
-        if channel_dir.is_dir():
-            for path in channel_dir.glob("audio-*.opus*"):
-                try:
-                    newest = max(newest, path.stat().st_mtime)
-                except OSError:
-                    continue
+        newest = _newest_segment_mtime(audio_dir / device.channel)
         if newest and (now - newest) <= max_age_seconds:
             covered.append(device.key)
         else:

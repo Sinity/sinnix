@@ -171,53 +171,81 @@ _SEG_RE = re.compile(r"^([0-9.]+)\s*--\s*([0-9.]+):\s*(.+)$")
 
 
 def transcribe_file(path: Path, *, vad: bool = True) -> dict:
-    """One audio file to a transcript record.
+    """One audio file to a transcript record (see transcribe_files)."""
+    return transcribe_files([path], vad=vad)[0]
+
+
+#: Files per recogniser run in a recordings pass. One run loads the model once
+#: for all of their windows; the bound keeps the scratch WAVs (32 KB per second
+#: of audio) and the work lost to one crashed run small.
+BATCH_FILES = 32
+
+
+def transcribe_files(paths: list[Path], *, vad: bool = True) -> list[dict]:
+    """Audio files to transcript records, in order.
 
     VAD-gated by default. Without the gate a silent hour still costs an hour of
     encoder time; with it, only the speech is decoded and the record carries
     how much speech there was, so silence is measured rather than assumed.
+
+    Every window of every file goes to one recogniser process, which loads
+    the 641 MB model once. A process per window re-read the model from disk
+    about once a minute under memory pressure (490 GiB in 13 h on 2026-11-24).
+    The batch's real-time factor is recorded on each of its files.
     """
     with tempfile.TemporaryDirectory() as tmp:
-        wav = Path(tmp) / "in.wav"
-        try:
-            audio_seconds = to_wav(path, wav)
-        except Undecodable as exc:
-            return {
-                "schema": SCHEMA,
-                "file": path.name,
-                "undecodable": True,
-                "error": str(exc),
-                "audio_seconds": None,
-                "speech_seconds": 0,
-                "segments": [],
-                "text": "",
-                "transcribed_at": utc_ts(),
-            }
-
-        common = [
-            f"--encoder={PARAKEET}/encoder.int8.onnx",
-            f"--decoder={PARAKEET}/decoder.int8.onnx",
-            f"--joiner={PARAKEET}/joiner.int8.onnx",
-            f"--tokens={PARAKEET}/tokens.txt",
-            "--model-type=nemo_transducer",
-            f"--num-threads={THREADS}",
-        ]
-        if vad:
-            binary = ["sherpa-onnx-vad-with-offline-asr", f"--silero-vad-model={SILERO}"]
-        else:
-            binary = ["sherpa-onnx-offline"]
-
-        started = dt.datetime.now()
-        segments: list[dict] = []
-        errors: list[str] = []
-        for offset, window in _windows(wav, audio_seconds, Path(tmp)):
-            proc = subprocess.run([*binary, *common, str(window)], capture_output=True, text=True)
-            if proc.returncode != 0:
-                errors.append(f"window at {offset:.0f}s: " + (proc.stderr or "").strip()[-200:])
+        jobs: list[dict] = []
+        for index, path in enumerate(paths):
+            scratch = Path(tmp) / str(index)
+            scratch.mkdir()
+            wav = scratch / "in.wav"
+            try:
+                audio_seconds = to_wav(path, wav)
+            except Undecodable as exc:
+                jobs.append({"path": path, "undecodable": str(exc)})
                 continue
-            segments.extend(_shifted(_parse_segments(proc.stdout, vad=vad), offset))
+            jobs.append(
+                {
+                    "path": path,
+                    "audio_seconds": audio_seconds,
+                    "windows": _windows(wav, audio_seconds, scratch),
+                    "segments": [],
+                    "errors": [],
+                }
+            )
+        windows = [
+            (job, offset, window)
+            for job in jobs
+            if "windows" in job
+            for offset, window in job["windows"]
+        ]
+        started = dt.datetime.now()
+        if vad:
+            _decode_with_vad(windows)
+        else:
+            _decode_without_vad(windows)
         elapsed = (dt.datetime.now() - started).total_seconds()
 
+    total_audio = sum(job.get("audio_seconds") or 0 for job in jobs)
+    rtf = round(elapsed / total_audio, 4) if total_audio else None
+    return [_record(job, rtf) for job in jobs]
+
+
+def _record(job: dict, rtf: float | None) -> dict:
+    path = job["path"]
+    if "undecodable" in job:
+        return {
+            "schema": SCHEMA,
+            "file": path.name,
+            "undecodable": True,
+            "error": job["undecodable"],
+            "audio_seconds": None,
+            "speech_seconds": 0,
+            "segments": [],
+            "text": "",
+            "transcribed_at": utc_ts(),
+        }
+    segments, errors, audio_seconds = job["segments"], job["errors"], job["audio_seconds"]
     if errors and not segments:
         return {
             "schema": SCHEMA,
@@ -226,7 +254,6 @@ def transcribe_file(path: Path, *, vad: bool = True) -> dict:
             "audio_seconds": audio_seconds,
             "transcribed_at": utc_ts(),
         }
-
     speech_seconds = round(sum(s["end"] - s["start"] for s in segments), 2)
     return {
         "schema": SCHEMA,
@@ -236,10 +263,85 @@ def transcribe_file(path: Path, *, vad: bool = True) -> dict:
         "speech_seconds": speech_seconds,
         "segments": segments,
         "text": " ".join(s["text"] for s in segments).strip(),
-        "rtf": round(elapsed / audio_seconds, 4) if audio_seconds else None,
+        "rtf": rtf if audio_seconds else None,
         **({"window_errors": errors} if errors else {}),
         "transcribed_at": utc_ts(),
     }
+
+
+def _recogniser_args() -> list[str]:
+    return [
+        f"--encoder={PARAKEET}/encoder.int8.onnx",
+        f"--decoder={PARAKEET}/decoder.int8.onnx",
+        f"--joiner={PARAKEET}/joiner.int8.onnx",
+        f"--tokens={PARAKEET}/tokens.txt",
+        "--model-type=nemo_transducer",
+        f"--num-threads={THREADS}",
+    ]
+
+
+#: Block markers from the batch VAD binary (the sherpa-onnx overlay patch):
+#: `#file N` opens the stdout block of its Nth wave argument, `#error N why`
+#: says that file could not be read.
+_FILE_RE = re.compile(r"^#file (\d+)$")
+_ERROR_RE = re.compile(r"^#error (\d+) (.*)$")
+
+
+def _decode_with_vad(windows: list[tuple[dict, float, Path]]) -> None:
+    """Decode every window in as few recogniser runs as possible.
+
+    A run that dies (an OOM kill, a crash) loses only the window it was on:
+    that window is recorded as an error and the next run resumes after it.
+    """
+    binary = ["sherpa-onnx-vad-with-offline-asr", f"--silero-vad-model={SILERO}"]
+    remaining = windows
+    while remaining:
+        proc = subprocess.run(
+            [*binary, *_recogniser_args(), *(str(window) for _, _, window in remaining)],
+            capture_output=True,
+            text=True,
+        )
+        blocks: dict[int, list[str]] = {}
+        current = 0
+        for line in proc.stdout.splitlines():
+            if m := _FILE_RE.match(line):
+                current = int(m.group(1))
+                blocks[current] = []
+            elif m := _ERROR_RE.match(line):
+                job, offset, _ = remaining[int(m.group(1)) - 1]
+                job["errors"].append(f"window at {offset:.0f}s: {m.group(2)}"[:200])
+                blocks.pop(int(m.group(1)), None)
+            elif current in blocks:
+                blocks[current].append(line)
+        # On a failed run the window whose block opened last is the one it
+        # died on; everything before it finished.
+        finished = len(remaining) if proc.returncode == 0 else max(current, 1) - 1
+        for number, lines in blocks.items():
+            if number > finished:
+                continue
+            job, offset, _ = remaining[number - 1]
+            job["segments"].extend(_shifted(_parse_segments("\n".join(lines), vad=True), offset))
+        if proc.returncode == 0:
+            return
+        job, offset, _ = remaining[finished]
+        job["errors"].append(
+            f"window at {offset:.0f}s: " + (proc.stderr or f"exit {proc.returncode}").strip()[-200:]
+        )
+        remaining = remaining[finished + 1 :]
+
+
+def _decode_without_vad(windows: list[tuple[dict, float, Path]]) -> None:
+    """The ungated path (`transcribe --no-vad`): one run per window."""
+    for job, offset, window in windows:
+        proc = subprocess.run(
+            ["sherpa-onnx-offline", *_recogniser_args(), str(window)],
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0:
+            job["errors"].append(f"window at {offset:.0f}s: " + (proc.stderr or "").strip()[-200:])
+            continue
+        job["segments"].extend(_shifted(_parse_segments(proc.stdout, vad=False), offset))
 
 
 #: Longest stretch handed to the recogniser at once. The VAD binary does not
@@ -346,8 +448,7 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
     if not models_present():
         print("stt: models missing — run `sinnix stt models`", file=sys.stderr)
         return 1
-    for f in args.files:
-        record = transcribe_file(Path(f), vad=not args.no_vad)
+    for record in transcribe_files([Path(f) for f in args.files], vad=not args.no_vad):
         print(json.dumps(record, ensure_ascii=False, indent=2 if args.pretty else None))
     return 0
 
@@ -462,6 +563,7 @@ def cmd_recordings(args: argparse.Namespace) -> int:
     with_speech = 0
     undecodable = 0
 
+    pending: list[tuple[str, Path, int]] = []
     for lane in selected:
         root = available.get(lane)
         if root is None or not root.is_dir():
@@ -474,9 +576,14 @@ def cmd_recordings(args: argparse.Namespace) -> int:
             size = path.stat().st_size
             if (lane, path.name, size) in seen:
                 continue
-            if args.limit and done >= args.limit:
+            if args.limit and len(pending) >= args.limit:
                 break
-            record = transcribe_file(path)
+            pending.append((lane, path, size))
+
+    for first in range(0, len(pending), BATCH_FILES):
+        batch = pending[first : first + BATCH_FILES]
+        records = transcribe_files([path for _, path, _ in batch])
+        for (lane, path, size), record in zip(batch, records):
             record["lane"] = lane
             record["bytes"] = size
 

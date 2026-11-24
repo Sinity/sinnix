@@ -26,11 +26,14 @@ def recordings(tmp_path, monkeypatch):
     monkeypatch.setenv("SINNIX_PHONE_LAKE", str(tmp_path / "phone"))
     calls = []
 
-    def transcribe(path):
-        calls.append(path)
-        return {"file": str(path), "speech_seconds": 1, "text": path.read_text()}
+    def transcribe(paths, **kwargs):
+        calls.extend(paths)
+        return [
+            {"file": str(path), "speech_seconds": 1, "text": path.read_text()}
+            for path in paths
+        ]
 
-    monkeypatch.setattr(module, "transcribe_file", transcribe)
+    monkeypatch.setattr(module, "transcribe_files", transcribe)
     phone = tmp_path / "phone" / "ambient" / "same.opus"
     mic = module.ACTIVITY / "audio" / "recording" / "src-mic" / "same.opus"
     for path, text in ((phone, "room"), (mic, "desk")):
@@ -384,3 +387,51 @@ def test_windowed_segments_move_back_to_recording_time(recordings):
         }
     ]
     assert module._windows(Path("x.wav"), 60.0, Path(".")) == [(0.0, Path("x.wav"))]
+
+
+def _batch_job():
+    return {"segments": [], "errors": []}
+
+
+def test_batch_decoder_splits_blocks_by_window(recordings, monkeypatch):
+    module, *_ = recordings
+    a, b = _batch_job(), _batch_job()
+    windows = [(a, 0.0, Path("a0.wav")), (a, 60.0, Path("a1.wav")), (b, 0.0, Path("b0.wav"))]
+    runs = []
+
+    def run(argv, **kwargs):
+        runs.append([arg for arg in argv if arg.endswith(".wav")])
+        out = "#file 1\n1.000 -- 2.000: one\n#file 2\n0.500 -- 1.500: two\n#file 3\n#error 3 failed to read b0.wav\n"
+        return module.subprocess.CompletedProcess(argv, 0, out, "")
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    module._decode_with_vad(windows)
+    assert runs == [["a0.wav", "a1.wav", "b0.wav"]]
+    assert [(s["start"], s["text"]) for s in a["segments"]] == [(1.0, "one"), (60.5, "two")]
+    assert b["segments"] == [] and b["errors"] == ["window at 0s: failed to read b0.wav"]
+
+
+def test_batch_decoder_resumes_after_the_window_a_run_died_on(recordings, monkeypatch):
+    module, *_ = recordings
+    job = _batch_job()
+    windows = [(job, 60.0 * i, Path(f"w{i}.wav")) for i in range(4)]
+    runs = []
+
+    def run(argv, **kwargs):
+        wavs = [arg for arg in argv if arg.endswith(".wav")]
+        runs.append(wavs)
+        if len(runs) == 1:
+            out = "#file 1\n1.000 -- 2.000: kept\n#file 2\n3.000 -- 4.000: partial\n"
+            return module.subprocess.CompletedProcess(argv, -9, out, "killed")
+        out = "".join(f"#file {n}\n0.000 -- 1.000: later\n" for n in range(1, len(wavs) + 1))
+        return module.subprocess.CompletedProcess(argv, 0, out, "")
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    module._decode_with_vad(windows)
+    assert runs == [["w0.wav", "w1.wav", "w2.wav", "w3.wav"], ["w2.wav", "w3.wav"]]
+    assert [(s["start"], s["text"]) for s in job["segments"]] == [
+        (1.0, "kept"),
+        (120.0, "later"),
+        (180.0, "later"),
+    ]
+    assert job["errors"] == ["window at 60s: killed"]

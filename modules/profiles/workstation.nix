@@ -197,8 +197,13 @@ in
         # zram is the only swap; overcommit beyond it is killed because disk paging stalls the host.
         # Telemetry samples zram, PSI and refaults.
         # The zram store's RAM is a line of the host memory budget
-        # (runtime-defaults.nix, docs/resource-control.md): 9 GiB of swap
-        # space at the measured 3:1 is about 3 GiB of RAM. The device size is
+        # (runtime-defaults.nix, docs/resource-control.md): 16 GiB of swap
+        # space at the measured 3.3:1 is about 5 GiB of RAM. Half of RAM: the
+        # cold anonymous memory it absorbs (background tabs, idle daemons)
+        # leaves that much more page cache, and on 2026-11-24 file re-reads
+        # (3.3 TiB in 13 h) cost the host far more than zram traffic did
+        # (278 GiB in and out, ~1% of a core). Larger would let a hot
+        # working set thrash in zram instead of being killed. The device size is
         # the only bound. A resident limit (zram mem_limit) below the space
         # makes swap writes fail while swap still reads as free, so reclaim
         # loops and no swap-based OOM rule ever fires. Disksize changes apply
@@ -206,7 +211,7 @@ in
         zramSwap = {
           enable = true;
           algorithm = "zstd";
-          memoryMax = 9 * 1024 * 1024 * 1024;
+          memoryMax = 16 * 1024 * 1024 * 1024;
           priority = 100;
         };
 
@@ -219,7 +224,14 @@ in
         # long as the load lasts: the stall is charged as I/O, so pressure
         # based killers do not see it. Job units run at OOMScoreAdjust 900
         # and agent CLIs at 300, so a build is the victim.
-        systemd.tmpfiles.rules = [ "w /sys/kernel/mm/lru_gen/min_ttl_ms - - - - 1000" ];
+        systemd.tmpfiles.rules = [
+          "w /sys/kernel/mm/lru_gen/min_ttl_ms - - - - 1000"
+          # ksmd merges only memory that opted in (Chrome's unit sets
+          # MemoryKSM, browser.nix); the advisor sizes each scan to a target
+          # pass time instead of a fixed page count, bounding its CPU.
+          "w /sys/kernel/mm/ksm/advisor_mode - - - - scan-time"
+        ];
+        hardware.ksm.enable = true;
 
         # No polkit password dialogs for wheel on unit management and power
         # actions: wheel already has NOPASSWD sudo, so the prompt is friction with
@@ -243,11 +255,14 @@ in
           # zram is the first swap tier, so swapping a cold anonymous page costs
           # a compression, not a disk write. At swappiness 10 the kernel evicted
           # file cache instead and re-read it: over one 11-day uptime file
-          # refaults reached 16.6 TiB against 1.4 TiB of swap-ins.
+          # refaults reached 16.6 TiB against 1.4 TiB of swap-ins. Above 100 the
+          # kernel treats swapping as cheaper than re-reading a file, which zram
+          # is: decompressing a page costs microseconds, a file refault a disk
+          # read.
           # The free-page reserve is a small fixed floor against allocation
           # bursts; a 1 GiB reserve with a 2% watermark gap kept ~2 GB idle on a
           # 32 GB host that was swapping.
-          "vm.swappiness" = 100;
+          "vm.swappiness" = 170;
           "vm.page-cluster" = 0;
           # Kernel default; do not raise. At 1000 dentries/inodes stay permanently
           # cold and PID1 alone re-reads hundreds of GiB/day of unit fragments.
@@ -335,7 +350,7 @@ in
           # must not hold a fully swapped host between 2.5% and 5% available RAM.
           # Swap still gives it a grace band between 10% and 5% free.
           freeMemKillThreshold = 5;
-          # SIGTERM below 10% free swap (~1.2 GiB of 12 GiB zram), SIGKILL
+          # SIGTERM below 10% free swap (~1.6 GiB of 16 GiB zram), SIGKILL
           # below the default half (5%) if SIGTERM cannot recover the host.
           freeSwapThreshold = 10;
           extraArgs = [

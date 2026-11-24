@@ -7,6 +7,7 @@ from pathlib import Path
 from sinnix_audio_capture.devices import (
     AudioDevice,
     DeviceSupervisor,
+    _newest_segment_mtime,
     channel_name,
     matches_any,
     parse_devices,
@@ -152,6 +153,25 @@ def test_probe_reports_uncovered_devices_of_both_kinds(tmp_path: Path):
     )
     assert code == 0
     assert detail["uncovered"] == []
+
+
+def test_newest_segment_mtime_reads_the_newest_hour_only(tmp_path: Path):
+    import os
+
+    channel = tmp_path / "chan"
+    channel.mkdir()
+    old = channel / "audio-chan-20260101T000000Z.opus"
+    first = channel / "audio-chan-20260102T050000Z.opus"
+    part = channel / "audio-chan-p2-20260102T050000Z.opus.partial"
+    (channel / "device.json").write_text("{}")
+    for path, mtime in ((old, 3000.0), (first, 1000.0), (part, 2000.0)):
+        path.write_bytes(b"x")
+        os.utime(path, (mtime, mtime))
+    # The older hour's later mtime is ignored; within the newest hour the
+    # latest part wins, whatever its -pN- marker.
+    assert _newest_segment_mtime(channel) == 2000.0
+    assert _newest_segment_mtime(tmp_path / "missing") == 0.0
+    assert _newest_segment_mtime(tmp_path) == 0.0
 
 
 def test_probe_returns_unknown_when_graph_unreadable(tmp_path: Path):

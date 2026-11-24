@@ -26,9 +26,13 @@ curl -F file=@clip.wav -F model=parakeet-tdt-0.6b-v3 \
 ```
 
 The HTTP frontend starts on the first connection and exits after 300 s idle.
-Recognition workers are created per recording window. A worker initializes
-its ASR model only after VAD emits speech; silent windows never load the large
-encoder. Browser requests (an `Origin` or Fetch-Metadata header) are refused.
+Recordings are cut into windows of at most 60 s, and one recognizer process
+decodes every window of a batch (up to 32 files in a `recordings` pass, or the
+files of one `transcribe` call), so the model is read once per batch. The
+process initializes its ASR model only after VAD first emits speech; a batch
+that is all silence never loads the large encoder. If the process dies, only
+the window it was on is recorded as an error and the next run resumes after
+it. Browser requests (an `Origin` or Fetch-Metadata header) are refused.
 
 The VAD passes only speech to the recogniser, and every record carries
 `speech_seconds` next to `audio_seconds`, so silence is measured, not

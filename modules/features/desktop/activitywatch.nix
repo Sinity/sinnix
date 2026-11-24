@@ -125,6 +125,18 @@ mkFeatureModule {
                 Slice = "background.slice";
                 MemoryHigh = "1G";
                 MemoryMax = "2G";
+                # aw-server ships only a single-column bucketrow index, so each
+                # heartbeat's "latest event in this bucket" query sorted every
+                # event of the bucket and read the whole database (about 22k
+                # page reads a second at 1.3M window events). The composite
+                # indexes let it read one row.
+                ExecStartPre = "${pkgs.writeShellScript "activitywatch-indexes" ''
+                  db="$HOME/.local/share/activitywatch/aw-server-rust/sqlite.db"
+                  [ -f "$db" ] || exit 0
+                  exec ${pkgs.sqlite}/bin/sqlite3 "$db" \
+                    'CREATE INDEX IF NOT EXISTS events_bucketrow_starttime ON events(bucketrow, starttime);' \
+                    'CREATE INDEX IF NOT EXISTS events_bucketrow_endtime ON events(bucketrow, endtime);'
+                ''}";
               };
             };
             Install.WantedBy = lib.mkIf (!cfg.autoStart) (lib.mkForce [ ]);

@@ -44,9 +44,9 @@ let
     # Kernel memory no cgroup is charged for (slab, vmalloc, stacks, about
     # 1.3 GiB) and the free-page watermarks (min_free_kbytes 256 MiB).
     kernel = 2048;
-    # The zram store (workstation.nix): 9 GiB of swapped pages from every
-    # cgroup, compressed about 3:1, held in RAM.
-    zram = 3072;
+    # The zram store (workstation.nix): 16 GiB of swapped pages from every
+    # cgroup, compressed at the measured 3.3:1, held in RAM.
+    zram = 4864;
     desktop = desktopMemory.totalMin;
     # The huge-page reservation for shared buffers (bridge.nix: 2,202 pages,
     # 4.3 GiB, charged to the unit) plus 1.2 GiB of backends and cache.
@@ -75,8 +75,9 @@ let
     cliLow = 3072;
     toolMax = 5120;
     # The job plane: room for the largest single job (a Sinnix check peaks
-    # at 6.1-6.4G, a Sinex focused build at 6.9G).
-    planeMax = 8192;
+    # at 6.1-6.4G, a Sinex focused build at 6.9G). 7.5G since the zram line
+    # grew to 4.75G and left about 7.65G for agent work.
+    planeMax = 7680;
   };
   mib = value: "${toString value}M";
 
