@@ -9,7 +9,7 @@
   fetchurl,
   # The app offers only the Claude Code aliases opus, sonnet and haiku. This is
   # the model its "opus" choice resolves to; null leaves the CLI default.
-  claudeOpusModel ? "claude-fable-5-2",
+  claudeOpusModel ? "claude-opus-5-5",
 }:
 let
   pname = "learnharness";
