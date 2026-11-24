@@ -166,9 +166,11 @@ let
       ''--setenv=SINNIX_SECRET_DECLARATIONS="$SINNIX_SECRET_DECLARATIONS"''
       "--slice=nix-build.slice"
       "-p CPUSchedulingPolicy=other"
-      # A rebuild is retryable agent-tier work: under host OOM it goes before
-      # the desktop and services, like an agentctl job (docs/resource-control.md).
-      "-p OOMScoreAdjust=900"
+      # Under host OOM a rebuild goes before the desktop and services, but after
+      # agentctl jobs: it is how the host's own fixes land, and at an equal rank
+      # its 2.5 GiB evaluation was the largest process and lost every race to
+      # agent compiles (docs/resource-control.md).
+      "-p OOMScoreAdjust=850"
       "-p KillMode=control-group"
       "-p ExitType=main"
       "-p TimeoutStopSec=5s"

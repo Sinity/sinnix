@@ -90,16 +90,17 @@ of agent work:
 1. agentctl job units, `OOMScoreAdjust=900` (measurement jobs 100). A job unit
    carries `OOMPolicy=kill`, so the whole job ends, and agentctl reports it as
    `out-of-memory` with `killed: out of memory in the agent budget` in its
-   log. Retryable work outside the agent slice ranks with them at 900:
-   rebuilds (their `nix-build.slice` unit), the Nix daemon's builders, and
-   Borg drains, which resume on their next run.
-2. Tool commands, 800 (`claude-tool-scope`).
-3. The agent CLIs themselves, 300.
+   log. Borg drains rank with them at 900 and resume on their next run.
+2. Rebuilds (their `nix-build.slice` unit) and the Nix daemon's builders, 850.
+3. Tool commands, 800 (`claude-tool-scope`).
+4. The agent CLIs themselves, 300.
 
-Within a rank the kernel kills the largest process. Rebuilds, builders and
-drains have no line of their own, so without that rank a host OOM with them
-running found only tiny tool commands at the top and killed those, freeing
-nothing, while the memory stayed with the build and the drain.
+The kernel adds to each rank the process's share of RAM (about 78 points for
+2.5 GiB), and kills the highest total. Rebuilds sit below agentctl jobs because
+activation is how the host's own fixes land: at an equal rank a rebuild's
+2.5 GiB evaluation was the largest process and died to agent compiles four
+times in a row (2026-11-24). They sit above tool commands so that a host OOM
+during a large build does not kill tiny tool commands first, freeing nothing.
 
 Compare (`sinnix rank desktop`) runs in its own scope in `app.slice`, so its
 memory counts on the apps line whatever launched it, with `MemoryHigh=3G`
