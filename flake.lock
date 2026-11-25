@@ -1330,11 +1330,11 @@
         "rust-overlay": "rust-overlay_4"
       },
       "locked": {
-        "lastModified": 1795544833,
-        "narHash": "sha256-sqD6kc2ZwJiESpjXFO27YfdzvhS5sAj3v+l+plJ28oM=",
+        "lastModified": 1795569604,
+        "narHash": "sha256-qmSwFa1QgOY+VMyPlZt+FCMB4W96AXWST1tf17pTAvM=",
         "owner": "Sinity",
         "repo": "polylogue",
-        "rev": "4816be15747fbdfc90e516a814287374fb26fde9",
+        "rev": "91ace5db0b07eb1532d1b5a778c0c03705ee86e5",
         "type": "github"
       },
       "original": {
