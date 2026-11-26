@@ -31,9 +31,14 @@ class ConfigError(ValueError):
 
 @dataclass(frozen=True)
 class PoolPolicy:
-    """One pueue group's declared parallelism."""
+    """One pueue group's declared parallelism and default memory reservation.
+
+    ``memory_mib`` is what a job of this pool reserves in the job plane when
+    its operation declares no ``admission``; zero admits by slots alone.
+    """
 
     parallel: int
+    memory_mib: int = 0
 
 
 @dataclass(frozen=True)
@@ -43,8 +48,9 @@ class Config:
     state_dir: Path
     agentctl_executable: str
     private_project_catalog: Path | None = None
-    # Each pueue group's declared width. `pools apply` writes it into the
-    # running daemon, which schedules the tasks.
+    # Each pueue group's declared width and default memory reservation.
+    # `pools apply` writes the widths into the running daemon, which
+    # schedules the tasks; reservations decide when a held job is released.
     pools: Mapping[str, PoolPolicy] = field(default_factory=dict)
     # The file this configuration was read from. Every task agentctl queues
     # carries it as AGENTCTL_CONFIG, so the agentctl calls inside a task read
@@ -114,12 +120,17 @@ def _pools(value: Any) -> dict[str, PoolPolicy]:
             raise ConfigError(f"pools has an invalid pueue group name: {name!r}")
         if not isinstance(declaration, Mapping):
             raise ConfigError(f"pools.{name} must be an object with `parallel`")
-        unknown = set(declaration) - {"parallel"}
+        unknown = set(declaration) - {"parallel", "memory_mib"}
         if unknown:
             raise ConfigError(
                 f"pools.{name} declares unknown field(s): " + ", ".join(sorted(unknown))
             )
-        parsed[name] = PoolPolicy(parallel=_parallel(name, declaration.get("parallel")))
+        memory = declaration.get("memory_mib", 0)
+        if not isinstance(memory, int) or isinstance(memory, bool) or memory < 0:
+            raise ConfigError(f"pools.{name}.memory_mib must be a nonnegative integer")
+        parsed[name] = PoolPolicy(
+            parallel=_parallel(name, declaration.get("parallel")), memory_mib=memory
+        )
     return parsed
 
 

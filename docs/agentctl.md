@@ -31,6 +31,7 @@ functions. Waiting never cancels a job; queue cleanup keeps its input and output
 | `job list [--project p] [--active] [--all]`                                                   | job rows, newest first (40 unless `--all`)                                                                                                                                                                                                                                                           |
 | `job snapshot [--limit N]`                                                                    | group state and counts plus bounded job rows, unfinished first                                                                                                                                                                                                                                       |
 | `job get \| logs \| result \| cancel \| retry \| wait <id>`                                   | one job by pueue task ID, with optional `--job-id` checked against that row; `--attempt` selects a retry; `logs`/`result` page with `--offset`/`--limit`                                                                                                                                             |
+| `job admit`                                                                                   | release held jobs the job plane's free memory now covers ([memory admission](#memory-admission)); the `agentctl-admit` timer runs it every minute                                                                                                    |
 | `job clean <id> \| --all-terminal`                                                            | remove terminal entries; `--all-terminal` removes only jobs finished more than 24 hours ago; inputs and output stay                                                                                                                                                                                  |
 | `worktree clean [p] [--path P]`                                                               | retire completed checkouts whose work is published, keeping any with unpublished or uncommitted work                                                                                                                                                                                                 |
 | `worktree build-output [--root D] [--expire-idle-days N [--apply]]` | what each checkout's build output occupies and when it was last used; with `--expire-idle-days`, remove that output for idle checkouts (a dry run without `--apply`) |
@@ -97,7 +98,9 @@ subscription is above its threshold and names the reset time, the job is added
 held (pueue's delayed enqueue) and pueue releases it by itself a minute after
 that reset. The launch input records `deferred` (`reason`, `until`); the start
 prints it, and `job snapshot` and `sinnix state` show it as the reason the job
-waits. A check that is absent, fails, or names no reset time defers nothing.
+waits. A job with a memory reservation is instead held by admission, which
+releases it no earlier than `until`; pueue's delay would put it in its pool
+unadmitted. A check that is absent, fails, or names no reset time defers nothing.
 agentctl never marks a job discretionary by itself: an ordinary `job start`
 does not run the check.
 
@@ -127,7 +130,13 @@ launching process can say, who started it: `caller.harness` and
 `caller.principal`. Both ride on the job's `queue-task` events. `job snapshot`
 shows them on unfinished rows with the command and checkout, and gives each
 queued row a `wait` reason: `group-paused`, `dependencies`, `pool-full` (with
-the jobs holding the pool), `priority-order` or `ready`.
+the jobs holding the pool), `priority-order` or `ready`. A job held by
+[memory admission](#memory-admission) has phase `waiting-memory` and reason
+`memory` (its `memory_mib`, the plane's `free_mib` and `ceiling_mib`, and
+`behind` when an older held job may not be passed), or phase `queued` with
+reason `pool-full`, `group-paused` or `deferred`. `job get` reports the same
+reason, `job list` the same phase, and `job start` and `job wait` print the
+line on stderr, e.g. `waiting for memory: needs 6144 MiB, 3284 of 7680 MiB free`.
 `job start --idempotency-key` binds a caller's request to one launch:
 a replay reuses the accepted launch, and an unprovable submission raises
 instead of resubmitting.
@@ -151,7 +160,8 @@ Each invocation gets `jobs/<ref>.attempts/<n>/`:
 
 - `output.log`: diagnostics, plus all output for `exit` jobs.
 - `output.result`: stdout alone, for `json` and `pytest` jobs.
-- `output.outcome`: how the invocation ended.
+- `output.outcome`: how the invocation ended, with the unit's
+  `memory_peak_mib` when systemd reported it.
 
 `jobs/<ref>.log`, `.result` and `.outcome` are links to the latest attempt.
 Jobs from before attempt directories existed keep their plain files as
@@ -170,8 +180,10 @@ attempt 1. A retry never overwrites an earlier attempt.
 An `out-of-memory` job was the victim the host chose when agent work reached
 its memory ceiling ([resource control](resource-control.md)); the log ends
 with `killed: out of memory in the agent budget`. Job units carry
-`OOMPolicy=kill`, so the whole unit ends with the killed process. Run it again
-when the plane is quieter, or narrower.
+`OOMPolicy=kill`, so the whole unit ends with the killed process. Admission
+counts what jobs use as well as what they reserve, so a recurring kill means
+some job outgrew its reservation: compare the outcomes' `memory_peak_mib`
+(the unit's peak, page cache included) with the operations' `admission`.
 
 Terminal outcomes publish retained records and finish events for the event feed. They do not send phone notifications. Producers that require
 operator action use explicit alarm paths.
@@ -231,11 +243,47 @@ A pool declares one fixed `parallel` width. Pueue enforces it. Applying pool
 settings changes widths without restarting the daemon or its running jobs.
 
 **Concurrent builds.** The widths of the pools that run Cargo builds
-(`normal` 1, `bulk` 1, `compile` 1) bound how many run at once, so a job takes
-its queue slot only when it can run; no job waits inside its slot. Widths are
-sized for efficiency inside the job plane's memory ceiling: more concurrent
-builds than the plane holds are throttled and then killed. The ceiling, not
-the widths, protects the host.
+(`normal` 1, `bulk` 1, `compile` 1) bound how many run at once within each
+pool, so a job takes its queue slot only when it can run; no job waits inside
+its slot. Across pools, memory admission decides. The ceiling, not the widths,
+protects the host.
+
+### Memory admission
+
+Each pueue group admits on its own, so groups alone would start a build in
+every pool at once and overfill the plane's `MemoryMax`, where the kernel or
+systemd-oomd kills one of them. A job therefore reserves memory: its
+operation's `admission.memory_mib`, else its pool's `memory_mib`. A job with a
+reservation is added to pueue stashed (the launch input records
+`admission.held`) and released into its group when
+
+- the group is running and has a free slot, so the job starts at once, and
+- the plane's free memory covers the reservation.
+
+The plane's committed memory is what it holds now that reclaim cannot free
+(`memory.current` less clean page cache, read from `agent-ctl.slice`), plus
+the part of each running reservation its job has not used yet, plus the whole
+reservation of each released job that has not started. A job using more than
+it reserved is charged what it uses. When no reserved job is running, the
+first held job starts whatever its size, so neither a reservation larger than
+the plane nor memory held by unreserved work blocks the queue for good.
+Pools whose jobs are agents (`agent`, `codex`, the shell pools) reserve
+nothing: an agent waits on builds of its own, and a reservation it held would
+keep them out. Their usage still counts.
+
+Held jobs are released in pueue's order (priority, then task ID) across all
+pools. A smaller job may pass a held one that does not fit until that one has
+waited ten minutes; from then on nothing passes it. A job added stashed by
+its caller, or stashed by hand, is never released by admission.
+
+There is no daemon. A pass runs under one lock (`<state_dir>/admission.lock`)
+when a job is added or retried, when a job's wrapper finishes (after its unit
+has ended, counting its own slot as free), when a job is cancelled, and every
+minute from `agentctl-admit.timer`, which covers deferrals running out, pools
+resumed by hand and wrappers killed before their own pass. Each pass reads
+pueue's state, the launch inputs and the plane's cgroup afresh, and records
+each release as an `admission` event. `agentctl job admit` runs one pass and
+prints what it released and why the rest wait.
 
 **Pausing work.** `pueue pause --group <pool> --wait` stops new jobs in a
 group while its running jobs finish. `pueue start --group <pool>` resumes it.
@@ -352,7 +400,7 @@ generation; reboot remains a separate action.
 | `arguments`           | `none`, or `required` when the caller must pass a selector after `--`                                                                                                                                                                                                                                                                             |
 | `cache`               | `none` (default), or `tree+environment` to answer a request from an active or successful job with the same clean content tree, environment and arguments, in any checkout of the project and at any commit; after the queue entry is cleaned, its retained outcome still answers (`<state_dir>/results/` maps each request key to its newest job) |
 | `scratch`             | `nvme` (default) or `tmpfs`                                                                                                                                                                                                                                                                                                                       |
-| `admission`           | `{ memory_mib }`: the expected footprint, exported as `AGENTCTL_ADMISSION_MEMORY_MIB`. It is not a limit                                                                                                                                                                                                                                          |
+| `admission`           | `{ memory_mib }`: the memory the job reserves in the job plane ([memory admission](#memory-admission)), overriding its pool's default; exported as `AGENTCTL_ADMISSION_MEMORY_MIB`. It is not a unit limit                                                                                                                                        |
 | `unit_properties`     | resource limits for the unit, e.g. `["MemoryMax=3G", "IOReadBandwidthMax=/realm 20M"]`                                                                                                                                                                                                                                                            |
 
 | `announce`            | `true` for an operation that changes the live machine: its caller is told which other announced jobs are queued or running |
@@ -385,7 +433,7 @@ Timeouts, size bounds and exit codes are owned by `limits.py`, `run.py` and
 
 `modules/services/agentctl.nix` renders `/etc/sinnix/agentctl.json`:
 `project_roots`, `event_spool`, `state_dir` and `pools`,
-with each pool as `{parallel}`; `build_output_exempt`
+with each pool as `{parallel, memory_mib}`; `build_output_exempt`
 (`sinnix.services.agentctl.buildOutputExempt`), the worktree names whose build
 output is never examined; and `quota_check`, the command asked before a
 discretionary job is queued. It installs `agentctl`, `wt`, `pueue` and
@@ -396,6 +444,8 @@ declares these units:
 - `agentctl-clean-queue` (hourly: removes tasks finished over 24 hours ago).
 - `agentctl-pools`, which reapplies pool widths whenever pueued starts or the
   configuration changes.
+- `agentctl-admit` (every minute: one [memory admission](#memory-admission)
+  pass).
 
 pueued and the pool slices come from `modules/features/cli/core.nix` and
 `flake/data/runtime-defaults.nix`. The package's test suite drives a private

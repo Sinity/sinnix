@@ -594,7 +594,9 @@ def test_an_unknown_operation_is_a_refusal_and_a_key_error_is_not(
     assert cli.main(["job", "start", "fixture", "nope"]) == cli.EXIT_REFUSED
     assert "unknown project operation: fixture.nope" in capsys.readouterr().err
 
-    def broken(project_id: str | None = None) -> list[dict[str, object]]:
+    def broken(
+        project_id: str | None = None, config: object = None
+    ) -> list[dict[str, object]]:
         raise KeyError("phase")
 
     monkeypatch.setattr(cli.job_queries, "list_jobs", broken)

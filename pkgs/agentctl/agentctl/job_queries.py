@@ -210,6 +210,11 @@ def job_queue(
     if task.status == "Paused":
         return {**result, "reason": "task-paused"}
     if task.status == "Stashed":
+        from .admission import held_waits
+
+        held = held_waits(config, live).get(task.task_id)
+        if held is not None:
+            return {**result, **held}
         return {**result, "reason": "stashed"}
     waiting = [dep for dep in task.dependencies if dep in live.tasks]
     if state["status"] == "Paused":
@@ -234,6 +239,12 @@ def job_queue(
         "ahead": ids[:position],
         "occupied_by": running_jobs if reason != "ready" else [],
     }
+
+
+def held_phase(wait: Mapping[str, Any]) -> str:
+    """The phase of a job admission holds: waiting for memory, or queued
+    like any job whose pool is full, paused or deferred."""
+    return "waiting-memory" if wait.get("reason") == "memory" else "queued"
 
 
 def phase_of(task: Task) -> str:
@@ -367,13 +378,25 @@ def job_view(task: Task) -> dict[str, Any]:
     }
 
 
-def list_jobs(project_id: str | None = None) -> list[dict[str, Any]]:
-    tasks = pueue.tasks().values()
-    rows = [
-        job_view(task)
-        for task in sorted(tasks, key=lambda item: item.task_id)
-        if project_id is None or task.label.startswith(f"{project_id}:")
-    ]
+def list_jobs(
+    project_id: str | None = None, config: Config | None = None
+) -> list[dict[str, Any]]:
+    """Job rows; with ``config``, a job admission holds shows why it waits."""
+    tasks = pueue.tasks()
+    held: dict[int, dict[str, Any]] = {}
+    if config is not None and any(task.status == "Stashed" for task in tasks.values()):
+        from .admission import held_waits
+
+        held = held_waits(config, pueue.live())
+    rows = []
+    for task in sorted(tasks.values(), key=lambda item: item.task_id):
+        if project_id is not None and not task.label.startswith(f"{project_id}:"):
+            continue
+        row = job_view(task)
+        if (wait := held.get(task.task_id)) is not None:
+            row["phase"] = held_phase(wait)
+            row["wait"] = wait
+        rows.append(row)
     return rows
 
 
@@ -428,6 +451,14 @@ def snapshot_jobs(limit: int, config: Config | None = None) -> dict[str, Any]:
     active.sort(key=lambda task: task.task_id, reverse=True)
     terminal.sort(key=lambda task: task.task_id, reverse=True)
     waits = wait_reasons(active, queue.groups)
+    held: dict[int, dict[str, Any]] = {}
+    if config is not None:
+        from .admission import held_waits
+
+        live = pueue.Status({task.task_id: task for task in active}, queue.groups)
+        held = held_waits(config, live)
+        for task_id, wait in held.items():
+            waits[task_id] = {"wait": {**wait, "group": queue.tasks[task_id].group}}
     selected = [*active, *terminal][:limit]
     returned_active = sum(not task.terminal for task in selected)
     returned_terminal = len(selected) - returned_active
@@ -436,7 +467,15 @@ def snapshot_jobs(limit: int, config: Config | None = None) -> dict[str, Any]:
         "limit": limit,
         "groups": groups,
         "jobs": [
-            {**_snapshot_row(task, config), **waits.get(task.task_id, {})}
+            {
+                **_snapshot_row(task, config),
+                **waits.get(task.task_id, {}),
+                **(
+                    {"phase": held_phase(held[task.task_id])}
+                    if task.task_id in held
+                    else {}
+                ),
+            }
             for task in selected
         ],
         "omitted": {
@@ -718,6 +757,9 @@ def _job_detail(
         view["binding"] = binding
     if launch_input.get("admission"):
         view["admission"] = launch_input["admission"]
+    if task.status == "Stashed" and launch_input.get("admission", {}).get("held"):
+        if (held := admission_wait(config, task)) is not None:
+            view.update(wait=held, phase=held_phase(held))
     view.update(artifact_view(config, task, attempt))
     selected_outcome = view["artifacts"].get("outcome")
     outcome_path = Path(selected_outcome).resolve() if selected_outcome else None
@@ -1042,3 +1084,15 @@ def wait(
     if view["terminal"]:
         return view
     return {**view, "wait_timed_out": True, **({"detail": detail} if detail else {})}
+
+
+def admission_wait(config: Config, task: Task) -> dict[str, Any] | None:
+    """Why admission still holds this job, or None when it does not."""
+    if task.status != "Stashed":
+        return None
+    from .admission import held_waits
+
+    try:
+        return held_waits(config, pueue.live()).get(task.task_id)
+    except PueueError:
+        return None

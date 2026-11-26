@@ -409,6 +409,21 @@ in
         assert lib.assertMsg (
           declaredPools.normal.parallel == 1 && declaredPools.compile.parallel == 1
         ) "normal and compile each admit one Cargo build";
+        # Memory admission: one test build and one type check fit the plane
+        # together, and an agent never holds a reservation that would keep
+        # out the builds it waits on.
+        assert lib.assertMsg (
+          (declaredPools.normal.memory_mib + declaredPools.compile.memory_mib) * 1024 * 1024
+          <= sliceBytes userSlices.agent-ctl.MemoryMax
+        ) "a test build's and a type check's reservations must fit the job plane together";
+        assert lib.assertMsg (lib.all (name: declaredPools.${name}.memory_mib == 0) [
+          "agent"
+          "codex"
+          "shell-quick"
+          "shell-long"
+          "interactive"
+          "service"
+        ]) "pools whose jobs are agents reserve no memory";
         assert lib.assertMsg (lib.all (token: !(lib.hasInfix token avoidPattern))
           forbiddenAvoidTokens
         ) "the earlyoom fallback must not exempt agents, browsers, runtimes, or generic shells";

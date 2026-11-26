@@ -416,6 +416,26 @@ def scratch_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, 
 
 
 @pytest.fixture(autouse=True)
+def plane(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
+    """The job plane admission reads; never the host's agent-ctl.slice.
+
+    Without a call the plane has no ceiling, so held jobs start as their
+    pools allow. A test sets a ceiling, current usage and per-unit usage.
+    """
+    from agentctl import admission
+
+    state: dict[str, Any] = {"plane": None}
+    monkeypatch.setattr(admission, "read_plane", lambda: state["plane"])
+
+    def set_plane(
+        ceiling_mib: int | None, used_mib: int = 0, units: dict[str, int] | None = None
+    ) -> None:
+        state["plane"] = admission.Plane(ceiling_mib, used_mib, dict(units or {}))
+
+    return set_plane
+
+
+@pytest.fixture(autouse=True)
 def _no_inherited_queue_group(monkeypatch: pytest.MonkeyPatch) -> None:
     """The suite must not inherit the group of a pueue task that runs it.
 

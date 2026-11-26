@@ -1625,9 +1625,9 @@ def test_a_declared_admission_envelope_reaches_the_job_and_its_command(
     started = launch.start_operation(config, project, project.operation("corpus"))
 
     written = read_launch(config, fake_pueue.task(started["task_id"]))
-    assert written["admission"] == {"memory_mib": 12288}
+    assert written["admission"] == {"memory_mib": 12288, "source": "operation"}
     assert written["environment"]["AGENTCTL_ADMISSION_MEMORY_MIB"] == "12288"
-    # A declaration, not a limit: it must not become a unit memory bound.
+    # A reservation, not a limit: it must not become a unit memory bound.
     assert not any(
         item.startswith("Memory") for item in written.get("unit_properties", [])
     )

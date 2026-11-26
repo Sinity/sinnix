@@ -139,6 +139,15 @@ def wait_text(job: Mapping[str, Any], now: datetime) -> str | None:
         return f"deferred until {deferred.get('until')}: {deferred.get('reason')}"
     if str(job.get("phase")) == "stashed":
         return "held in the queue (stashed)"
+    if reason == "memory":
+        line = f"waiting for memory: needs {wait.get('memory_mib')} MiB"
+        if wait.get("free_mib") is not None:
+            line += f", {wait.get('free_mib')} of {wait.get('ceiling_mib')} MiB free"
+        if isinstance(wait.get("behind"), dict):
+            line += f", behind {named([wait['behind']])}"
+        return line
+    if reason == "deferred":
+        return "deferred by its starter"
     if reason == "group-paused":
         return f"pool {group} is paused in the queue"
     if reason == "dependencies":

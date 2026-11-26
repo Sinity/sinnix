@@ -507,7 +507,7 @@ def _unit_snapshot(unit: str) -> dict[str, str] | None:
     shown = _systemctl(
         "show",
         "-p",
-        "LoadState,ActiveState,SubState,Result,ExecMainStatus,ExecMainCode,Type,ActiveEnterTimestampMonotonic,Job",
+        "LoadState,ActiveState,SubState,Result,ExecMainStatus,ExecMainCode,Type,ActiveEnterTimestampMonotonic,Job,MemoryPeak",
         unit,
     )
     if shown is None:
@@ -818,7 +818,9 @@ def _run(
         # An earlier attempt of this job made it, and that attempt's unit has
         # just been stopped above: the scratch dies with that attempt.
         if (error := remove_scratch(scratch_dir)) is not None:
-            log_path.write_text(f"could not remove the earlier attempt's scratch: {error}\n")
+            log_path.write_text(
+                f"could not remove the earlier attempt's scratch: {error}\n"
+            )
             return refused()
     try:
         scratch_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -1002,6 +1004,11 @@ def _run(
         "pool": pool,
         "systemd_result": properties.get("Result") if properties is not None else None,
     }
+    peak = (properties or {}).get("MemoryPeak", "")
+    if peak.isdigit():
+        # Page cache included, as the kernel counts it: what this run's unit
+        # held at most, for sizing the job's memory reservation.
+        record["memory_peak_mib"] = int(peak) // (1024 * 1024)
     if start_git is not None:
         end_git = git_observation(Path(launch["working_directory"]))
         record["execution_receipt"] = execution_receipt(start_git, end_git)
@@ -1035,7 +1042,32 @@ def main(arguments: Sequence[str] | None = None) -> int:
     # The input stays for `pueue restart`: a retry re-executes this same
     # command line. The path travels on as written: a canceller reads that
     # same string out of the task's command to name the unit this run creates.
-    return run(launch, launch_input=parsed.launch_input)
+    status = run(launch, launch_input=parsed.launch_input)
+    _admit_after(launch)
+    return status
+
+
+def _admit_after(launch: Mapping[str, Any]) -> None:
+    """Release held jobs this one's ended unit made room for.
+
+    Runs only as a pueue task: this task still holds its slot until it exits,
+    so the pass counts it as gone. A failure leaves held jobs for the next
+    pass and never changes this job's outcome.
+    """
+    task_id = os.environ.get("PUEUE_ID", "")
+    if not task_id.isdecimal():
+        return
+    from .admission import admit
+    from .config import load_config
+
+    configured = (launch.get("environment") or {}).get("AGENTCTL_CONFIG")
+    try:
+        admit(
+            load_config(Path(configured) if configured else None),
+            exclude=int(task_id),
+        )
+    except Exception as error:  # noqa: BLE001 - reported, never the job's outcome
+        print(f"agentctl: admission pass failed: {error}", file=sys.stderr)
 
 
 if __name__ == "__main__":  # pragma: no cover - console entry point

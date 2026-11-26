@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from . import (
+    admission,
     build_output,
     job_queries,
     launch,
@@ -297,6 +298,11 @@ def parser() -> argparse.ArgumentParser:
         help="remove tasks finished more than 24 hours ago",
     )
     _output_arguments(clean)
+    admit = job_verbs.add_parser(
+        "admit",
+        help="release held jobs the job plane's free memory now covers",
+    )
+    _output_arguments(admit)
     wait = job_verbs.add_parser("wait")
     wait.add_argument("task_id", type=int)
     _job_id_option(wait)
@@ -421,6 +427,8 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
                 f"deferred until {deferred.get('until')}: {deferred.get('reason')}",
                 file=sys.stderr,
             )
+        if isinstance(held := started.get("wait"), dict):
+            print(admission.wait_line(held), file=sys.stderr)
         if arguments.wait:
             started = job_queries.wait(
                 started["task_id"],
@@ -438,7 +446,7 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             )
         return EXIT_OK
     if verb == "list":
-        rows = job_queries.list_jobs(arguments.project)
+        rows = job_queries.list_jobs(arguments.project, config)
         if arguments.active:
             rows = [row for row in rows if not row["terminal"]]
         rows.sort(key=lambda row: row["task_id"], reverse=True)
@@ -524,7 +532,28 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         job = launch.retry(config, arguments.task_id, arguments.job_id)
         out.write(job, out.job_line(job))
         return EXIT_OK
+    if verb == "admit":
+        passed = admission.admit(config)
+        free = (
+            f"{passed['ceiling_mib'] - passed['committed_mib']} of {passed['ceiling_mib']} MiB free"
+            if passed["ceiling_mib"] is not None
+            else "no plane ceiling"
+        )
+        out.write(
+            passed,
+            f"released {len(passed['released'])}, waiting {len(passed['waiting'])}; {free}",
+        )
+        return EXIT_OK
     if verb == "wait":
+        # Said before blocking, so a waiter knows the job is held, not slow.
+        # The wait below reports a task that cannot be read.
+        try:
+            task = job_queries.read_task(config, arguments.task_id, arguments.job_id)
+            held = job_queries.admission_wait(config, task)
+        except (JobError, PueueError):
+            held = None
+        if held is not None:
+            print(admission.wait_line(held), file=sys.stderr)
         waited = job_queries.wait(
             arguments.task_id,
             timeout_seconds=arguments.timeout_seconds,

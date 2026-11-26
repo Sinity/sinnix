@@ -64,8 +64,7 @@ let
     systemCritical = 256;
     # The user capture producers and ActivityWatch (0.3 GiB together).
     captureProducers = 512;
-    protected =
-      desktop + systemLive + userLive + systemServices + systemCritical + captureProducers;
+    protected = desktop + systemLive + userLive + systemServices + systemCritical + captureProducers;
     agents = ram - kernel - zram - protected;
   };
   # Ceilings on agent work that can run away: tool commands and the job
@@ -464,8 +463,11 @@ rec {
       # Peak memory per job, page cache included: Polylogue focused p50 3.6G
       # p90 5.5G, Sinex focused p90 6.9G, Sinnix check 6.1-6.4G, compile and
       # Clippy 2.0-3.4G. The plane holds one large job, or one test build
-      # beside one type check; beyond that the kernel ends the largest job at
-      # the ceiling, and the owner sees "out of memory" (docs/agentctl.md).
+      # beside one type check. agentctl starts a job only when the plane's
+      # free memory covers its reservation (docs/agentctl.md, memory
+      # admission); a job that outgrows its reservation can still reach the
+      # ceiling, where the kernel ends the largest job and its owner sees
+      # "out of memory".
       agent-ctl = {
         IOAccounting = true;
         # Give queued work enough CPU to make progress alongside the desktop.

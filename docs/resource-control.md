@@ -3,8 +3,9 @@
 Agent work on sinnix-prime can slow itself down or lose its own jobs; it
 cannot take the desktop, the live services or the host with it. Memory is
 held to that by a budget that sums to physical memory, the disk by IOCost
-weights. Pool widths only make builds efficient inside the budget
-([agentctl pools](agentctl.md#pools)).
+weights. Pool widths only make builds efficient inside the budget, and
+agentctl starts a job only when the job plane's free memory covers its
+reservation ([agentctl pools](agentctl.md#pools)).
 
 ## Memory budget
 
@@ -34,7 +35,8 @@ Inside agent work: interactive CLIs (`agent-cli.slice`) keep 3 GiB protected
 and have no ceiling; tool commands and MCP servers (`agent-tool.slice`)
 stop at 5; the job plane (`agent-ctl.slice`) stops at 7.5, room for the largest
 single job (a Sinex focused build peaks at 6.9 GiB). A pool slice sets its own limit only where it is tighter than
-the plane's.
+the plane's. Jobs whose reservations together exceed the plane wait in the
+queue instead of starting ([memory admission](agentctl.md#memory-admission)).
 
 An agent's tool commands and MCP servers share one unit,
 `agent-tool-<agent unit>.service`, which `agent-tool-command` starts with the

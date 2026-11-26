@@ -22,6 +22,7 @@ from typing import Any, Callable, Mapping, Sequence
 import tomllib
 from sinnix_lib.atomic import atomic_publish
 
+from . import admission as admission_module
 from . import artifacts, gitcmd, job_queries, pueue
 from .config import Config
 from .launch_input import scratch_path, write_input
@@ -359,13 +360,22 @@ def enqueue(
         launch["request_digest"] = request_digest
     if unit_properties:
         launch["unit_properties"] = list(unit_properties)
-    if admission is not None:
-        # The declared envelope, recorded on the job and exported to the
-        # command so a workload's own sizing receipt has a declared number to
-        # compare its measurement against. It bounds nothing by itself.
-        launch["admission"] = admission.catalog_row()
-        environment["AGENTCTL_ADMISSION_MEMORY_MIB"] = str(admission.memory_mib)
+    # The memory this job reserves in the job plane: its operation's
+    # declaration, else its pool's default. A reserved job is added held and
+    # released by admission once the plane can hold it; the number is also
+    # exported, so a workload's own sizing can compare against it.
+    reserved, source = (
+        (admission.memory_mib, "operation")
+        if admission is not None
+        else (config.pools[group].memory_mib if group in config.pools else 0, "pool")
+    )
+    held = bool(reserved) and not stashed and not after
+    if reserved:
+        launch["admission"] = {"memory_mib": reserved, "source": source}
+        environment["AGENTCTL_ADMISSION_MEMORY_MIB"] = str(reserved)
         launch["environment"] = environment
+        if held:
+            launch = admission_module.hold(launch)
     if tree_receipt is not None:
         launch["tree_receipt"] = dict(tree_receipt)
     if environment_receipt is not None:
@@ -386,11 +396,13 @@ def enqueue(
             command=(job_queries.QUEUE_RUN_EXECUTABLE, str(input_path)),
             working_directory=working_directory,
             after=after,
-            stashed=stashed,
+            stashed=stashed or held,
             priority=priority,
+            # A held job's deferral is kept by admission, which releases it
+            # only after `deferred.until`; pueue's own delay would bypass it.
             **(
                 {"delay_seconds": int(deferred["delay_seconds"])}
-                if deferred is not None
+                if deferred is not None and not held
                 else {}
             ),
         )
@@ -402,6 +414,21 @@ def enqueue(
         raise EnqueueUncertain(job_id, error) from error
     launch["queue_task_id"] = task_id
     write_input(input_path, launch)
+    waiting = None
+    if held:
+        try:
+            waiting = next(
+                (
+                    {key: value for key, value in row.items() if key != "task_id"}
+                    for row in admission_module.admit(config)["waiting"]
+                    if row["task_id"] == task_id
+                ),
+                None,
+            )
+        except PueueError:
+            # The job is queued and held; the next pass (a finishing job or
+            # the admission timer) releases it.
+            pass
     task = pueue.task(task_id)
     view = (
         job_queries.job_view(task)
@@ -411,6 +438,9 @@ def enqueue(
     view.update(job_queries.launch_selection(launch))
     if "deferred" in launch:
         view["deferred"] = launch["deferred"]
+    if waiting is not None:
+        view["wait"] = waiting
+        view["phase"] = job_queries.held_phase(waiting)
     return view
 
 
@@ -1032,6 +1062,9 @@ def cancel(
                         removed = True
                     else:
                         pueue.kill(task_id)
+    # A cancelled job frees its reservation or its place at the head of the
+    # held jobs.
+    _admit_quietly(config)
     return {
         **job_queries.get_job(task_id, config, job_id),
         "state": "removed" if removed else "stopped",
@@ -1111,9 +1144,26 @@ def retry(config: Config, task_id: int, job_id: str | None = None) -> dict[str, 
                     f"task {task_id} is still {task.status.lower()}"
                 )
             artifacts.cancellation_path(Path(log), 0).unlink(missing_ok=True)
-            pueue.restart(task_id)
+            held = admission_module.reservation(document) > 0
+            if held:
+                path = job_queries.launch_input_path(task)
+                if path is not None:
+                    write_input(path, admission_module.hold(document))
+            pueue.restart(task_id, stashed=held)
+        if held:
+            _admit_quietly(config)
     else:
         if not task.terminal:
             raise job_queries.JobError(f"task {task_id} is still {task.status.lower()}")
         pueue.restart(task_id)
     return job_queries.get_job(task_id, config, job_id)
+
+
+def _admit_quietly(config: Config) -> None:
+    """Run an admission pass whose failure the caller's result does not depend
+    on: held jobs stay held, and the next pass (a finishing job or the
+    admission timer) releases them."""
+    try:
+        admission_module.admit(config)
+    except (PueueError, OSError):
+        pass

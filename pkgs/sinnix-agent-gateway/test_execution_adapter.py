@@ -246,7 +246,9 @@ def test_job_list_cursor_is_bound_to_the_project_filter(
             "enqueued_at": "2026-09-07T01:00:00Z",
         },
     ]
-    monkeypatch.setattr(job_queries, "list_jobs", lambda _project=None: rows)
+    monkeypatch.setattr(
+        job_queries, "list_jobs", lambda _project=None, _config=None: rows
+    )
     monkeypatch.setattr(job_queries, "attach_bindings", lambda _config, page: page)
 
     first = adapter.list(limit=1)

@@ -1,7 +1,9 @@
 """The pueue adapter: the queue, its groups, and one task's observable state.
 
-agentctl does not queue, admit, throttle, retry, or reap. pueued does, and its
-own state is the record. This module is the only place that shells out to it.
+agentctl does not queue, throttle, retry, or reap. pueued does, and its own
+state is the record; agentctl's one addition is releasing jobs it added held
+until the job plane has memory for them (`admission`). This module is the
+only place that shells out to pueue.
 """
 
 from __future__ import annotations

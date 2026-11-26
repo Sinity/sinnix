@@ -52,30 +52,56 @@ mkServiceModule {
             type = lib.types.ints.positive;
             description = "How many tasks this pueue group admits at once.";
           };
+          memory_mib = lib.mkOption {
+            type = lib.types.ints.unsigned;
+            default = 0;
+            description = "MiB a job of this pool reserves in the job plane when its operation declares no `admission`; agentctl holds the job until the plane's free memory covers it. 0 admits by slots alone.";
+          };
         };
       }
     );
     # Widths keep builds efficient inside the job plane's memory ceiling
     # (agent-ctl.slice, runtime-defaults.nix); the ceiling, not the widths,
-    # keeps the host alive. Jobs beyond what the plane holds are throttled
-    # and then killed, which wastes their work, so the memory-heavy pools
-    # admit what fits: one test build beside one check.
+    # keeps the host alive. Each pool admits on its own, so across pools a
+    # job also waits until the plane's free memory covers its reservation
+    # (`memory_mib`, or its operation's `admission`): one test build beside
+    # one type check (4096 + 3072 MiB) fits the plane; a full check runs
+    # alone. Pools whose jobs are agents waiting on other jobs reserve
+    # nothing (their live usage still counts), or an agent would hold the
+    # memory its own build waits for.
     default = {
       # Claude workers running focused tests reach 2-3 GiB each.
       agent.parallel = 2;
       # Codex workers, ~136 MB each, mostly wait on builds in other pools;
       # sixteen fit their slice's 3G MemoryHigh.
       codex.parallel = 16;
-      pytest.parallel = 1;
-      pytest-heavy.parallel = 1;
+      pytest = {
+        parallel = 1;
+        memory_mib = 2048;
+      };
+      # Two xdist workers at 2.3 GiB and the collecting process.
+      pytest-heavy = {
+        parallel = 1;
+        memory_mib = 5120;
+      };
       # Focused jobs run one pytest process (p99 about 550 MiB, max about
       # 1 GiB), so four fit under the quick slice's 4G MemoryHigh.
-      pytest-quick.parallel = 4;
+      pytest-quick = {
+        parallel = 4;
+        memory_mib = 1024;
+      };
       # Focused Cargo test builds, 2-7 GiB each: one at a time. /realm also
       # sustains only 25-50 MB/s of writes, and each test build writes 1-6 GB.
-      normal.parallel = 1;
+      normal = {
+        parallel = 1;
+        memory_mib = 4096;
+      };
       # Full checks and arbitrary commands, the longest builds: one at a time.
-      bulk.parallel = 1;
+      # Sinnix's check peaks at 6.1-6.4 GiB.
+      bulk = {
+        parallel = 1;
+        memory_mib = 6144;
+      };
       # Long-lived development dependencies must not occupy short-job capacity.
       service.parallel = 2;
       interactive.parallel = 2;
@@ -87,14 +113,29 @@ mkServiceModule {
       # Long I/O-heavy maintenance (copies between disks, offloads) that must
       # yield the disk to builds and interactive work; its slice carries the
       # lowest I/O weight in the job plane.
-      background.parallel = 2;
+      # Most of these jobs stay under 500 MiB.
+      background = {
+        parallel = 2;
+        memory_mib = 512;
+      };
       # Measurements and full system builds each get a slot outside bulk, so
       # checks can run beside them; prebuilt benchmarks use `measure_run`.
-      measure.parallel = 1;
-      system-build.parallel = 1;
+      measure = {
+        parallel = 1;
+        memory_mib = 3072;
+      };
+      # The build itself runs in nix-daemon, outside the plane; this is the
+      # evaluation.
+      system-build = {
+        parallel = 1;
+        memory_mib = 4096;
+      };
       # Rust type and lint checks (3-4 GiB each) have their own pool, so they
       # never wait behind test builds; one runs beside a test build.
-      compile.parallel = 1;
+      compile = {
+        parallel = 1;
+        memory_mib = 3072;
+      };
     };
     description = "Each pueue group's width and cross-pool admission policy.";
   };
@@ -141,7 +182,7 @@ mkServiceModule {
           private_project_catalog = config.sinnix.projects.privateCatalogFile;
           event_spool = eventSpool;
           agentctl = "${scriptPkgs.agentctl}/bin/agentctl";
-          pools = lib.mapAttrs (_name: pool: { inherit (pool) parallel; }) cfg.pools;
+          pools = lib.mapAttrs (_name: pool: { inherit (pool) parallel memory_mib; }) cfg.pools;
           build_output_exempt = cfg.buildOutputExempt;
           # What `job start --discretionary` asks before it queues a job.
           quota_check = [
@@ -174,6 +215,30 @@ mkServiceModule {
             onCalendar = "hourly";
             persistent = true;
             description = "Hourly cleanup of queue tasks finished over 24 hours ago";
+          };
+        }
+      )
+      # Admission passes run when a job is added, retried, cancelled or
+      # finishes. This one covers what no job event announces: a deferral
+      # running out, a paused pool resumed by hand, a wrapper killed before
+      # its own pass.
+      (lib.sinnix.mkScheduledJob
+        {
+          inherit config;
+          unitName = "agentctl-admit";
+          description = "Release held jobs the job plane has room for";
+        }
+        {
+          manager = "user";
+          resourceClass = "background";
+          path = [ pkgs.pueue ];
+          execStart = "${scriptPkgs.agentctl}/bin/agentctl job admit";
+          serviceConfig = {
+            TimeoutStartSec = "60s";
+          };
+          timer = {
+            intervalSec = 60;
+            description = "Admission pass for jobs held until the job plane has room";
           };
         }
       )

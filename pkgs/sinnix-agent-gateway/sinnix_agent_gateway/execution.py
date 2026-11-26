@@ -436,7 +436,9 @@ class LocalJobs:
         limit = int(arguments.get("limit") or 50)
         project_id = arguments.get("project_id")
         rows = sorted(
-            job_queries.list_jobs(project_id if isinstance(project_id, str) else None),
+            job_queries.list_jobs(
+                project_id if isinstance(project_id, str) else None, self.config
+            ),
             key=_sort_key,
             reverse=True,
         )
