@@ -54,6 +54,7 @@ in
     ./tests/vm.nix
     ./tests/host-build.nix
     ./tests/desktop-io.nix
+    ./tests/desktop-session.nix
     ./tests/block-io-controller.nix
     ./tests/ai-http-vm.nix
     ./tests/ai-http.nix

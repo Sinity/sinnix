@@ -27,7 +27,13 @@ from . import artifacts, gitcmd, job_queries, pueue
 from .config import Config
 from .launch_input import scratch_path, write_input
 from .limits import CALL_TIMEOUT_SECONDS, SHORT_ID, SYSTEMCTL_TIMEOUT_SECONDS
-from .projects import AdmissionEnvelope, ProjectAdapter, ProjectOperation
+from .projects import (
+    AdmissionEnvelope,
+    ProjectAdapter,
+    ProjectConfigError,
+    ProjectOperation,
+    load_project_adapter,
+)
 from .pueue import PueueError, PueueGroupError, PueueTimeout, Task
 from .run import (
     cancel_marker_for,
@@ -304,6 +310,7 @@ def enqueue(
     request_digest: str | None = None,
     priority: int = 0,
     announce: bool = False,
+    retry_after_reboot: bool = False,
     deferred: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Write the launch input, add the pueue task, return the job view.
@@ -351,6 +358,8 @@ def enqueue(
         launch["announce"] = True
         if (revision := _revision(working_directory)) is not None:
             launch["revision"] = revision
+    if retry_after_reboot:
+        launch["retry_after_reboot"] = True
     if deferred is not None:
         launch["deferred"] = {
             key: deferred[key] for key in ("reason", "until") if deferred.get(key)
@@ -866,6 +875,7 @@ def _start_operation(
         tree_receipt=tree_receipt,
         environment_receipt=environment_receipt,
         announce=operation.announce,
+        retry_after_reboot=operation.retry_after_reboot,
         deferred=discretionary_deferral(config) if discretionary else None,
     )
     if tree_receipt is not None:
@@ -1126,11 +1136,66 @@ def clean_terminal(
     return removed
 
 
-def retry(config: Config, task_id: int, job_id: str | None = None) -> dict[str, Any]:
+def _check_reboot_retry(task: Task, document: Mapping[str, Any], start: str) -> None:
+    if task.result != "Killed" or task.started_at != start:
+        raise job_queries.JobError(
+            "the captured attempt is no longer a killed queue task"
+        )
+    if document.get("retry_after_reboot") is not True:
+        raise job_queries.JobError("the launch did not declare retry_after_reboot")
+    log = Path(document["log_path"])
+    attempt = artifacts.attempt_for_start(document, start)
+    outcome = job_queries.read_outcome(
+        artifacts.root_for(log) / str(attempt) / artifacts.CANONICAL_NAMES["outcome"],
+        job_queries.MAX_OUTCOME_BYTES,
+    )
+    if outcome and outcome.get("outcome") == "success":
+        raise job_queries.JobError(
+            "the captured attempt already completed successfully"
+        )
+    if cancel_marker_for(log).exists() or any(
+        artifacts.cancellation_path(log, number).exists() for number in (0, attempt)
+    ):
+        raise job_queries.JobError("the captured attempt was cancelled explicitly")
+    if (
+        document.get("secret_environment")
+        or not Path(document["working_directory"]).is_dir()
+    ):
+        raise job_queries.JobError(
+            "the launch needs fresh credentials or its checkout disappeared"
+        )
+    try:
+        descriptor = Path(document["descriptor_path"])
+        project = load_project_adapter(descriptor.parent.parent)
+        operation = project.operation(document["operation"])
+        declared = (
+            project.descriptor == descriptor
+            and project.project_id == document["project_id"]
+            and operation.retry_after_reboot
+        )
+    except (KeyError, OSError, ProjectConfigError, ValueError):
+        declared = False
+    if not declared:
+        raise job_queries.JobError(
+            "the current descriptor does not allow a reboot retry"
+        )
+
+
+def retry(
+    config: Config,
+    task_id: int,
+    job_id: str | None = None,
+    *,
+    interrupted_start: str | None = None,
+) -> dict[str, Any]:
     """Restart a terminal task in place, after any cancellation finishes."""
+    if interrupted_start is not None and not job_id:
+        raise job_queries.JobError("a reboot retry requires the saved job id")
     task = job_queries.task_by_id(task_id, job_id)
     document = job_queries.read_launch_input(config, task) or {}
     log = document.get("log_path")
+    if interrupted_start is not None and not log:
+        raise job_queries.JobError("the captured launch input is unavailable")
     if log:
         if not job_queries.owns_path(config, task, Path(log)):
             raise job_queries.JobError("cannot read the job's launch input")
@@ -1143,6 +1208,8 @@ def retry(config: Config, task_id: int, job_id: str | None = None) -> dict[str, 
                 raise job_queries.JobError(
                     f"task {task_id} is still {task.status.lower()}"
                 )
+            if interrupted_start is not None:
+                _check_reboot_retry(task, document, interrupted_start)
             artifacts.cancellation_path(Path(log), 0).unlink(missing_ok=True)
             held = admission_module.reservation(document) > 0
             if held:

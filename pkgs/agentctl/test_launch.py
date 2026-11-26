@@ -1493,6 +1493,62 @@ def test_retry_is_pueue_restart_and_only_for_terminal_tasks(
     assert retried["phase"] == "queued"
 
 
+@pytest.mark.parametrize(
+    "reason",
+    [None, "undeclared", "revoked", "cancelled", "changed", "failed", "succeeded"],
+)
+def test_reboot_retry_checks_the_original_killed_attempt(
+    fake_pueue: FakePueue, config: Config, project_root: Path, reason: str | None
+) -> None:
+    descriptor = project_root / ".agentctl/project.toml"
+    original = descriptor.read_text()
+    if reason != "undeclared":
+        descriptor.write_text(
+            original.replace(
+                "[operations.verify]", "[operations.verify]\nretry_after_reboot = true"
+            )
+        )
+    project = load_project_adapter(project_root)
+    operation = project.operation("verify")
+    assert operation.catalog_row()["retry_after_reboot"] is (reason != "undeclared")
+    job = launch.start_operation(config, project, operation)
+    task_id, job_id, start = job["task_id"], job["job_id"], job["started_at"]
+    document = read_launch(config, fake_pueue.task(task_id))
+    assert document.get("retry_after_reboot") is (
+        True if operation.retry_after_reboot else None
+    )
+    artifacts.begin(document, "fixture-input")
+    fake_pueue.kill_directly(task_id)
+    if reason == "revoked":
+        descriptor.write_text(original)
+    if reason == "cancelled":
+        marker = artifacts.cancellation_path(Path(document["log_path"]), 1)
+        marker.touch()
+    if reason == "changed":
+        start = "2026-01-01T01:00:00+00:00"
+    if reason == "failed":
+        fake_pueue.fail(task_id, exit_code=1)
+    if reason == "succeeded":
+        outcome_path_for(document["log_path"]).write_text('{"outcome":"success"}')
+    expected = {
+        "undeclared": "launch did not declare",
+        "revoked": "current descriptor",
+        "cancelled": "cancelled explicitly",
+        "changed": "no longer a killed",
+        "failed": "no longer a killed",
+        "succeeded": "completed successfully",
+    }
+    if reason:
+        with pytest.raises(JobError, match=expected[reason]):
+            launch.retry(config, task_id, job_id, interrupted_start=start)
+        assert fake_pueue.restarted == []
+    else:
+        retried = launch.retry(config, task_id, job_id, interrupted_start=start)
+        assert retried["job_id"] == job_id
+        assert retried["phase"] == "queued"
+        assert fake_pueue.restarted == [task_id]
+
+
 def test_wait_returns_the_terminal_view_and_reports_a_timeout_as_such(
     fake_pueue: FakePueue, config: Config, project_root: Path
 ) -> None:

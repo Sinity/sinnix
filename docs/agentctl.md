@@ -214,6 +214,21 @@ Launch inputs may set `unit_properties`, limited to resource limits
 `CPUWeight`, `IOWeight`, `IOReadBandwidthMax`, `IOWriteBandwidthMax`) and path
 access (`ReadOnlyPaths`, `ReadWritePaths`, `InaccessiblePaths`).
 
+### Reboot recovery
+
+Desktop restore records the task ID, job ID and start timestamp of running
+or paused jobs. After boot it reports jobs whose old attempt was killed or
+whose queue record disappeared. Queued work resumes through pueue itself.
+
+Set `retry_after_reboot = true` on operations that can repeat their work
+after an interruption. The default is false. AgentCTL saves the declaration
+with the launch. When restoring a killed task it checks the captured start
+timestamp and the current descriptor before restarting the task in place.
+An explicit cancellation, a recorded success, a missing checkout, or an
+environment that needs fresh secret values rules out automatic retry.
+Launches from before the declaration was recorded are reported for manual
+review. The normal `job retry` command still accepts an explicit operator retry.
+
 ### Scratch
 
 Every job gets one directory of its own, `/realm/tmp/work/agentctl/<ref>`, or
@@ -402,8 +417,8 @@ generation; reboot remains a separate action.
 | `scratch`             | `nvme` (default) or `tmpfs`                                                                                                                                                                                                                                                                                                                       |
 | `admission`           | `{ memory_mib }`: the memory the job reserves in the job plane ([memory admission](#memory-admission)), overriding its pool's default; exported as `AGENTCTL_ADMISSION_MEMORY_MIB`. It is not a unit limit                                                                                                                                        |
 | `unit_properties`     | resource limits for the unit, e.g. `["MemoryMax=3G", "IOReadBandwidthMax=/realm 20M"]`                                                                                                                                                                                                                                                            |
-
 | `announce`            | `true` for an operation that changes the live machine: its caller is told which other announced jobs are queued or running |
+| `retry_after_reboot` | `true` permits automatic retry of a captured attempt killed by reboot. The default is false. |
 
 Unknown operation fields are ignored with a warning.
 

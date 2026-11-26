@@ -80,6 +80,7 @@ _OPERATION_FIELDS = frozenset(
         "unit_properties",
         "environment",
         "announce",
+        "retry_after_reboot",
     }
 )
 #: An operation's declared memory envelope, in MiB. One key today; the table
@@ -214,6 +215,7 @@ class ProjectOperation:
     # An operation that changes the live machine. `job start` tells its caller
     # which other announced jobs are queued or running, and for whom.
     announce: bool = False
+    retry_after_reboot: bool = False
 
     def catalog_row(self) -> dict[str, Any]:
         return {
@@ -229,6 +231,7 @@ class ProjectOperation:
             "admission": self.admission.catalog_row() if self.admission else None,
             "unit_properties": list(self.unit_properties),
             "announce": self.announce,
+            "retry_after_reboot": self.retry_after_reboot,
         }
 
 
@@ -443,10 +446,11 @@ def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation
         if definition["arguments"] not in ARGUMENTS_KINDS:
             raise ProjectConfigError(f"operations.{name}.arguments is invalid")
         fields["arguments"] = definition["arguments"]
-    if "announce" in definition:
-        if not isinstance(definition["announce"], bool):
-            raise ProjectConfigError(f"operations.{name}.announce must be a boolean")
-        fields["announce"] = definition["announce"]
+    for flag in ("announce", "retry_after_reboot"):
+        if flag in definition:
+            if not isinstance(definition[flag], bool):
+                raise ProjectConfigError(f"operations.{name}.{flag} must be a boolean")
+            fields[flag] = definition[flag]
     return ProjectOperation(
         name=name,
         description=description,

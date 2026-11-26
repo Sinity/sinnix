@@ -19,6 +19,7 @@ root = "/realm/worktree"
 default_base = "origin/master"
 
 [operations.check]
+retry_after_reboot = true
 description = "Run default Sinnix checks"
 exec = ["check"]
 pool = "bulk"
@@ -31,12 +32,14 @@ timeout_seconds = 7200
 admission = { memory_mib = 4608 }
 
 [operations.check_focused]
+retry_after_reboot = true
 description = "Build explicitly selected Sinnix flake checks"
 exec = ["nix", "build", "--no-link"]
 pool = "bulk"
 timeout_seconds = 1800
 
 [operations.earlyoom_vm_verify]
+retry_after_reboot = true
 description = "Verify emergency earlyoom victim selection and real signals in an isolated VM"
 exec = ["nix", "build", "--no-link", "--max-jobs", "1", "--cores", "2", ".#heavyChecks.x86_64-linux.earlyoom-emergency-vm"]
 pool = "bulk"
@@ -46,6 +49,7 @@ admission = { memory_mib = 4096 }
 # Driver build is bounded to one builder/two cores; runtime QEMU is a direct
 # descendant, so these kernel limits cover the actual pressure workload.
 [operations.earlyoom_pressure_vm_verify]
+retry_after_reboot = true
 description = "Verify real guest memory/swap/IO pressure under explicit host limits"
 exec = ["python3", "flake/tests/earlyoom_pressure_host.py"]
 arguments = "required"
@@ -92,6 +96,7 @@ pool = "bulk"
 timeout_seconds = 1800
 
 [operations.pytest_focused]
+retry_after_reboot = true
 description = "Run selected AgentCTL and gateway Python tests"
 exec = ["nix", "develop", ".#gateway-tests", "--command", "gateway-pytest", "-q"]
 arguments = "required"
@@ -99,6 +104,7 @@ pool = "pytest"
 timeout_seconds = 1800
 
 [operations.verify_telemetry_restore]
+retry_after_reboot = true
 description = "Restore one retained telemetry SQLite zstd artifact and check its structure"
 exec = ["sinnix-sqlite-backup", "--immutable-source", "--verify-only", "--compressed-source", "--max-restore-bytes", "85899345920", "--acquire-budget-seconds", "3600"]
 arguments = "required"
@@ -108,6 +114,7 @@ admission = { memory_mib = 4096 }
 unit_properties = ["MemoryHigh=4G", "MemoryMax=5G"]
 
 [operations.verify_job_limits]
+retry_after_reboot = true
 description = "Verify declared operation limits in its actual kernel cgroup"
 exec = ["python3", "flake/tests/job_limits_native.py"]
 pool = "bulk"
@@ -131,27 +138,32 @@ pool = "normal"
 timeout_seconds = 1800
 
 [operations.verify_quick]
+retry_after_reboot = true
 description = "Run maintained lint and formatting checks before lane publication"
 exec = ["lint"]
 pool = "normal"
 
 [operations.check_heavy]
+retry_after_reboot = true
 description = "Run the heavy Sinnix check tier"
 exec = ["check-heavy"]
 pool = "bulk"
 
 [operations.check_all]
+retry_after_reboot = true
 description = "Run all Sinnix semantic checks"
 exec = ["check-all"]
 pool = "bulk"
 
 [operations.check_master]
+retry_after_reboot = true
 description = "Manually verify committed master's flake checks"
 exec = ["check-master"]
 pool = "bulk"
 timeout_seconds = 7200
 
 [operations.lint]
+retry_after_reboot = true
 description = "Run maintained Nix and shell linters"
 exec = ["lint"]
 pool = "normal"
@@ -203,12 +215,14 @@ pool = "bulk"
 timeout_seconds = 14400
 
 [operations.phone_app_build]
+retry_after_reboot = true
 description = "Build the phone application and its signing installer"
 exec = ["nix", "build", ".#sinnix-phone-app-install", "--no-link", "--print-out-paths"]
 pool = "bulk"
 timeout_seconds = 3600
 
 [operations.phone_dispatcher_build]
+retry_after_reboot = true
 description = "Build and test the phone upload and repair tools"
 exec = ["nix", "build", ".#checks.x86_64-linux.sinnix-phone-dispatcher-suite", "--no-link", "--print-out-paths"]
 pool = "normal"
@@ -221,12 +235,14 @@ pool = "normal"
 timeout_seconds = 1800
 
 [operations.build_system]
+retry_after_reboot = true
 description = "Build the declared workstation configuration without activation"
 exec = ["env", "SINNIX_SECRET_DECLARATIONS=/realm/state/secrets/sinnix/runtime.nix", "nix", "build", "--impure", "--no-link", ".#nixosConfigurations.sinnix-prime.config.system.build.toplevel"]
 pool = "system-build"
 timeout_seconds = 14400
 
 [operations.eval_system]
+retry_after_reboot = true
 description = "Measure uncached workstation evaluation with native Nix statistics"
 exec = ["env", "NIX_SHOW_STATS=1", "SINNIX_SECRET_DECLARATIONS=/realm/state/secrets/sinnix/runtime.nix", "nix", "eval", "--impure", "--no-eval-cache", ".#nixosConfigurations.sinnix-prime.config.system.build.toplevel.drvPath"]
 pool = "bulk"
@@ -258,6 +274,7 @@ pool = "bulk"
 timeout_seconds = 21600
 
 [operations.verify_report_navigation]
+retry_after_reboot = true
 description = "Verify report-index links in local and served contexts"
 exec = ["nix", "build", "--no-link", ".#checks.x86_64-linux.report-navigation-suite"]
 pool = "normal"
@@ -285,6 +302,7 @@ result = "json"
 timeout_seconds = 3600
 
 [operations.filesystem_accounting]
+retry_after_reboot = true
 description = "Read compression and shared-extent accounting for explicit physical paths"
 exec = ["sinnix-fs", "maintain", "account"]
 arguments = "required"
@@ -293,6 +311,7 @@ result = "json"
 timeout_seconds = 7200
 
 [operations.filesystem_usage]
+retry_after_reboot = true
 description = "Measure allocated directory bytes on explicit paths with idle I/O priority"
 exec = ["sudo", "-n", "ionice", "-c", "3", "nice", "-n", "15", "du", "-x", "-B1", "--max-depth=2", "--"]
 arguments = "required"
@@ -300,6 +319,7 @@ pool = "background"
 timeout_seconds = 7200
 
 [operations.filesystem_store_gc_plan]
+retry_after_reboot = true
 description = "List native unreachable Nix store paths without deleting roots or payloads"
 exec = ["nix-store", "--store", "daemon", "--gc", "--print-dead"]
 pool = "background"
@@ -330,6 +350,7 @@ pool = "background"
 timeout_seconds = 7500
 
 [operations.backup_archive_inventory]
+retry_after_reboot = true
 description = "Measure logical file-size prefixes in one explicit Borg archive without restoring contents"
 exec = ["python3", "flake/tests/backup_archive_inventory.py"]
 arguments = "required"

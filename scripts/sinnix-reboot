@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Save the current graphical session and request a reboot
+# runtimeInputs: systemd
+# docs: docs/desktop-session.md
+set -euo pipefail
+
+if [[ $# != 0 ]]; then
+  printf 'Usage: sinnix reboot\n'
+  [[ $# == 1 && ( $1 == --help || $1 == -h ) ]]
+  exit
+fi
+
+systemctl --user start sinnix-desktop-snapshot.service
+exec systemctl reboot

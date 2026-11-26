@@ -27,7 +27,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterator, Mapping
 
 from .claims import SESSION_VARIABLES, parse_duration
 
@@ -353,6 +353,39 @@ def _terminal_used(path: str | None) -> float | None:
         return None
 
 
+def claude_processes(
+    config_dir: Path, proc: Path
+) -> Iterator[tuple[int, str, dict[str, Any], list[str]]]:
+    """Live interactive registry entries with their verified process stat fields."""
+    for entry in sorted((config_dir / "sessions").glob("*.json")):
+        try:
+            record = json.loads(entry.read_text())
+            pid, session = int(record["pid"]), str(record["sessionId"])
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        fields = _stat_fields(proc, pid)
+        # A reused process id is another process: its start time differs.
+        if fields is None or str(record.get("procStart")) != fields[19]:
+            continue
+        if record.get("kind") != "interactive":
+            continue
+        yield pid, session, record, fields
+
+
+def codex_transcript(process: Path) -> Path | None:
+    try:
+        for link in (process / "fd").iterdir():
+            try:
+                target = os.readlink(link)
+            except OSError:
+                continue
+            if "/rollout-" in target and target.endswith(".jsonl"):
+                return Path(target)
+    except OSError:
+        pass
+    return None
+
+
 def collect(
     *,
     config_dir: Path | None = None,
@@ -366,18 +399,7 @@ def collect(
     config_dir = config_dir or claude_config_dir()
     rows: list[dict[str, Any]] = []
     claude_pids: set[int] = set()
-    for entry in sorted((config_dir / "sessions").glob("*.json")):
-        try:
-            record = json.loads(entry.read_text())
-            pid, session = int(record["pid"]), str(record["sessionId"])
-        except (OSError, ValueError, KeyError, TypeError):
-            continue
-        fields = _stat_fields(proc, pid)
-        # A reused process id is another process: its start time differs.
-        if fields is None or str(record.get("procStart")) != fields[19]:
-            continue
-        if record.get("kind") != "interactive":
-            continue
+    for pid, session, record, fields in claude_processes(config_dir, proc):
         claude_pids.add(pid)
         cwd = str(record.get("cwd") or "")
         transcript = claude_transcript(config_dir, cwd, session)
@@ -453,15 +475,7 @@ def _codex_sessions(
         fields = _stat_fields(proc, pid)
         if fields is None:
             continue
-        transcript = None
-        try:
-            for link in (entry / "fd").iterdir():
-                target = os.readlink(link)
-                if "/rollout-" in target and target.endswith(".jsonl"):
-                    transcript = Path(target)
-                    break
-        except OSError:
-            pass
+        transcript = codex_transcript(entry)
         session = transcript.stem[-36:] if transcript else None
         try:
             cwd = os.readlink(entry / "cwd")

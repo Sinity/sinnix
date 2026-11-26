@@ -6,6 +6,10 @@ shell_bin="${SHELL:-}"
 if [[ -z "$shell_bin" || ! -x "$shell_bin" ]]; then
   shell_bin="$(command -v zsh)"
 fi
+shell_command='"$SINNIX_CAPTURE_SHELL"'
+for arg in "$@"; do
+  shell_command+=" '${arg//\'/\'\\\'\'}'"
+done
 
 capture_root_file="${XDG_CONFIG_HOME:-$HOME/.config}/sinnix/terminal-capture-root"
 if [[ -r "$capture_root_file" ]]; then
@@ -76,11 +80,11 @@ done < <(env)
 unset SINNIX_CAPTURE_ACTIVE SINNIX_CAPTURE_CAST_FILE ASCIINEMA_SESSION || true
 
 if [[ -n "$capture_disabled" || -n "${TMUX:-}" || ! -t 0 || -z "${KITTY_PID:-}" ]]; then
-  exec "$shell_bin"
+  exec "$shell_bin" "$@"
 fi
 
 if ! command -v asciinema >/dev/null 2>&1 || ! command -v setsid >/dev/null 2>&1; then
-  exec "$shell_bin"
+  exec "$shell_bin" "$@"
 fi
 
 # The recorder owns private captures; the interactive shell keeps its caller's
@@ -359,7 +363,7 @@ run_recorder() {
     --return \
     --output-format asciicast-v3 \
     --capture-env SHELL,TERM,SINNIX_CAPTURE_SESSION_ID,SINNIX_CAPTURE_HOST,SINNIX_CAPTURE_USER,SINNIX_CAPTURE_TTY,SINNIX_CAPTURE_TERMINAL,SINNIX_CAPTURE_START_CWD,SINNIX_CAPTURE_START_REPO_ROOT,SINNIX_CAPTURE_PROJECT_ROOT \
-    --command "umask $shell_umask; exec \"\$SINNIX_CAPTURE_SHELL\""
+    --command "umask $shell_umask; exec $shell_command"
 }
 
 # The recorder must not hold the events pipe open past the launcher.

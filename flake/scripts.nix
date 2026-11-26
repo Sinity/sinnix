@@ -34,6 +34,7 @@ let
   discovery = import ./script-discovery.nix {
     inherit lib pkgs;
     siblingExtras = {
+      agentctl = externalPackages.agentctl;
       sinnix-capture = externalPackages.sinnix-capture;
       # Importable, not executable: named by a script's `pythonPackages`
       # frontmatter, which builds that script's shebang interpreter with the

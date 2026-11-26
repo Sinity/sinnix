@@ -1,0 +1,485 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Save and restore the desktop's working session across boots
+# runtimeInputs: hyprland kitty libnotify systemd @agentctl
+# pythonPackages: @sinnix-lib @sinnix-runtime
+# docs: docs/desktop-session.md
+"""Snapshot only the data needed to reopen windows, conversations and jobs."""
+
+import argparse
+import json
+import os
+import re
+import shlex
+import stat
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+from sinnix_lib.atomic import atomic_publish
+from sinnix_runtime.operator_state.sessions import (
+    CODEX_NOT_INTERACTIVE,
+    _agent_name,
+    _argv,
+    _stat_fields,
+    claude_config_dir,
+    claude_processes,
+    codex_transcript,
+)
+
+SESSION_ID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", re.I)
+BOOT_ID = re.compile(r"[0-9a-f]{32}")
+RESUME = {"claude": ("claude", "--resume"), "codex": ("codex", "resume")}
+TOOL_TIMEOUT = 5
+SNAPSHOTS_TO_KEEP = 3
+
+
+def call(*argv):
+    result = subprocess.run(
+        argv, capture_output=True, text=True, errors="replace", timeout=TOOL_TIMEOUT
+    )
+    if result.returncode:
+        raise RuntimeError(
+            result.stderr.strip() or f"{argv[0]} exited {result.returncode}"
+        )
+    return result.stdout.strip()
+
+
+def put_json(path, value):
+    atomic_publish(path, (json.dumps(value) + "\n").encode(), fsync=True, mode=0o600)
+
+
+def get_json(path):
+    return json.loads(path.read_text())
+
+
+def runtime_dir():
+    return Path(os.environ["XDG_RUNTIME_DIR"])
+
+
+def state_dir():
+    return (
+        Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state")
+        / "sinnix/session"
+    )
+
+
+def current_boot():
+    return Path("/proc/sys/kernel/random/boot_id").read_text().strip().replace("-", "")
+
+
+def previous_boot():
+    result = subprocess.run(
+        [
+            "journalctl",
+            "-b",
+            "-1",
+            "-n",
+            "1",
+            "-o",
+            "json",
+            "--output-fields=_BOOT_ID",
+            "--no-pager",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    boot = (
+        json.loads(result.stdout).get("_BOOT_ID", "") if result.stdout.strip() else ""
+    )
+    return boot if BOOT_ID.fullmatch(boot) else None
+
+
+def proc_rows(proc):
+    """Return same-user processes with a stable parent and terminal view."""
+    rows = {}
+    for entry in proc.iterdir():
+        if not entry.name.isdecimal():
+            continue
+        try:
+            if entry.stat().st_uid != os.getuid():
+                continue
+        except OSError:
+            continue
+        pid = int(entry.name)
+        fields = _stat_fields(proc, pid)
+        if fields and len(fields) > 19:
+            rows[pid] = fields
+    return rows
+
+
+def child_processes(rows, root):
+    """Walk past Kitty's capture wrapper and recorder into the inner PTY."""
+    children = {}
+    for pid, fields in rows.items():
+        children.setdefault(int(fields[1]), []).append(pid)
+    stack = [root]
+    while stack:
+        pid = stack.pop()
+        stack.extend(reversed(children.get(pid, ())))
+        yield pid
+
+
+def terminal_details(window, rows, claude, proc):
+    restore = {"title": window.get("title", ""), "cwd": window.get("cwd", "")}
+    for pid in child_processes(rows, window["pid"]):
+        fields = rows.get(pid)
+        if not fields or fields[4] == "0":
+            continue
+        try:
+            cwd = os.readlink(proc / str(pid) / "cwd")
+        except OSError:
+            continue
+        if fields[3] == str(pid):
+            # The inner PTY's shell is its session leader. Kitty reports the
+            # outer recorder's original cwd even after an interactive cd.
+            restore["cwd"] = cwd
+        if pid in claude:
+            session, cwd = claude[pid]
+            harness = "claude"
+        else:
+            argv = _argv(proc, pid)
+            if _agent_name(argv) != "codex" or CODEX_NOT_INTERACTIVE & set(argv[1:]):
+                continue
+            transcript = codex_transcript(proc / str(pid))
+            session = transcript.stem[-36:] if transcript else ""
+            harness = "codex"
+        # An agent launched as a background shell job does not own the pane.
+        if SESSION_ID.fullmatch(session) and fields[2] == fields[5]:
+            restore.update(cwd=cwd or restore["cwd"], agent=harness, session=session)
+            break
+    return restore
+
+
+def kitty_inventory(runtime):
+    for socket in sorted(runtime.glob("kitty-*")):
+        if not socket.name.rpartition("-")[2].isdigit() or not socket.is_socket():
+            continue
+        pid = int(socket.name.rpartition("-")[2])
+        if not Path(f"/proc/{pid}").exists():
+            continue
+        yield pid, json.loads(call("kitten", "@", "--to", f"unix:{socket}", "ls"))
+
+
+def active_title(window):
+    tab = next((tab for tab in window["tabs"] if tab["is_active"]), None)
+    if tab:
+        pane = next((pane for pane in tab["windows"] if pane["is_active"]), None)
+        return pane["title"] if pane else None
+    return None
+
+
+def kitty_windows(inventory, clients, rows, claude, proc):
+    windows = []
+    for pid, instance in inventory:
+        for window in instance:
+            if window["wm_class"] == "scratchpad-weechat":
+                continue
+            peers = [
+                client
+                for client in clients
+                if client["pid"] == pid and client["class"] == window["wm_class"]
+            ]
+            matching = [
+                client for client in peers if client["title"] == active_title(window)
+            ]
+            # Wayland exposes no shared numeric window id in Kitty's listing.
+            # A unique title identifies the OS window. An ambiguous title
+            # still identifies the workspace if its matches agree.
+            candidates = matching or peers
+            client = candidates[0] if len(candidates) == 1 else None
+            workspaces = {item["workspace"]["id"] for item in candidates}
+            workspace = workspaces.pop() if len(workspaces) == 1 else None
+            tabs = []
+            for tab in window["tabs"]:
+                panes = [
+                    terminal_details(pane, rows, claude, proc)
+                    for pane in tab["windows"]
+                ]
+                if panes:
+                    tabs.append({"title": tab["title"], "panes": panes})
+            if tabs:
+                windows.append(
+                    {
+                        "kitty_pid": pid,
+                        "class": window["wm_class"],
+                        "workspace": workspace,
+                        "geometry": (
+                            {key: client[key] for key in ("at", "size")}
+                            if client
+                            else None
+                        ),
+                        "tabs": tabs,
+                    }
+                )
+    return windows
+
+
+def active_jobs():
+    return json.loads(call("agentctl", "job", "list", "--active", "--all", "--json"))
+
+
+def snapshot(root, boot, proc, runtime):
+    call("systemctl", "--user", "is-active", "graphical-session.target")
+    clients = json.loads(call("hyprctl", "-j", "clients"))
+    rows = proc_rows(proc)
+    claude = {
+        pid: (session, record.get("cwd") or "")
+        for pid, session, record, _ in claude_processes(claude_config_dir(), proc)
+    }
+    kitty = kitty_windows(kitty_inventory(runtime), clients, rows, claude, proc)
+    chrome = any(
+        client["class"].lower() in {"google-chrome", "google-chrome-stable"}
+        for client in clients
+    )
+    if not chrome:
+        for pid in rows:
+            argv = _argv(proc, pid)
+            if (
+                argv
+                and Path(argv[0]).name == "chrome"
+                and not any(flag.startswith("--type=") for flag in argv[1:])
+            ):
+                chrome = True
+                break
+    errors = []
+    try:
+        jobs = [
+            {key: row[key] for key in ("task_id", "job_id", "phase", "started_at")}
+            for row in active_jobs()
+            if row["job_id"]
+        ]
+    except (RuntimeError, OSError, subprocess.TimeoutExpired, ValueError):
+        jobs = []
+        errors.append("AgentCTL queue was unavailable during capture")
+    # Recheck after the queries, before publishing. A manual invocation outside
+    # the desktop and a session that disappeared during capture both fail.
+    call("systemctl", "--user", "is-active", "graphical-session.target")
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    moment = time.time_ns()
+    put_json(
+        root / f"snapshot-{moment}-{boot}.json",
+        {
+            "boot_id": boot,
+            "captured_ns": moment,
+            "kitty": kitty,
+            "chrome": chrome,
+            "jobs": jobs,
+            "errors": errors,
+        },
+    )
+    for expired in sorted(root.glob("snapshot-*.json"), reverse=True)[
+        SNAPSHOTS_TO_KEEP:
+    ]:
+        expired.unlink()
+    print(
+        f"Saved {len(kitty)} Kitty windows, Chrome {'open' if chrome else 'closed'}, {len(jobs)} jobs."
+    )
+
+
+def read_snapshot(root, boot):
+    if not boot:
+        return None
+    for path in sorted(root.glob(f"snapshot-*-{boot}.json"), reverse=True):
+        try:
+            value = get_json(path)
+            if value["boot_id"] == boot and isinstance(value["kitty"], list):
+                return value
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    return None
+
+
+def single_line(value):
+    return " ".join(value.splitlines()).replace("\x00", "")
+
+
+def kitty_session(window, executable):
+    lines = []
+    for tab in window["tabs"]:
+        # An unnamed first tab is created implicitly by Kitty. Preserve
+        # tab titles and pane membership through its native session grammar.
+        title = single_line(tab["title"]).replace("$", "$$")
+        lines.append(f"new_tab {title}" if title else "new_tab")
+        for pane in tab["panes"]:
+            cwd = pane["cwd"]
+            argv = [
+                executable,
+                "terminal",
+                cwd if cwd and single_line(cwd) == cwd else "",
+            ]
+            if pane.get("agent") in RESUME and SESSION_ID.fullmatch(
+                pane.get("session", "")
+            ):
+                argv.extend([pane["agent"], pane["session"]])
+            title = single_line(pane["title"]).replace("$", "$$")
+            if title:
+                argv.insert(0, f"--title={title}")
+            lines.append("launch " + shlex.join(argv))
+    return "\n".join(lines) + "\n"
+
+
+def reopen_terminal(cwd, harness, session):
+    try:
+        os.chdir(cwd or Path.home())
+    except OSError:
+        os.chdir(Path.home())
+        print(
+            "The saved directory is unavailable. Opened a shell in your home directory.",
+            flush=True,
+        )
+        harness = None
+    shell = str(Path.home() / ".local/bin/sinnix-captured-shell")
+    argv = [shell]
+    if harness and SESSION_ID.fullmatch(session):
+        resume = shlex.join([*RESUME[harness], session])
+        argv.extend(["-ic", f'{resume}; exec "$SHELL"'])
+    os.execv(shell, argv)
+
+
+def interrupted_jobs(jobs):
+    for saved in jobs:
+        if saved["phase"] not in {"running", "paused"} or not saved["started_at"]:
+            continue
+        task_id = str(saved["task_id"])
+        identity = ("--job-id", saved["job_id"])
+        row = {"task_id": saved["task_id"], "job_id": saved["job_id"]}
+        try:
+            current = json.loads(
+                call("agentctl", "job", "get", task_id, *identity, "--json")
+            )
+            if current["phase"] in {"succeeded", "timeout", "out-of-memory", "refused"}:
+                continue
+            if (current.get("cancellation") or {}).get("stopped"):
+                continue
+            if current["phase"] == "failed" and current["exit_code"] not in {137, 143}:
+                continue
+            if (
+                current.get("queue_present")
+                and current["started_at"] != saved["started_at"]
+            ):
+                continue
+            if current["result"] != "Killed":
+                yield {
+                    **row,
+                    "status": "reported",
+                    "reason": "queue interruption could not be confirmed",
+                }
+                continue
+            call(
+                "agentctl",
+                "job",
+                "retry",
+                task_id,
+                *identity,
+                "--interrupted-start",
+                saved["started_at"],
+            )
+            yield {**row, "status": "retried"}
+        except (RuntimeError, OSError, subprocess.TimeoutExpired, ValueError) as error:
+            yield {**row, "status": "reported", "reason": str(error)}
+
+
+def restore(root, boot, runtime, executable):
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    receipt_path = root / "restore.json"
+    if receipt_path.exists() and get_json(receipt_path).get("boot_id") == boot:
+        print("A restore receipt already exists for this boot.")
+        return
+    prior = previous_boot() if any(root.glob("snapshot-*.json")) else None
+    saved = read_snapshot(root, prior)
+    receipt = {"boot_id": boot, "previous_boot_id": prior}
+    if saved is None:
+        put_json(receipt_path, {**receipt, "status": "no-previous-boot-snapshot"})
+        print("No previous-boot desktop snapshot.")
+        return
+
+    receipt.update(
+        status="restoring",
+        captured_ns=saved["captured_ns"],
+        kitty_windows_started=0,
+        chrome_started=False,
+        jobs=[],
+        errors=saved["errors"],
+    )
+    put_json(receipt_path, receipt)
+    launches = runtime / "sinnix-desktop-session"
+    launches.mkdir(mode=0o700, exist_ok=True)
+    for number, window in enumerate(saved["kitty"]):
+        path = launches / f"window-{number}.kitty-session"
+        atomic_publish(path, kitty_session(window, executable).encode(), fsync=False)
+        # Hyprland applies its exec rules to a newly launched window. Launch
+        # each OS window separately so Kitty's shared PID can't mix workspaces.
+        command = shlex.join(
+            ["kitty", "--class", window["class"], "--session", str(path)]
+        )
+        workspace = window["workspace"]
+        if type(workspace) is int and workspace > 0:
+            command = f"[workspace {workspace} silent] {command}"
+        else:
+            receipt["errors"].append(
+                f"Kitty window {number + 1} has no matched numbered workspace"
+            )
+        try:
+            if call("hyprctl", "dispatch", "exec", command) != "ok":
+                raise RuntimeError("Hyprland refused the launch")
+            receipt["kitty_windows_started"] += 1
+        except (RuntimeError, OSError, subprocess.TimeoutExpired):
+            receipt["errors"].append(f"Kitty window {number + 1} could not be started")
+        put_json(receipt_path, receipt)
+    if saved["chrome"]:
+        try:
+            call("sinnix-chrome")
+            receipt["chrome_started"] = True
+        except (RuntimeError, OSError, subprocess.TimeoutExpired):
+            receipt["errors"].append("Chrome could not be started")
+        put_json(receipt_path, receipt)
+    for job in interrupted_jobs(saved["jobs"]):
+        receipt["jobs"].append(job)
+        put_json(receipt_path, receipt)
+    receipt["status"] = "restored-with-errors" if receipt["errors"] else "restored"
+    put_json(receipt_path, receipt)
+    summary = [
+        f"Started {receipt['kitty_windows_started']} Kitty windows"
+        + (" and Chrome." if receipt["chrome_started"] else ".")
+    ]
+    summary.extend(
+        f"AgentCTL {job['job_id']} (task {job['task_id']}): {job['status']}"
+        for job in receipt["jobs"]
+    )
+    summary.extend(receipt["errors"])
+    try:
+        call("notify-send", "--", "Desktop session restored", "\n".join(summary))
+    except (RuntimeError, OSError, subprocess.TimeoutExpired):
+        print("Desktop restore notification could not be delivered.", file=sys.stderr)
+    print(
+        f"Desktop restore: {receipt['status']}. {len(receipt['jobs'])} interrupted jobs."
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    verbs = parser.add_subparsers(dest="verb", required=True)
+    verbs.add_parser("snapshot")
+    restore_parser = verbs.add_parser("restore")
+    restore_parser.add_argument("--executable", required=True)
+    terminal = verbs.add_parser("terminal")
+    terminal.add_argument("cwd")
+    terminal.add_argument("harness", choices=RESUME, nargs="?")
+    terminal.add_argument("session", nargs="?")
+    args = parser.parse_args()
+    if args.verb == "terminal":
+        reopen_terminal(args.cwd, args.harness, args.session or "")
+    elif args.verb == "snapshot":
+        snapshot(state_dir(), current_boot(), Path("/proc"), runtime_dir())
+    else:
+        restore(state_dir(), current_boot(), runtime_dir(), args.executable)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as error:
+        sys.exit(f"Desktop session: {error}")

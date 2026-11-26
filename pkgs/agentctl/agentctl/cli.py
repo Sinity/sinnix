@@ -260,6 +260,11 @@ def parser() -> argparse.ArgumentParser:
         one = job_verbs.add_parser(name)
         one.add_argument("task_id", type=int)
         _job_id_option(one)
+        if name == "retry":
+            one.add_argument(
+                "--interrupted-start",
+                help="retry only a killed, reboot-retryable attempt with this saved start timestamp",
+            )
         if name in {"get", "logs", "result"}:
             one.add_argument(
                 "--attempt", type=int, help="execution attempt (latest by default)"
@@ -529,7 +534,12 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         out.write(job, f"{out.job_line(job)}; cleaned")
         return EXIT_OK
     if verb == "retry":
-        job = launch.retry(config, arguments.task_id, arguments.job_id)
+        job = launch.retry(
+            config,
+            arguments.task_id,
+            arguments.job_id,
+            interrupted_start=arguments.interrupted_start,
+        )
         out.write(job, out.job_line(job))
         return EXIT_OK
     if verb == "admit":
