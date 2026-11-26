@@ -394,10 +394,12 @@ mkFeatureModule {
               # With its Routines setting on, Plannotator writes this unit
               # file itself at every start, naming its unwrapped binary: run
               # that way it adds its tool server to agents' private configs
-              # and a note to their instruction files. Activation puts the
-              # declared file back, and the drop-in holds the command for
-              # whichever of the two files is in place.
+              # and a note to their instruction files. It also enables the
+              # unit, which replaces the link in default.target.wants.
+              # Activation puts the declared file and link back, and the
+              # drop-in holds the command for whichever unit file is in place.
               "systemd/user/plannotator-inbox.service".force = true;
+              "systemd/user/default.target.wants/plannotator-inbox.service".force = true;
               "systemd/user/plannotator-inbox.service.d/10-launcher.conf".text = ''
                 [Service]
                 ExecStartPre=

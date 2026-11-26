@@ -146,6 +146,20 @@ in
               message = "Claude settings.json must not be managed through Home Manager xdg.configFile.";
             }
             {
+              # Every Home Manager path of the unit that Plannotator rewrites
+              # (the file) or `systemctl --user enable` relinks (the wants
+              # link) is forced; an unforced one fails the next activation.
+              assertion =
+                let
+                  written = lib.filterAttrs (
+                    path: _: lib.hasPrefix "systemd/user/" path && lib.hasSuffix "/plannotator-inbox.service" "/${path}"
+                  ) hm.xdg.configFile;
+                in
+                builtins.length (lib.attrNames written) == 2
+                && lib.all (entry: entry.force) (lib.attrValues written);
+              message = "The Inbox unit file and its default.target link are rewritten by Plannotator, so Home Manager must replace them instead of refusing to activate.";
+            }
+            {
               assertion = lib.hasInfix "export PATH=\"$HOME/.local/bin:" codexWrapperText;
               message = "the Codex wrapper must resolve nested codex calls through ~/.local/bin before its private npm prefix";
             }
