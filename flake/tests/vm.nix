@@ -72,15 +72,31 @@ in
 
             machine.succeed("loginctl enable-linger sinity")
             machine.wait_for_unit(f"user@{uid}.service")
+            show = f"{as_user} systemctl --user show polylogue-live.service --value -p"
+            # Type=notify: the unit is active only once the socket answers.
+            # Status answers at once; it exits 5 (degraded) while the first
+            # index is still being built.
             machine.wait_for_unit("polylogue-live.service", "sinity")
-            machine.succeed(f"{as_user} systemctl --user is-active --quiet polylogue-live.service")
-            # The CLI exits 6 until the daemon answers on its socket.
-            machine.wait_until_succeeds(
-                f"{as_user} sh -c '/etc/profiles/per-user/sinity/bin/polylogue status --json > /tmp/polylogue-status.json'",
-                timeout=120,
+            machine.succeed(
+                f"{as_user} sh -c '/etc/profiles/per-user/sinity/bin/polylogue status --json > /tmp/polylogue-status.json; rc=$?; [ $rc = 0 ] || [ $rc = 5 ]'"
             )
             machine.succeed("jq -e 'type == \"object\"' /tmp/polylogue-status.json >/dev/null")
             machine.succeed("test -S /realm/state/polylogue-live/data/polylogue/daemon.sock")
+            assert machine.succeed(f"{show} WatchdogUSec").strip() == "30s"
+            machine.wait_until_succeeds(f"{show} StatusText | grep -q '^Serving'")
+
+            # A kill, as the kernel's OOM killer ends it, is restarted and
+            # reported: Restart= keeps the unit out of the failed state, so
+            # the report comes from ExecStopPost.
+            first = machine.succeed(f"{show} MainPID").strip()
+            machine.succeed(f"kill -KILL {first}")
+            machine.wait_until_succeeds(f"test \"$({show} NRestarts)\" = 1", timeout=60)
+            machine.wait_for_unit("polylogue-live.service", "sinity")
+            assert machine.succeed(f"{show} MainPID").strip() != first
+            machine.succeed(
+                "jq -e '.\"service:user:polylogue-live.service\".status == \"failed\"' "
+                "/run/sinnix/health-state.json"
+            )
           '';
         };
         transmission-vm = mkVmCheck system {

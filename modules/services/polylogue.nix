@@ -236,12 +236,24 @@ mkServiceModule {
             Unit.Description = "Polylogue daemon over the live archive";
             Service = liveServiceClass // {
               ExecStart = "${cli}/bin/polylogue daemon" + lib.optionalString (!cfg.readSources) " --no-sources";
-              # Restart even after a clean stop: a SIGTERM from the OOM response counts as clean.
+              # Active only once the socket answers. While it opens, the
+              # daemon names each step in the status line and extends the
+              # start timeout, so a long index open never trips it. Serving,
+              # it feeds the watchdog from answers on its own socket.
+              Type = "notify";
+              NotifyAccess = "main";
+              WatchdogSec = "30s";
+              # Restart even after a clean exit nobody asked for: a SIGTERM
+              # from the OOM response counts as clean. The delay grows from
+              # 5 s to 5 min across repeated failures.
               Restart = "always";
               RestartSec = "5s";
-              # The daemon exits 78 when it refuses the archive (a schema it
-              # cannot migrate); restarting cannot change that.
-              RestartPreventExitStatus = 78;
+              RestartSteps = 5;
+              RestartMaxDelaySec = "5min";
+              # Restarting cannot change either: 78 is a refused archive (a
+              # schema it cannot migrate), 74 a failed disk sync, refused
+              # again until reboot.
+              RestartPreventExitStatus = "74 78";
               # Clean stops sync the index build so it resumes; SIGKILL forces a rebuild.
               # Fifteen minutes covers syncing a large file under disk contention.
               TimeoutStopSec = "15min";

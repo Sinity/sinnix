@@ -5,8 +5,10 @@
 # from the extension directory.
 #
 # Provably fails when: the unit's ExecStart or the host manifest stops going
-# through the polylogue wrapper, or the extension ID derivation changes
-# (checked against an ID Chrome assigned to a known path).
+# through the polylogue wrapper, the extension ID derivation changes
+# (checked against an ID Chrome assigned to a known path), or the unit stops
+# waiting for readiness, feeding a watchdog, restarting with a growing delay,
+# or refusing to restart a refused archive (78) or a failed disk sync (74).
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;
@@ -123,7 +125,11 @@ in
                 .Slice == "live.slice" and (has("IOWeight") | not) and
                 (has("Nice") | not) and (has("IOSchedulingPriority") | not) and
                 (has("MemoryHigh") | not) and .MemoryMax == "8G" and
-                .MemorySwapMax == "1G"
+                .MemorySwapMax == "1G" and
+                .Type == "notify" and .NotifyAccess == "main" and
+                .WatchdogSec == "30s" and .Restart == "always" and
+                .RestartSteps == 5 and .RestartMaxDelaySec == "5min" and
+                .RestartPreventExitStatus == "74 78"
               ' <<<"$servicePolicy" >/dev/null
               jq -e --arg wrapper "$wrapper" --arg id "$id" '
                 .path == $wrapper and
