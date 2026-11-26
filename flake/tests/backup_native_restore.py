@@ -35,6 +35,7 @@ SCOPES = {
     "realm": "borgbackup-job-realm.service",
     "persist": "borgbackup-job-persist.service",
 }
+BACKUP_POLICY = Path("/etc/sinnix/backup.json")
 
 
 def selected_target(payload, version, scope):
@@ -73,19 +74,13 @@ def selected_target(payload, version, scope):
 
 def installed_owner(scope):
     unit = SCOPES[scope]
-    start = subprocess.check_output(
-        ["systemctl", "show", unit, "-p", "ExecStart", "--value"], text=True
-    )
-    script = Path(re.search(r"path=(\S+) ;", start)[1]).read_text()
-    shell = shlex.split(script.splitlines()[0][2:])[0]
-    values = {}
-    for name in ("BORG_REPO", "BORG_PASSCOMMAND", "BORG_CACHE_DIR"):
-        words = shlex.split(
-            re.search(r"^\s*export " + name + r"=(.*)$", script, re.M)[1]
-        )
-        if len(words) != 1:
-            raise ValueError("archive owner has a nonliteral environment binding")
-        values[name] = words[0]
+    policy = json.loads(BACKUP_POLICY.read_text())
+    repository = policy["sources"][scope]["repository"]
+    values = {
+        "BORG_REPO": policy["repositories"][repository]["url"],
+        "BORG_PASSCOMMAND": shlex.join(["cat", policy["passphrase_path"]]),
+        "BORG_CACHE_DIR": policy["cache_directory"],
+    }
     declared = subprocess.check_output(
         ["systemctl", "show", unit, "-p", "Environment", "--value"], text=True
     )
@@ -119,7 +114,7 @@ def installed_owner(scope):
     )
     # The child receives this only after flock has acquired the owner mutex.
     values["SINNIX_BORG_GLOBAL_LOCK_HELD"] = "1"
-    return shell, values
+    return "bash", values
 
 
 def owner_read(shell, values, argv, seconds, output_limit):

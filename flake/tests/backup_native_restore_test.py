@@ -130,14 +130,24 @@ class RestoreProof(unittest.TestCase):
 
     def test_owner_reference_and_job_scratch_reach_the_privileged_reader(self):
         with tempfile.TemporaryDirectory() as directory:
-            script = Path(directory) / "owner"
-            script.write_text(
-                "#!/bin/bash\nexport BORG_REPO='file:///synthetic/repo'\n"
-                "export BORG_PASSCOMMAND='/synthetic/cat /run/secret/synthetic'\n"
-                "export BORG_CACHE_DIR='/synthetic/cache'\n"
+            policy = Path(directory) / "backup.json"
+            policy.write_text(
+                """{
+                  "sources": {
+                    "realm": {"repository": "realm-repo"},
+                    "persist": {"repository": "persist-repo"}
+                  },
+                  "repositories": {
+                    "realm-repo": {"url": "file:///synthetic/realm"},
+                    "persist-repo": {"url": "file:///synthetic/persist"}
+                  },
+                  "passphrase_path": "/run/secret/synthetic",
+                  "cache_directory": "/synthetic/cache"
+                }"""
             )
-            responses = [f"{{ path={script} ; }}", "PATH=/synthetic/bin", ""]
+            responses = ["PATH=/synthetic/bin", ""]
             with (
+                patch.object(RESTORE, "BACKUP_POLICY", policy),
                 patch.object(
                     RESTORE.subprocess, "check_output", side_effect=responses
                 ) as output,
@@ -162,6 +172,7 @@ class RestoreProof(unittest.TestCase):
                 )
             )
             with (
+                patch.object(RESTORE, "BACKUP_POLICY", policy),
                 patch.object(
                     RESTORE.subprocess, "check_output", side_effect=responses
                 ) as output,
@@ -173,16 +184,19 @@ class RestoreProof(unittest.TestCase):
                     },
                 ),
             ):
-                RESTORE.installed_owner("persist")
+                _, persist_values = RESTORE.installed_owner("persist")
             self.assertTrue(
                 all(
                     call.args[0][2] == "borgbackup-job-persist.service"
                     for call in output.call_args_list
                 )
             )
-            self.assertEqual(shell, "/bin/bash")
+            self.assertEqual(shell, "bash")
+            self.assertEqual(values["BORG_REPO"], "file:///synthetic/realm")
+            self.assertEqual(persist_values["BORG_REPO"], "file:///synthetic/persist")
+            self.assertEqual(values["BORG_CACHE_DIR"], "/synthetic/cache")
             self.assertEqual(
-                values["BORG_PASSCOMMAND"], "/synthetic/cat /run/secret/synthetic"
+                values["BORG_PASSCOMMAND"], "cat /run/secret/synthetic"
             )
             self.assertEqual(values["TMPDIR"], "/synthetic/task-scratch")
             self.assertEqual(values["BORG_HOST_ID"], "fixture@stable")
