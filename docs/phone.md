@@ -123,7 +123,10 @@ the lock screen through the ROM's profile service, keeping the PIN. A root
 watchdog restores the lock policy when the window ends, even if the command or
 ADB connection dies, and a Magisk boot hook
 (`/data/adb/service.d/sinnix-keyguard-recovery.sh`) restores it after a
-reboot. The phone must already have been unlocked once since boot.
+reboot. The phone must already have been unlocked once since boot. The command
+stays in the foreground until the window ends and the lock is back, so work
+that needs the unlocked phone runs beside it: start `unlock` in the
+background, wait for its `KEYGUARD_DISMISSED` line, then run the work.
 
 ## Transport
 
