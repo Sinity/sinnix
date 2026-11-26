@@ -2,7 +2,7 @@
 
 The input receipt contains expected archive identity and a complete file digest.
 Only digests and diagnostics reach job output; restored bytes stay in memory.
-Authentication references and PATH come from the installed archive owner.
+Authentication references come from the installed archive policy.
 """
 
 import argparse
@@ -36,6 +36,7 @@ SCOPES = {
     "persist": "borgbackup-job-persist.service",
 }
 BACKUP_POLICY = Path("/etc/sinnix/backup.json")
+SYSTEM_BIN = Path("/run/current-system/sw/bin")
 
 
 def selected_target(payload, version, scope):
@@ -80,6 +81,7 @@ def installed_owner(scope):
         "BORG_REPO": policy["repositories"][repository]["url"],
         "BORG_PASSCOMMAND": shlex.join(["cat", policy["passphrase_path"]]),
         "BORG_CACHE_DIR": policy["cache_directory"],
+        "PATH": str(SYSTEM_BIN),
     }
     declared = subprocess.check_output(
         ["systemctl", "show", unit, "-p", "Environment", "--value"], text=True
@@ -87,7 +89,6 @@ def installed_owner(scope):
     for item in shlex.split(declared):
         name, separator, value = item.partition("=")
         if separator and name in {
-            "PATH",
             "HOME",
             "BORG_BASE_DIR",
             "BORG_CONFIG_DIR",
@@ -104,8 +105,6 @@ def installed_owner(scope):
         or "root"
     )
     values.setdefault("HOME", pwd.getpwnam(user).pw_dir)
-    if "PATH" not in values:
-        raise ValueError("installed archive owner has no declared PATH")
     if not os.environ.get("TMPDIR"):
         raise ValueError("native restore requires managed job scratch")
     values["TMPDIR"] = os.environ["TMPDIR"]
@@ -114,7 +113,7 @@ def installed_owner(scope):
     )
     # The child receives this only after flock has acquired the owner mutex.
     values["SINNIX_BORG_GLOBAL_LOCK_HELD"] = "1"
-    return "bash", values
+    return str(SYSTEM_BIN / "bash"), values
 
 
 def owner_read(shell, values, argv, seconds, output_limit):

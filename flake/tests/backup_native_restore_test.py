@@ -145,7 +145,7 @@ class RestoreProof(unittest.TestCase):
                   "cache_directory": "/synthetic/cache"
                 }"""
             )
-            responses = ["PATH=/synthetic/bin", ""]
+            responses = ["PATH=/does-not-contain-borg", ""]
             with (
                 patch.object(RESTORE, "BACKUP_POLICY", policy),
                 patch.object(
@@ -191,7 +191,9 @@ class RestoreProof(unittest.TestCase):
                     for call in output.call_args_list
                 )
             )
-            self.assertEqual(shell, "bash")
+            self.assertTrue(Path(shell).is_absolute())
+            self.assertEqual(Path(shell).name, "bash")
+            self.assertEqual(values["PATH"], str(Path(shell).parent))
             self.assertEqual(values["BORG_REPO"], "file:///synthetic/realm")
             self.assertEqual(persist_values["BORG_REPO"], "file:///synthetic/persist")
             self.assertEqual(values["BORG_CACHE_DIR"], "/synthetic/cache")
