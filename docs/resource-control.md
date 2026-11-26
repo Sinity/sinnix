@@ -36,6 +36,17 @@ stop at 5; the job plane (`agent-ctl.slice`) stops at 7.5, room for the largest
 single job (a Sinex focused build peaks at 6.9 GiB). A pool slice sets its own limit only where it is tighter than
 the plane's.
 
+An agent's tool commands and MCP servers share one unit,
+`agent-tool-<agent unit>.service`, which `agent-tool-command` starts with the
+agent's first command and which stops when the agent's own unit does. Each
+command runs in its own leaf cgroup of that unit (`cmd-<pid>`) with the memory
+controller enabled, so the kernel and systemd-oomd still act on one command;
+the unit's own process removes the leaves of finished commands. A unit per
+command would be a journal line per command, with no end recorded for a scope.
+A helper launch of an agent CLI that is not a session (a version or help
+query, Codex's `app-server proxy`) stays where it was started and gets no
+unit.
+
 Each live service also has a ceiling that ends a leak inside its own unit:
 
 | Unit                  | `MemoryHigh` | `MemoryMax` | `MemorySwapMax` | Two-week peak             |
@@ -92,7 +103,7 @@ of agent work:
    `out-of-memory` with `killed: out of memory in the agent budget` in its
    log. Borg drains rank with them at 900 and resume on their next run.
 2. Rebuilds (their `nix-build.slice` unit) and the Nix daemon's builders, 850.
-3. Tool commands, 800 (`claude-tool-scope`).
+3. Tool commands, 800 (`agent-tool-command`).
 4. The agent CLIs themselves, 300.
 
 The kernel adds to each rank the process's share of RAM (about 78 points for

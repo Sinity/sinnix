@@ -24,7 +24,7 @@ and these invocation directories:
 A Claude Code session owns two directories under
 `/realm/tmp/work/claude-<uid>/`: Claude Code's own
 `<project>/<session-id>/` (which holds the session's scratchpad), and
-`session-tmp/<session-id>/`, which `claude-tool-scope` makes the TMPDIR of
+`session-tmp/<session-id>/`, which `agent-tool-command` makes the TMPDIR of
 that session's tool commands and MCP servers. Temporary files made by tools
 therefore land in a directory with a known owner instead of the shared root.
 

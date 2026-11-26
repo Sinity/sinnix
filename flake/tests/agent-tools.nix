@@ -1014,8 +1014,66 @@ in
             expect reexec "0::$user/app.slice/app-agentctl.slice/app-agentctl-stub.scope"
             expect reexec "0::$user/app.slice/app-agent-cli.slice/app-agent-cli-stub.scope"
 
+            # Which invocations are agent sessions, from the rendered
+            # preludes. This build's own cgroup is outside every contained
+            # slice, so a session reaches the stand-in systemd-run and a
+            # helper reaches the line after the prelude.
+            printf '%s\n' 'set -euo pipefail' > codex.sh
+            cat >> codex.sh <<'PRELUDE'
+            ${scopePreludes.codex}
+            PRELUDE
+            echo 'echo in-place' >> codex.sh
+            printf '%s\n' 'set -euo pipefail' > other.sh
+            cat >> other.sh <<'PRELUDE'
+            ${scopePreludes.other}
+            PRELUDE
+            echo 'echo in-place' >> other.sh
+
+            launch() {
+              wrapper="$1"
+              want="$2"
+              shift 2
+              actual="$(${pkgs.bash}/bin/bash "$wrapper" "$@")"
+              if [ "$actual" != "$want" ]; then
+                echo "agent scope prelude: expected $want for $wrapper $*, got $actual" >&2
+                exit 1
+              fi
+            }
+            launch codex.sh scoped
+            launch codex.sh scoped exec "fix the build"
+            launch codex.sh scoped app-server
+            launch codex.sh scoped app-server --listen stdio://
+            launch codex.sh scoped proxy app-server
+            launch codex.sh in-place app-server proxy --sock /run/fixture.sock
+            launch codex.sh in-place app-server proxy
+            launch codex.sh in-place --version
+            launch codex.sh in-place --help
+            # Another backend's wrapper has no such helper.
+            launch other.sh scoped app-server proxy
+            launch other.sh in-place --version
+
             touch "$out"
           '';
+      scopePreludes =
+        let
+          backends = import ../../modules/features/dev/agents/backends.nix {
+            inherit lib runtimeDefaults;
+            pkgs = pkgs // {
+              systemd = pkgs.writeShellScriptBin "systemd-run" ''
+                echo scoped
+              '';
+            };
+            scriptPkgs = { };
+            agentRuntimePath = "";
+            hermesRuntimePath = "";
+            sinnixCfg = { };
+            user = "fixture";
+          };
+        in
+        {
+          codex = backends.mkAgentScopePrelude { helperInvocations = backends.codexHelperInvocations; };
+          other = backends.agentScopePrelude;
+        };
       # The launch route on this repository's own descriptor: the queued
       # command is the descriptor's exec inside its environment, in its pool,
       # under its label, with its timeout.

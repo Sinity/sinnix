@@ -479,6 +479,9 @@ mkFeatureModule {
         environment.systemPackages = [
           scriptPkgs.beads
           scriptPkgs.beads.passthru.dolt
+          # dots/zsh/agent-tool-scope.zsh names it by its system path: the
+          # snippet is linked from the checkout, not built with the system.
+          scriptPkgs.agent-tool-command
         ];
       }
     ];

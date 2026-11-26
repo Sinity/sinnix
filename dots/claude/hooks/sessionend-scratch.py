@@ -3,7 +3,7 @@
 
 A session owns two directories under ``$CLAUDE_CODE_TMPDIR/claude-<uid>/``:
 Claude Code's own ``<project>/<session-id>/`` (the scratchpad and background
-task output) and ``session-tmp/<session-id>/``, the TMPDIR claude-tool-scope
+task output) and ``session-tmp/<session-id>/``, the TMPDIR agent-tool-command
 gives its tool commands. When the session ends this hook records the end in
 ``.ended/<session-id>`` and starts a detached remover, so the harness never
 waits on a large deletion.

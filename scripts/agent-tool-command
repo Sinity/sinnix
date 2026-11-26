@@ -1,0 +1,164 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Run one agent tool command in its agent's unit under agent-tool.slice
+# runtimeInputs: coreutils systemd
+#
+# Entry points:
+#   agent-tool-command '<command string>'   Claude Code's
+#       CLAUDE_CODE_SHELL_PREFIX: every Bash tool command, hook and stdio MCP
+#       server arrives as one string written for the user's shell.
+#   agent-tool-command -- <argv...>         dots/zsh/agent-tool-scope.zsh,
+#       re-entering a tool shell (Codex) with its original argv.
+#
+# A tool command started from agent-cli.slice must leave the agent's memory
+# domain: there it is a child of the agent process and shares its limits, so
+# a wave of heavy tools throttles the process supervising them. A command
+# started anywhere else stays put: a worker inside an agentctl lane keeps its
+# tools in the lane's unit, which carries the lane's MemoryMax and its
+# cancellation reap.
+#
+# One unit per agent, not one per command. A transient unit per command is a
+# journal line per command, and for a scope systemd logs no end. The agent's
+# first command starts agent-tool-<agent unit>.service; every command then
+# makes a leaf cgroup in it, moves itself there and execs in place, keeping
+# its PID, stdio and signals, so the agent's timeouts and kills still reach it.
+#
+# Constraints the unit's properties hold:
+# - A leaf cgroup per command, with the memory controller enabled for the
+#   unit's children: systemd-oomd ends only leaf cgroups, so it can end one
+#   command. With all commands in one cgroup it would end every command and
+#   MCP server of the agent at once.
+# - DelegateSubgroup keeps the unit's own process out of the unit's cgroup;
+#   a cgroup holding a process cannot enable controllers for its children.
+# - OOMPolicy=continue: the default stops the whole unit when the kernel
+#   kills one process in it.
+# - BindsTo the agent's unit: when the agent ends, its commands end.
+# - The unit's process removes emptied command cgroups; nothing else can,
+#   because a command execs away from this script.
+#
+# A tool command never fails because of this wrapper: the unit, then a scope
+# for this one command, then the command where it stands.
+set -uo pipefail
+
+sweep_seconds=30
+
+# The unit's own process (ExecStart). It runs in <unit>/anchor.
+if [ "${1:-}" = --sweep ] && [ "$#" -eq 1 ]; then
+  own=$(< /proc/self/cgroup)
+  cd "/sys/fs/cgroup${own#0::}/.." || exit 1
+  # Children created before this write get the controller too.
+  { echo +memory > cgroup.subtree_control; } 2>/dev/null || true
+  while :; do
+    sleep "$sweep_seconds" || true
+    # rmdir succeeds only on a cgroup with no process left in it.
+    rmdir cmd-*/ 2>/dev/null || true
+  done
+fi
+
+if [ "$#" -eq 1 ]; then
+  cmd=("${SHELL:-/bin/sh}" -c "$1")
+else
+  [ "${1:-}" = -- ] && shift
+  cmd=("$@")
+fi
+[ "${#cmd[@]}" -gt 0 ] || exit 0
+
+own=$(< /proc/self/cgroup)
+own=${own#0::}
+case "$own" in
+  */agent-cli.slice/*) ;;
+  *) exec "${cmd[@]}" ;;
+esac
+
+# dots/zsh/agent-tool-scope.zsh skips a shell this script already handled,
+# including one it had to leave in place. The PID ties the mark to this
+# command, so an agent the command starts moves its own tools.
+export AGENT_TOOL_COMMAND_PID=$$
+
+# Hooks and the status line run on every tool call and hold no meaningful
+# memory; moving them would add a cgroup and a process start to each call.
+case "${cmd[-1]}" in
+  */dots/claude/hooks/* | */dots/claude/statusline-command.sh | polylogue\ internal\ hook\ *)
+    exec "${cmd[@]}"
+    ;;
+esac
+
+# Temporary files belong to the session that made them. Each session's tool
+# commands and MCP servers get their own TMPDIR beside Claude Code's own
+# per-session directories, and the session's SessionEnd hook removes both
+# (docs/scratch.md). A lane worker never gets here: its job already has a
+# private TMPDIR that ends with the job.
+if [[ "${CLAUDE_CODE_SESSION_ID:-}" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
+  && [ -n "${CLAUDE_CODE_TMPDIR:-}" ]; then
+  session_tmp="$CLAUDE_CODE_TMPDIR/claude-$UID/session-tmp/$CLAUDE_CODE_SESSION_ID"
+  if (umask 077 && mkdir -p "$session_tmp") 2>/dev/null; then
+    export TMPDIR="$session_tmp"
+  fi
+fi
+
+# Agent tool commands rank above browser tabs (200-300) as global OOM
+# victims; raising one's own oom_score_adj needs no privilege.
+echo 800 > /proc/self/oom_score_adj 2>/dev/null || true
+
+# The agent's own unit is the last element of its cgroup; agent-tool.slice is
+# the sibling of agent-cli.slice under agent.slice.
+agent_unit=${own##*/}
+unit_name=${agent_unit%.scope}
+unit="agent-tool-${unit_name//[^A-Za-z0-9_-]/-}.service"
+unit_cgroup="/sys/fs/cgroup${own%%/agent-cli.slice/*}/agent-tool.slice/$unit"
+
+enter_unit() {
+  local leaf="$unit_cgroup/cmd-$$"
+  # Twice: the sweep may remove the new, still empty leaf before the write.
+  for _ in 1 2; do
+    mkdir "$leaf" 2>/dev/null || [ -d "$leaf" ] || return 1
+    if { echo $$ > "$leaf/cgroup.procs"; } 2>/dev/null; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+start_unit() {
+  local self
+  self=$(realpath -- "${BASH_SOURCE[0]}") || return 1
+  # A fixed description: without one systemd logs the whole command line to a
+  # journal that is kept, backed up and captured. Losing the race to another
+  # command of the same agent fails here and succeeds at the wait below.
+  timeout 5 systemd-run --user --quiet --collect --unit="$unit" \
+    --service-type=exec --expand-environment=no --setenv=PATH \
+    --description="Agent tool commands" --slice=agent-tool.slice \
+    -p Delegate=yes -p DelegateSubgroup=anchor -p OOMPolicy=continue \
+    -p "BindsTo=$agent_unit" -p "After=$agent_unit" -p TimeoutStopSec=20s \
+    -- "$self" --sweep > /dev/null 2>&1
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    [ -w "$unit_cgroup/cgroup.procs" ] && return 0
+    sleep 0.05
+  done
+  return 1
+}
+
+manager_socket="${XDG_RUNTIME_DIR:-/run/user/$UID}/systemd/private"
+case "$agent_unit" in
+  *.scope | *.service)
+    if enter_unit || { [ -S "$manager_socket" ] && start_unit && enter_unit; }; then
+      exec "${cmd[@]}"
+    fi
+    ;;
+esac
+
+# No unit for this agent: one scope for this command, bound to the agent when
+# the agent's unit is known.
+if [ -S "$manager_socket" ]; then
+  bind=()
+  case "$agent_unit" in
+    *.scope | *.service) bind=(-p "BindsTo=$agent_unit" -p "After=$agent_unit") ;;
+  esac
+  shopt -s execfail
+  exec systemd-run --user --scope --quiet --collect \
+    --expand-environment=no \
+    --description="Agent tool command" \
+    --slice=agent-tool.slice "${bind[@]}" -- "${cmd[@]}"
+  shopt -u execfail
+fi
+exec "${cmd[@]}"

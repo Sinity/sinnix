@@ -69,27 +69,55 @@ let
   # runtimeDefaults.agentContainedSlices stays there: re-execing out of a
   # queued task's scope drops the lane's MemoryMax and leaves the agent
   # behind when the task is cancelled.
-  agentScopePrelude = ''
-    case "$(< /proc/self/cgroup)" in
-      ${runtimeDefaults.agentContainedCasePattern}) ;;
-      *)
-        # Agent CLIs rank just above Chrome's foreground renderers (200) as
-        # global OOM victims, and below the jobs and tools they start.
-        echo 300 >/proc/self/oom_score_adj 2>/dev/null || true
-        exec ${pkgs.systemd}/bin/systemd-run --user --scope --quiet \
-          --description="Agent CLI" --slice=agent-cli.slice -- "$0" "$@"
-        ;;
-    esac
-    # Build tools default to one job per core. Agents shell out to source
-    # builds (a `uv sync` without a wheel, cargo, cmake) from inside
-    # agent-cli.slice; a bounded default keeps one such build from filling the
-    # slice. An explicit caller setting still wins.
-    export CMAKE_BUILD_PARALLEL_LEVEL="''${CMAKE_BUILD_PARALLEL_LEVEL:-4}"
-    export MAKEFLAGS="''${MAKEFLAGS:--j4}"
-    export CARGO_BUILD_JOBS="''${CARGO_BUILD_JOBS:-4}"
-    export UV_CONCURRENT_BUILDS="''${UV_CONCURRENT_BUILDS:-2}"
-    export MAX_JOBS="''${MAX_JOBS:-4}"
-  '';
+  #
+  # An invocation that is not an agent session stays where it was started and
+  # gets no scope: a version or help query, and each backend's
+  # `helperInvocations` (its leading arguments). Every scope is a unit start
+  # in the journal, and other programs start such helpers every few seconds.
+  mkAgentScopePrelude =
+    {
+      helperInvocations ? [ ],
+    }:
+    let
+      helperPatterns = lib.concatMapStringsSep " | " (
+        invocation: "${lib.escapeShellArg invocation} | ${lib.escapeShellArg "${invocation} "}*"
+      ) (agentHelperInvocations ++ helperInvocations);
+    in
+    ''
+      case "''${1:-} ''${2:-}" in
+        ${helperPatterns}) ;;
+        *)
+          case "$(< /proc/self/cgroup)" in
+            ${runtimeDefaults.agentContainedCasePattern}) ;;
+            *)
+              # Agent CLIs rank just above Chrome's foreground renderers
+              # (200) as global OOM victims, and below the jobs and tools
+              # they start.
+              echo 300 >/proc/self/oom_score_adj 2>/dev/null || true
+              exec ${pkgs.systemd}/bin/systemd-run --user --scope --quiet \
+                --description="Agent CLI" --slice=agent-cli.slice -- "$0" "$@"
+              ;;
+          esac
+          ;;
+      esac
+      # Build tools default to one job per core. Agents shell out to source
+      # builds (a `uv sync` without a wheel, cargo, cmake) from inside
+      # agent-cli.slice; a bounded default keeps one such build from filling the
+      # slice. An explicit caller setting still wins.
+      export CMAKE_BUILD_PARALLEL_LEVEL="''${CMAKE_BUILD_PARALLEL_LEVEL:-4}"
+      export MAKEFLAGS="''${MAKEFLAGS:--j4}"
+      export CARGO_BUILD_JOBS="''${CARGO_BUILD_JOBS:-4}"
+      export UV_CONCURRENT_BUILDS="''${UV_CONCURRENT_BUILDS:-2}"
+      export MAX_JOBS="''${MAX_JOBS:-4}"
+    '';
+  agentHelperInvocations = [
+    "--version"
+    "--help"
+  ];
+  # Codex's `app-server proxy` is a stdio-to-socket relay to the running app
+  # server, not a session.
+  codexHelperInvocations = [ "app-server proxy" ];
+  agentScopePrelude = mkAgentScopePrelude { };
 
   claudeConfigPrelude = ''
     # Keep the atomically replaced global JSON inside the persisted directory.
@@ -110,7 +138,7 @@ let
       # Tool commands and MCP servers get their own memory budget in
       # agent-tool.slice, so a wave of heavy tool runs cannot throttle the
       # Claude process that supervises them.
-      export CLAUDE_CODE_SHELL_PREFIX=${lib.escapeShellArg "${scriptPkgs.claude-tool-scope}/bin/claude-tool-scope"}
+      export CLAUDE_CODE_SHELL_PREFIX=${lib.escapeShellArg "${scriptPkgs.agent-tool-command}/bin/agent-tool-command"}
     '';
 
   mkClaudeLaunchArgs = mcpConfigName: ''
@@ -176,7 +204,7 @@ let
       #!/usr/bin/env bash
       set -euo pipefail
 
-      ${agentScopePrelude}
+      ${mkAgentScopePrelude { helperInvocations = codexHelperInvocations; }}
 
       ${mkNpmBootstrap {
         stateDir = "codex";
@@ -261,6 +289,8 @@ in
   inherit
     mkNpmBootstrap
     agentScopePrelude
+    mkAgentScopePrelude
+    codexHelperInvocations
     mkClaudeScratchPrelude
     mkClaudeLaunchArgs
     mkClaudeCodeWrapper

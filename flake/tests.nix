@@ -26,6 +26,7 @@ in
       file = ./tests.nix;
     })
     ./tests/agent-tools.nix
+    ./tests/agent-tool-command.nix
     ./tests/pi.nix
     ./tests/bootstrap-outcome.nix
     ./tests/aichat-roster.nix
