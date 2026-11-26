@@ -226,7 +226,9 @@ five-minute binary chunks (`sinnix.phone.sensor-binary/1`) with their
 timestamps; a minute-level `ambient_context` event summarizes them. The
 sensor hub buffers samples and delivers them in batches at most 30 s apart,
 each with its own hardware timestamp; the minute summary asks the hub for what
-it still holds before it is written.
+it still holds before it is written. A chunk can therefore begin with samples
+up to 30 s older than the start time in its header; the header pair still
+maps every sample timestamp to wall time.
 
 ## Instruments
 
