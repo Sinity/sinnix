@@ -166,6 +166,14 @@ in
               message = "observed system services must receive the system failure-notify template";
             }
             {
+              # A unit Restart= brings back never enters failed, so OnFailure=
+              # alone would miss its crashes.
+              assertion = lib.any (lib.hasSuffix "/bin/sinnix-unit-failure-notify %n") (
+                config.systemd.services.runtime-policy-system.serviceConfig.ExecStopPost
+              );
+              message = "observed system services must report every unsuccessful end from ExecStopPost";
+            }
+            {
               assertion = lib.hasInfix "sinnix-unit-failure-notify %i" (
                 toString config.systemd.services."sinnix-unit-failure-notify@".serviceConfig.ExecStart
               );
@@ -186,6 +194,16 @@ in
                 config.home-manager.users.sinity.xdg.configFile
                 ? "systemd/user/runtime-policy-user.service.d/50-sinnix-unit-failure-notify.conf";
               message = "observed user services must receive the user failure-notify drop-in";
+            }
+            {
+              assertion =
+                let
+                  dropIn =
+                    config.home-manager.users.sinity.xdg.configFile."systemd/user/runtime-policy-user.service.d/50-sinnix-unit-failure-notify.conf".text;
+                in
+                lib.hasInfix "[Service]\nExecStopPost=-" dropIn
+                && lib.hasInfix "/bin/sinnix-unit-failure-notify %n --user\n" dropIn;
+              message = "observed user services must report every unsuccessful end from ExecStopPost";
             }
             {
               # A generated job reports its own failure even when nothing

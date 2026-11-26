@@ -17,6 +17,10 @@ let
 
   # Failure notifications share the hub's per-unit state and write it directly
   # if the hub is down; root and user templates share group users and umask 0002.
+  # Two hooks run it: OnFailure= (the unit entered failed) and ExecStopPost=
+  # (any end of the main process, with SERVICE_RESULT set). A unit that
+  # Restart= brings back never enters failed, so only ExecStopPost sees its
+  # crash; when both run for one failure, the hub's state records it once.
   unitFailureNotify = pkgs.writeShellApplication {
     name = "sinnix-unit-failure-notify";
     runtimeInputs = [
@@ -26,12 +30,15 @@ let
     text = ''
       umask 0002
       unit="$1"
+      if [ "''${SERVICE_RESULT:-}" = success ]; then
+        exit 0
+      fi
       if [ "''${2:-}" = "--user" ]; then
         manager=user
-        result="$(systemctl --user show "$unit" -p Result --value 2>/dev/null || true)"
+        result="''${SERVICE_RESULT:-$(systemctl --user show "$unit" -p Result --value 2>/dev/null || true)}"
       else
         manager=system
-        result="$(systemctl show "$unit" -p Result --value 2>/dev/null || true)"
+        result="''${SERVICE_RESULT:-$(systemctl show "$unit" -p Result --value 2>/dev/null || true)}"
       fi
       sinnix-hub-server emit-failure --unit "$unit" --result "''${result:-unknown}" --manager "$manager"
     '';
@@ -513,6 +520,7 @@ in
                   _name: surface:
                   lib.nameValuePair (lib.removeSuffix ".service" surface.unit) {
                     unitConfig.OnFailure = [ "sinnix-unit-failure-notify@%n.service" ];
+                    serviceConfig.ExecStopPost = [ "-${unitFailureNotify}/bin/sinnix-unit-failure-notify %n" ];
                   }
                 )
                 (
@@ -550,6 +558,9 @@ in
                 text = ''
                   [Unit]
                   OnFailure=sinnix-unit-failure-notify@%n.service
+
+                  [Service]
+                  ExecStopPost=-${unitFailureNotify}/bin/sinnix-unit-failure-notify %n --user
                 '';
               }
             )
