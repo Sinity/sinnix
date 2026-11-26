@@ -22,6 +22,8 @@ def test_retention_preview_expiry_restore_cadence_and_contention(
     host.borg("init", "--encryption=none", str(repo))
     payload = backup_root / "payload"
     payload.write_text("synthetic recoverable payload\n")
+    cold_payload = backup_root / "cold-payload"
+    cold_payload.write_text("synthetic data held only by the cold archive\n")
     for name, age in [
         ("realm-current", 0),
         ("realm-old", 400),
@@ -36,6 +38,7 @@ def test_retention_preview_expiry_restore_cadence_and_contention(
         ("sinnix-prime-realm-a", 100),
         ("sinnix-prime-realm-b", 99),
         ("sinnix-prime-realm-c", 98),
+        ("cold-history-local-offload", 400),
         ("unrelated", 400),
     ]:
         moment = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=age)
@@ -49,7 +52,7 @@ def test_retention_preview_expiry_restore_cadence_and_contention(
             "--timestamp",
             stamp,
             f"{repo}::{name}",
-            "payload",
+            cold_payload.name if name.startswith("cold-history-") else payload.name,
             cwd=backup_root,
         )
     sinex_repositories = []
@@ -102,12 +105,17 @@ def test_retention_preview_expiry_restore_cadence_and_contention(
         "genome-unrelated",
         "sinnix-prime-realm-a",
         "sinnix-prime-realm-c",
+        "cold-history-local-offload",
         "unrelated",
     }, archives()
     restored = host.borg(
         "extract", "--stdout", f"{repo}::realm-current", "payload"
     ).stdout
     assert restored == payload.read_text()
+    retained = host.borg(
+        "extract", "--stdout", f"{repo}::cold-history-local-offload", cold_payload.name
+    ).stdout
+    assert retained == cold_payload.read_text()
     for sinex in sinex_repositories:
         assert archives(sinex) == {
             "sinex-core-current",

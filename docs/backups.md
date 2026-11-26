@@ -76,6 +76,18 @@ backups, not elapsed-age limits. Retired series (`sinnix-prime-realm-*`,
 milestones; archives older than 365 days expire even when the series has stopped.
 A version present only in a removed recovery point is no longer recoverable.
 
+When removing a local copy that must survive rolling retention, archive the
+specific files in the same repository under a `cold-history-*` name. Ordinary
+maintenance selects only the configured rotating series, so that name keeps
+the cold archive outside automatic expiry and lets Borg share chunks with the
+rolling backups. Record the new archive ID and restore the files to verify
+their bytes before releasing the local copy. Any later removal of the cold
+archive needs its own custody decision.
+
+For files already in a rolling archive, use Borg's `recreate --target` with
+exact path selection and no recompression or rechunking. Verify the target's
+membership and the original archive ID after the copy.
+
 Each pass records archive names and IDs before and after pruning under
 `/persist/root/.cache/borg-drain/retention/`. Compaction, which releases
 unreferenced chunks, runs on the first pass at least 6.5 days after the last
