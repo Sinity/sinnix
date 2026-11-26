@@ -16,8 +16,10 @@ Every target is an exact root already excluded by `realmExclusions` in
 `modules/backup.nix`:
 
 - `tmp`, `worktree`, the historical `worktrees`, and `state/cache`.
-- Cargo targets in Polylogue, Polylogue-Sinex Common, Sinex, and the two Spec
-  build roots.
+- Cargo targets in Polylogue, Polylogue-Sinex Common, and Sinex.
+- Downloaded GGUF weights, Steam's installed games and Codex app-server packages.
+- Generated filesystem index generations. The authored judgments and
+  references stay in the parent directory and are included in backups.
 - Stash's `state/stashbox/analysis-cache` and `state/stashbox/generated`.
 
 Missing paths are skipped. Core tmpfiles rules use `v` for `tmp`, `worktree`,
@@ -88,6 +90,7 @@ sudo btrbk list snapshots
 # Set this to the exact new Realm snapshot path reported above:
 snapshot=/realm/.btrfs/snapshot/realm.YYYYMMDDTHHMMSS+ZZZZ
 for relative in tmp worktree worktrees state/cache \
+  state/fs-index/generations state/codex/home/packages \
   project/polylogue/repo/target project/polylogue-sinex-common/repo/target \
   project/sinex/repo/target \
   state/stashbox/analysis-cache state/stashbox/generated; do

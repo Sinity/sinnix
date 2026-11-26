@@ -226,6 +226,8 @@ let
       # Container image layers and Codex releases, fetched again on demand.
       "state/containers"
       "state/codex/home/packages"
+      # The filesystem index can be rebuilt. Its authored inputs stay covered.
+      "state/fs-index/generations"
       # Scratch, agent checkouts, pytest caches and trash; inbox/ stays covered.
       "tmp"
       "worktree"

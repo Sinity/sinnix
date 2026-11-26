@@ -389,6 +389,9 @@ rather than the whole Steam tree.
 - Build and environment trees that hold only rebuildable content: the named
   Cargo `target/` and project `.venv` directories, Stash's analysis cache,
   generated media and GPU virtualenv, and the ComfyUI virtualenv.
+- The generated filesystem index under `state/fs-index/generations`. The
+  authored judgments and references beside it stay covered. Run a fresh scan
+  after restoring the authored inputs to regenerate the index.
 - Polylogue's `index.db` with its WAL and SHM files, in the live archive and
   in every directory of `sinnix.services.polylogue.retainedArchives`; it is
   rebuilt from `archive.db`. The rest of `state/polylogue-live` comes from
@@ -398,9 +401,10 @@ Evaluation asserts that the scratch roots in
 `modules/lib/storage/scratch-roots.nix` stay within these exclusions, and that no
 exclusion covers a Beads task store, the ranking domains or
 `library/model/control-vector`, or any of their parents.
-The boot migration puts downloaded GGUF weights and Steam's installed game
-files in nested subvolumes. New Realm snapshots then stop holding their
-blocks after removal. Steam's Proton data stays in the Realm snapshot.
+The boot migration also moves generated filesystem indexes, downloaded Codex
+releases, downloaded GGUF weights and Steam's installed games into nested
+subvolumes. New Realm snapshots then stop holding their blocks after removal.
+Steam's Proton data stays in the Realm snapshot.
 Existing snapshots retain their original contents until they are deleted.
 
 `/persist` leaves out, marked `mayBeMissing`: user caches (`~/.cache`, Hugging

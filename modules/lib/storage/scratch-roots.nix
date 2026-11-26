@@ -9,6 +9,9 @@
   "library/game/steam/steamapps/common"
   # Downloaded weights are already excluded from Borg.
   "library/model/gguf"
+  # Keep the authored judgments and references beside the generated index.
+  "state/fs-index/generations"
+  "state/codex/home/packages"
   # Exact regenerable build/cache roots already excluded by backup.nix.
   "project/polylogue/repo/target"
   "project/polylogue-sinex-common/repo/target"
