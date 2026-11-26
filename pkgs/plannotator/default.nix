@@ -20,6 +20,11 @@
 # tool-server environment carries no XDG_DATA_HOME, so the Inbox an agent
 # starts would keep its threads outside the persisted directory
 # (modules/features/dev/agents/clis.nix).
+#
+# Plannotator restarts itself, writes its own login unit and prints setup
+# commands with the path of the binary, not of this wrapper, so the wrapper
+# cannot be the only guard. clis.nix also links ~/.plannotator to the
+# persisted directory and declares the login unit with this wrapper.
 {
   lib,
   stdenvNoCC,

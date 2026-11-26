@@ -251,6 +251,7 @@ in
           ".codex/agents/explorer.toml"
           ".codex/agents/implementer.toml"
           ".codex/agents/review.toml"
+          ".plannotator"
         ];
         fixtureAssets = [
           {
@@ -283,6 +284,8 @@ in
         xdgConfigFiles = [
           "claude/mcp.json"
           "claude/skills"
+          "systemd/user/plannotator-inbox.service"
+          "systemd/user/plannotator-inbox.service.d/10-launcher.conf"
         ];
         useHmZshrc = true;
         zshrcPreamble = ''
@@ -316,6 +319,9 @@ in
         agentToolsRuntimeConfig.sinnix.features.dev.agentTools.hermesProfileConfigSources;
       agentToolsCodexSkillsActivation = pkgs.writeText "codex-skills-activation.sh" (
         agentToolsRuntimeConfig.home-manager.users.${agentToolsRuntimeConfig.sinnix.user.name}.home.activation.codexSkills.data
+      );
+      agentToolsCodexPrivateServersActivation = pkgs.writeText "codex-private-servers-activation.sh" (
+        agentToolsRuntimeConfig.home-manager.users.${agentToolsRuntimeConfig.sinnix.user.name}.home.activation.codexPrivateServers.data
       );
       agentToolsPiSources = agentToolsRuntimeConfig.sinnix.features.dev.agentTools.piSources;
       agentToolsPiActivation = pkgs.writeText "pi-config-activation.sh" (
@@ -717,6 +723,90 @@ in
             test ! -L "$dry_home/.codex/skills/retired-skill"
             test -L "$dry_home/.codex/skills/private-skill"
             test -f "$dry_home/.codex/skills/app-installed-skill"
+            # A table in Codex's private config that gives a registry server
+            # another command is removed, with its subtables. Tables that
+            # agree with the generated config, servers the registry does not
+            # have, and the rest of the file keep their bytes.
+            codex_home="$TMPDIR/codex-private-servers"
+            mkdir -p "$codex_home/.codex"
+            {
+              printf '%s\n' 'model = "kept"' "" \
+                '[mcp_servers.node_repl]' 'command = "node"' "" \
+                '[mcp_servers.github]' 'command = "mcp-github"' "" \
+                '[mcp_servers.github.env]' 'TOKEN = "kept"' ""
+              cat <<'TOML'
+            [mcp_servers.plannotator-inbox]
+            command = "/opt/elsewhere/libexec/plannotator"
+            args = ["inbox", "mcp"]
+
+            [mcp_servers.plannotator-inbox.env]
+            STRAY = "1"
+
+            TOML
+              printf '%s\n' '[projects."/fixture/project"]' 'trust_level = "trusted"'
+            } > "$codex_home/.codex/config.toml"
+            chmod 600 "$codex_home/.codex/config.toml"
+            printf '%s\n' 'model = "kept"' "" \
+              '[mcp_servers.node_repl]' 'command = "node"' "" \
+              '[mcp_servers.github]' 'command = "mcp-github"' "" \
+              '[mcp_servers.github.env]' 'TOKEN = "kept"' "" \
+              '[projects."/fixture/project"]' 'trust_level = "trusted"' \
+              > "$TMPDIR/codex-private-expected.toml"
+            (
+              export HOME="$codex_home"
+              run() { :; }
+              source ${agentToolsCodexPrivateServersActivation}
+            )
+            grep -Fq '/opt/elsewhere/libexec/plannotator' "$codex_home/.codex/config.toml"
+            (
+              export HOME="$codex_home"
+              run() { "$@"; }
+              source ${agentToolsCodexPrivateServersActivation}
+            )
+            cmp "$codex_home/.codex/config.toml" "$TMPDIR/codex-private-expected.toml"
+            test "$(stat -c '%a' "$codex_home/.codex/config.toml")" = 600
+            # A file that is not TOML, and a home without the file, stay as
+            # they are.
+            printf '%s\n' '[mcp_servers.plannotator-inbox' 'command = "x"' \
+              > "$codex_home/.codex/config.toml"
+            cp "$codex_home/.codex/config.toml" "$TMPDIR/codex-private-broken.toml"
+            (
+              export HOME="$codex_home"
+              run() { "$@"; }
+              source ${agentToolsCodexPrivateServersActivation}
+              cmp "$HOME/.codex/config.toml" "$TMPDIR/codex-private-broken.toml"
+              rm "$HOME/.codex/config.toml"
+              source ${agentToolsCodexPrivateServersActivation}
+              test ! -e "$HOME/.codex/config.toml"
+            )
+
+            # One Inbox store: Plannotator's default directory is the
+            # persisted one, and the login unit starts the launcher. The
+            # drop-in gives the same command to the unit file Plannotator
+            # writes over the declared one, whose own ExecStart it clears.
+            test "$(readlink -m "$HOME/.plannotator")" = ${
+              agentToolsRuntimeConfig.home-manager.users.${agentToolsRuntimeConfig.sinnix.user.name}.home.homeDirectory
+            }/.local/share/plannotator
+            inbox_unit="$XDG_CONFIG_HOME/systemd/user/plannotator-inbox.service"
+            inbox_dropin="$inbox_unit.d/10-launcher.conf"
+            inbox_start="$(grep '^ExecStart=' "$inbox_unit")"
+            inbox_launcher="''${inbox_start#ExecStart=}"
+            inbox_launcher="''${inbox_launcher% inbox --no-open}"
+            case "$inbox_launcher" in
+              /nix/store/*/bin/plannotator) ;;
+              *)
+                echo "the Inbox unit does not start the launcher: $inbox_start" >&2
+                exit 1
+                ;;
+            esac
+            grep -Fq 'PLANNOTATOR_INBOX_CONNECT' "$inbox_launcher"
+            grep -Fq 'PLANNOTATOR_DATA_DIR' "$inbox_launcher"
+            grep -Fxq 'WantedBy=default.target' "$inbox_unit"
+            test "$(grep -E '^(ExecStart|ExecStartPre)=' "$inbox_dropin" | head -n 2 | sort | tr '\n' ' ')" = 'ExecStart= ExecStartPre= '
+            for setting in ExecStart ExecStartPre Restart RestartSec SuccessExitStatus; do
+              test "$(grep "^$setting=." "$inbox_unit")" = "$(grep "^$setting=." "$inbox_dropin")"
+            done
+
             test -L "$HOME/.config/claude/mcp.json"
             test -L "$HOME/.config/hermes/skills"
             python3 - "$HOME/.hermes/config.yaml" <<'PYCODE'

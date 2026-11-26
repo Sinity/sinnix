@@ -152,6 +152,14 @@ mkFeatureModule {
                     fi
                   ''
                 );
+                # Codex's private config wins over the generated one, and
+                # programs other than Sinnix write tool servers into it. A
+                # private table that gives a registry server another command
+                # is removed; the script's header has the rule.
+                codexPrivateServers = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+                  run ${pkgs.python3}/bin/python3 ${./codex-private-servers.py} \
+                    "$HOME/.codex/config.toml" ${codexSystemConfigFile}
+                '';
                 # ~/.codex/skills also holds app-installed skills and Codex's
                 # .system directory, so each declared skill gets its own link.
                 # A ~/.codex/skills that is itself a symlink is private state
