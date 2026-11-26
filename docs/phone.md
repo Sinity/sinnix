@@ -188,13 +188,21 @@ original names; a few `.webm` chunks date from the changeover.
 A microphone foreground service with a persistent notification is the only way
 to record with the screen off, which is why this is an app.
 
+The app reads the microphone itself: one thread wakes once a second, takes
+what the audio buffer holds, and pushes it through the platform Opus encoder
+and Ogg writer in one burst. `MediaRecorder` ran the same encoder and writer
+inside `mediaserver` and moved every 20 ms frame through three processes as it
+arrived, which kept most of a core busy around the clock. The microphone stays
+open when a chunk ends, so consecutive chunks are contiguous; each file gets
+its own encoder instance and is a complete Opus stream.
+
 Files are named `ambient-<UTC basic ISO time>.opus` (the storage layer rejects
 colons). A chunk is written as `.opus.part` in private storage and published only
 after the muxer closes it and its duration is checked; a `.part` left by a
 crashed recorder becomes `.opus.orphan` and is still uploaded.
 
-The app checks amplitude and file growth every 20 s. Four exact-zero
-samples in a row restart the recorder. No growth for 90 s, or growth under
+The app checks amplitude (the largest sample the microphone delivered) and
+file growth every 20 s. Four exact-zero samples in a row restart the recorder. No growth for 90 s, or growth under
 1 kbps, also restarts it. Each closed chunk's encoded duration is compared
 with elapsed time. On prime, `sinnix phone ambient-audit`
 decodes every chunk into
@@ -215,7 +223,10 @@ behind it. The grants screen tests storage access by writing a real file.
 
 The sensor lane records raw accelerometer and light readings continuously in
 five-minute binary chunks (`sinnix.phone.sensor-binary/1`) with their
-timestamps; a minute-level `ambient_context` event summarizes them.
+timestamps; a minute-level `ambient_context` event summarizes them. The
+sensor hub buffers samples and delivers them in batches at most 30 s apart,
+each with its own hardware timestamp; the minute summary asks the hub for what
+it still holds before it is written.
 
 ## Instruments
 
