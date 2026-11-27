@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 
 [project.scripts]
 sinnix-backup = "sinnix_backup.cli:main"
+sinnix-backup-admission = "sinnix_backup.admission:main"
 
 [tool.setuptools.packages.find]
 include = ["sinnix_backup*"]

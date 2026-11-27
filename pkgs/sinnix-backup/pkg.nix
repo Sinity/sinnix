@@ -30,25 +30,28 @@ python3Packages.buildPythonPackage {
   nativeBuildInputs = [ makeWrapper ];
   # The code calls every tool by bare name, so tests can put fakes first on PATH.
   postFixup = ''
-    wrapProgram "$out/bin/sinnix-backup" --prefix PATH : ${
-      lib.makeBinPath [
-        borgbackup
-        btrfs-progs
-        btrbk
-        coreutils
-        dolt
-        sqlite
-        systemd
-        util-linux
-        sinnix-borg-check
-        sinnix-borg-expire
-        sinnix-borg-prune-dumps
-        sinnix-sqlite-backup
-      ]
-    }
+    for command in sinnix-backup sinnix-backup-admission; do
+      wrapProgram "$out/bin/$command" --prefix PATH : ${
+        lib.makeBinPath [
+          borgbackup
+          btrfs-progs
+          btrbk
+          coreutils
+          dolt
+          sqlite
+          systemd
+          util-linux
+          sinnix-borg-check
+          sinnix-borg-expire
+          sinnix-borg-prune-dumps
+          sinnix-sqlite-backup
+        ]
+      }
+    done
   '';
   doCheck = false;
   pythonImportsCheck = [
+    "sinnix_backup.admission"
     "sinnix_backup.cli"
     "sinnix_backup.drain"
     "sinnix_backup.nightly"

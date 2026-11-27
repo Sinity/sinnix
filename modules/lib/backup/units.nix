@@ -40,6 +40,22 @@ let
   realmBind = backupConfig.sources.realm.bind_path;
   sinexStorePaths = backupConfig.jobs.sinex_store_paths;
 
+  # Resumable full-volume drains share one hard memory ceiling.
+  fullDrains = [
+    "borgbackup-job-realm"
+    "borgbackup-job-persist"
+  ]
+  ++ lib.optional (genomeRoot != null) "borgbackup-job-genome";
+  plConfig = config.sinnix.services.polylogue;
+  admission = "${scriptPkgs.sinnix-backup}/bin/sinnix-backup-admission";
+  admissionArgs = lib.optionalString plConfig.enable (
+    " --user ${lib.escapeShellArg config.sinnix.user.name} --uid ${
+       toString config.users.users.${config.sinnix.user.name}.uid
+     }"
+    + lib.optionalString (!plConfig.startDaemon) " --allow-inactive"
+  );
+  waitForAdmission = "${admission} wait${admissionArgs} --min-available-mib 8192";
+
   # Activation never restarts a job: a switch mid-run would abandon a bind
   # mount and a held Borg lock. Resources come from the unit's own surface.
   # With archive backups off, only btrbk (snapshots and their deletion by
@@ -63,6 +79,12 @@ let
               restartIfChanged = false;
             }
             // (job.unit or { });
+            serviceConfig =
+              (job.serviceConfig or { })
+              // lib.optionalAttrs (builtins.elem name fullDrains) {
+                ExecStartPre = [ waitForAdmission ] ++ (job.serviceConfig.ExecStartPre or [ ]);
+                MemorySwapMax = 0;
+              };
           }
         )
       )
@@ -158,6 +180,26 @@ in
       execStart = sinnixBackup "drain genome";
     }
   ))
+
+  # Detect a build that starts after admission. systemd requeues the same
+  # resumable unit; drains waiting in ExecStartPre are ignored. Keep this
+  # enabled even when automatic archival is off: drains can start manually.
+  (lib.sinnix.mkScheduledJob
+    {
+      inherit config;
+      unitName = "borgbackup-drain-admission";
+      description = "Requeue full-volume backups when live rebuild or memory pressure takes priority";
+    }
+    {
+      execStart = "${admission} yield${admissionArgs} ${
+        lib.concatMapStringsSep " " (name: "--unit ${name}.service") fullDrains
+      }";
+      unit.restartIfChanged = false;
+      serviceConfig.TimeoutStartSec = "40s";
+      timer.intervalSec = 30;
+      timer.accuracySec = "1s";
+    }
+  )
 
   # Holds no Borg lock while a child runs; stopping it stops the children.
   (mkBackupJob "borgbackup-drain-coordinator" {

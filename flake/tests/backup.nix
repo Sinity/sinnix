@@ -458,7 +458,25 @@ assert lib.assertMsg (
           && services.borgbackup-job-realm.serviceConfig.MemoryHigh == "6G"
           && services.borgbackup-job-realm.serviceConfig.MemoryMax == "6G"
           && backupRuntimeEval.config.systemd.slices.borgdrain.sliceConfig.MemoryHigh == "6G"
-          && backupRuntimeEval.config.systemd.slices.borgdrain.sliceConfig.MemoryMax == "8G"
+          && services.borgbackup-job-realm.serviceConfig.MemorySwapMax == 0
+          && services.borgbackup-job-persist.serviceConfig.Slice == "borgdrain.slice"
+          && services.borgbackup-job-genome.serviceConfig.MemorySwapMax == 0
+          &&
+            lib.all
+              (
+                name:
+                lib.any (lib.hasInfix "sinnix-backup-admission wait") services.${name}.serviceConfig.ExecStartPre
+              )
+              [
+                "borgbackup-job-realm"
+                "borgbackup-job-persist"
+                "borgbackup-job-genome"
+              ]
+          && lib.hasInfix "sinnix-backup-admission yield" services.borgbackup-drain-admission.serviceConfig.ExecStart
+          && timers.borgbackup-drain-admission.timerConfig.OnCalendar == "*:*:0/30"
+          && timers.borgbackup-drain-admission.timerConfig.AccuracySec == "1s"
+          && backupRuntimeEval.config.systemd.slices.borgdrain.sliceConfig.MemoryMax == "6G"
+          && backupRuntimeEval.config.systemd.slices.borgdrain.sliceConfig.MemorySwapMax == 0
           &&
             lib.count (
               pattern: pattern == "run/borgbackup-snapshot-inputs/realm/state/cache"
@@ -488,13 +506,18 @@ assert lib.assertMsg (
                 name: _: lib.hasPrefix "borgbackup-" name || name == "sinnix-borg-beads-check"
               ) config.sinnix.runtime.units;
             in
-            !(lib.any (name: lib.hasInfix "borg" name || lib.hasPrefix "sinex-backup" name) enabledTimers)
+            !(lib.any (
+              name:
+              name != "borgbackup-drain-admission"
+              && (lib.hasInfix "borg" name || lib.hasPrefix "sinex-backup" name)
+            ) enabledTimers)
+            && config.systemd.timers.borgbackup-drain-admission.enable
             && config.systemd.timers.btrbk.timerConfig.OnCalendar == "*-*-* 00,06,12,18:00:00"
             && lib.all (name: config.systemd.services ? ${name}) backupJobNames
             && lib.all (surface: surface.captures == [ ]) (lib.attrValues borgSurfaces)
             && config.sinnix.runtime.units.btrbk.captures != [ ]
           )
-          "With archive backups off, every Borg unit stays defined with no timer or freshness lane, and btrbk keeps its schedule";
+          "With archive backups off, backup jobs stay defined with no archival timer or freshness lane; btrbk and drain admission keep their schedules";
         assert lib.assertMsg
           (
             let

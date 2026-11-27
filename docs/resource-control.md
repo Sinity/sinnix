@@ -183,3 +183,27 @@ No weight makes it faster: a write-heavy agent job beside PostgreSQL shares
 that rate, and the latency targets keep PostgreSQL's reads ahead of it.
 
 Primary contract: [Linux block-cgroup delay helpers](https://raw.githubusercontent.com/gregkh/linux/v6.18.50/block/blk-cgroup.h#L373-L425).
+
+### Full-volume backup admission and live archive activation
+
+The Realm, Persist and genome drains share the existing borgdrain.slice
+(6 GiB resident in total, no swap). Before starting, each waits for at least
+8 GiB available RAM and a current Polylogue index, or a confirmed inactive
+user manager. An unavailable active index status is not readiness. Waiting
+takes no Borg lock. Local snapshot acquisition and the hourly custody jobs
+remain independent.
+
+The systemd admission timer checks only running full-volume drains. If a
+live rebuild starts after admission, or memory crosses the emergency
+watermark, it requeues the affected drain through the same admission wait;
+the unacknowledged snapshot and any Borg checkpoint remain recoverable.
+The upper start watermark and lower emergency watermark avoid oscillation.
+This is a sampled guard, not a host-wide atomic memory reservation.
+
+Home Manager uses sd-switch's keep-old policy for Polylogue: switching
+the workstation installs the unit configuration but never restarts its
+existing process. For an intentional product or archive upgrade, verify
+the live status, prepare the new archive and explicitly restart
+polylogue-live.service only at the chosen cutover. Do not treat successful
+activation alone as evidence of a running daemon upgrade. The service keeps
+normal automatic recovery after an unexpected exit.

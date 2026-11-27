@@ -94,7 +94,9 @@ mkServiceModule {
       default = true;
       description = ''
         Whether polylogue-live is wanted by the user session, so that login
-        and every switch start it. Off, the unit stays installed but only a
+        and installation start it. Activation keeps an existing process alive;
+        changing the daemon or archive requires a deliberate restart. Off,
+        the unit stays installed but only a
         manual `systemctl --user start polylogue-live` runs it.
       '';
     };
@@ -187,7 +189,12 @@ mkServiceModule {
           };
 
           systemd.user.services.polylogue-live = {
-            Unit.Description = "Polylogue daemon over the live archive";
+            Unit = {
+              Description = "Polylogue daemon over the live archive";
+              # An ordinary system switch must not discard a running rebuild.
+              # Deploying a changed daemon/archive needs an explicit restart.
+              X-SwitchMethod = "keep-old";
+            };
             Service = liveServiceClass // {
               ExecStart = "${cli}/bin/polylogue daemon" + lib.optionalString (!cfg.readSources) " --no-sources";
               Environment = [ "POLYLOGUE_MCP_SOCKET=${cfg.mcpSocket}" ];

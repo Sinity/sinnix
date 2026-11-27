@@ -690,7 +690,8 @@ in
             CPUWeight = 3;
             IOWeight = 20;
             MemoryHigh = "6G";
-            MemoryMax = "8G";
+            MemoryMax = "6G";
+            MemorySwapMax = 0;
           };
 
           sinnix.runtime.units = {
@@ -706,6 +707,7 @@ in
               notifyOnFailure = true;
             };
             borgbackup-job-persist = watchedUnit "borgbackup-job-persist" {
+              resources = drainResources;
               captures = archiveCaptures [ (drainCapture "persist" "freshness persist") ];
             };
             borgbackup-job-persist-hourly = watchedUnit "borgbackup-job-persist-hourly" {

@@ -103,6 +103,7 @@ in
             touch "$out"
           '';
         polylogue-live =
+          assert liveService.Unit.X-SwitchMethod == "keep-old";
           assert linkedExtension.recursive;
           assert toString linkedExtension.source == "${extension}/share/polylogue/extension";
           pkgs.runCommand "sinnix-polylogue-live-check"
