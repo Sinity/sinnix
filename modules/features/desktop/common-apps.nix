@@ -108,8 +108,26 @@ mkFeatureModule {
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
       nav = cfg.fileNavigation;
       paths = config.sinnix.paths;
+      graphical = "graphical-session.target";
+      chatgptState = "${paths.stateRoot}/chatgpt-app";
     in
     {
+      systemd.user.services.app-chatgpt = {
+        description = "ChatGPT desktop";
+        wantedBy = [ graphical ];
+        partOf = [ graphical ];
+        requisite = [ graphical ];
+        after = [ graphical ];
+        serviceConfig = {
+          Type = "exec";
+          ExecStart = "${lib.getExe scriptPkgs.chatgpt-app} --systemd-service";
+          Environment = "CHATGPT_APP_HOME=${chatgptState}";
+          IOWriteBandwidthMax = "${chatgptState} 30M";
+          Restart = "on-failure";
+          RestartSec = "10s";
+        };
+      };
+
       sinnix.features.desktop.common-apps.fileNavigation.places = lib.mkDefault [
         {
           name = "Projects";

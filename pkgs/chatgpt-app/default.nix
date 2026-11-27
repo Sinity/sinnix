@@ -77,6 +77,11 @@ let
       export NIX_LD_LIBRARY_PATH=${lib.makeLibraryPath libraries}
       export LD_LIBRARY_PATH="${lib.makeLibraryPath libraries}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
       export XDG_DATA_DIRS="${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+      managed=0
+      if [ "''${1:-}" = --systemd-service ]; then
+        managed=1
+        shift
+      fi
       state="''${CHATGPT_APP_HOME:-/realm/state/chatgpt-app}"
       mkdir -p "$state/releases"
       exec 9>"$state/update.lock"
@@ -139,11 +144,15 @@ let
       fi
       # Keep the Electron profile on persistent /realm storage.
       mkdir -p "$state/profile"
+      app=("$state/current/ChatGPT" --ozone-platform=wayland --disable-features=PersistentHistograms --user-data-dir="$state/profile" "''${proxy_args[@]}" "$@")
+      if [ "$managed" = 1 ]; then
+        exec "''${app[@]}"
+      fi
       # A named scope attributes this closed binary's I/O; its write ceiling
       # keeps bursts below the rate that stalls the desktop.
       exec systemd-run --user --scope --quiet --collect --unit="app-chatgpt-$$" \
         --property=IOWriteBandwidthMax="$state 30M" \
-        "$state/current/ChatGPT" --ozone-platform=wayland --disable-features=PersistentHistograms --user-data-dir="$state/profile" "''${proxy_args[@]}" "$@"
+        "''${app[@]}"
     '';
   };
   desktop = runCommand "chatgpt-desktop" { } ''
