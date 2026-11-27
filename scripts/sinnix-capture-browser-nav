@@ -4,7 +4,7 @@
 # runtimeInputs: @sinnix-capture @sinnix-reading-stack
 # pythonPackages: @sinnix-lib
 """sinnix-capture-browser-nav: the local endpoint the nav-capture WebExtension
-POSTs to. Two routes:
+POSTs to. Three routes:
 
   POST /v1/link-event         -- {source_url, source_title, target_url,
                                    anchor_text, ts, trigger} -- every link
@@ -17,6 +17,11 @@ POSTs to. Two routes:
                                    click before navigation and retries with its
                                    original capture_id and observation time until
                                    the receiver confirms the write.
+
+  POST /v1/history-visit      -- {profile, url, visit}. Stores a Chrome
+                                   history.getVisits reply in its own lane.
+                                   The API visit time fixes its day file and
+                                   the capture ID fixes the original reply.
 
   POST /v1/reading-stack/push -- {source_url, source_title, target_url,
                                    target_title, anchor_text, note, ts}.
@@ -46,6 +51,7 @@ import os
 import re
 import subprocess
 import sys
+from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -104,6 +110,43 @@ def reading_stack_push(payload: dict) -> None:
     subprocess.run(
         ["sinnix-reading-stack", "push", "--json-stdin"],
         input=json.dumps(fields), text=True, check=True, capture_output=True,
+    )
+
+
+def history_visit(payload: dict) -> tuple[dict, float]:
+    profile, url, visit = (payload.get(key) for key in ("profile", "url", "visit"))
+    if not isinstance(profile, str) or not re.fullmatch(r"[0-9a-f]{32}", profile):
+        raise ValueError("invalid browser profile installation")
+    if not isinstance(url, str) or not url or not isinstance(visit, dict):
+        raise ValueError("visit needs an API record and URL")
+    for key, pattern in (
+        ("id", r"[1-9][0-9]*"),
+        ("visitId", r"[1-9][0-9]*"),
+        ("referringVisitId", r"0|[1-9][0-9]*"),
+    ):
+        value = visit.get(key)
+        if not isinstance(value, str) or not re.fullmatch(pattern, value):
+            raise ValueError(f"invalid Chrome visit {key}")
+    visited_ms = visit.get("visitTime")
+    if type(visited_ms) not in (int, float) or not 0 <= visited_ms < 253402300800000:
+        raise ValueError("invalid visit time")
+    transition = visit.get("transition")
+    if (
+        not isinstance(transition, str)
+        or not transition
+        or type(visit.get("isLocal")) is not bool
+    ):
+        raise ValueError("invalid visit transition or locality")
+    identity = [profile, visit["id"], visit["visitId"], float(visited_ms), url]
+    return (
+        {
+            "capture_id": sha256(json.dumps(identity).encode()).hexdigest(),
+            "source": "chrome.history.getVisits",
+            "profile": profile,
+            "url": url,
+            "visit": visit,
+        },
+        visited_ms / 1000,
     )
 
 
@@ -173,6 +216,12 @@ class Handler(BaseHTTPRequestHandler):
         if not self._allowed():
             self._refuse(403)
             return
+        if self.path == "/v1/history-visit" and (
+            self.server.extension_origin is None
+            or self.headers.get("Origin") != self.server.extension_origin
+        ):
+            self._refuse(403)
+            return
         types = self.headers.get_all("Content-Type", [])
         if len(types) != 1 or types[0].split(";", 1)[0].strip().lower() != "application/json":
             self._refuse(415)
@@ -205,6 +254,15 @@ class Handler(BaseHTTPRequestHandler):
                     sinnix_capture_write(
                         "browser-nav-edges", payload, observed_at=observed_at
                     )
+            elif self.path == "/v1/history-visit":
+                try:
+                    record, visited_at = history_visit(payload)
+                except ValueError:
+                    self._respond(400)
+                    return
+                sinnix_capture_write(
+                    "chromium-history-api", record, observed_at=visited_at
+                )
             elif self.path == "/v1/reading-stack/push":
                 reading_stack_push(payload)
             else:

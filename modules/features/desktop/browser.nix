@@ -155,6 +155,7 @@ mkFeatureModule {
 
       systemd.tmpfiles.rules = [
         "d ${config.sinnix.paths.capturePaths.browser-nav-edges} 0700 ${user} ${user} -"
+        "d ${config.sinnix.paths.capturePaths.chromium-history-api} 0700 ${user} ${user} -"
         "d ${config.sinnix.paths.capturePaths.reading-stack} 0700 ${user} ${user} -"
       ];
 
@@ -173,6 +174,16 @@ mkFeatureModule {
               requiredPayloadFields = [
                 "source_url"
                 "target_url"
+              ];
+            }
+            {
+              name = "chromium-history-api";
+              path = "${config.sinnix.paths.capturePaths.chromium-history-api}";
+              eventDriven = true;
+              requiredPayloadFields = [
+                "profile"
+                "url"
+                "visit"
               ];
             }
             # Written by the sinnix-reading-stack CLI on every push and pop;

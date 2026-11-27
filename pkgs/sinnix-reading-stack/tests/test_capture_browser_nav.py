@@ -117,6 +117,53 @@ def test_valid_body_reaches_capture(monkeypatch):
     assert calls == [("browser-nav-edges", {"trigger": "tap"})]
 
 
+def test_history_visit_reply_is_idempotent_through_the_capture_writer(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(daemon, "CAPTURE_ROOT", str(tmp_path))
+    payload = {
+        "profile": "b" * 32,
+        "url": "https://example.test/",
+        "visit": {
+            "id": "17",
+            "visitId": "41",
+            "referringVisitId": "39",
+            "visitTime": 1_760_000_000_250.25,
+            "transition": "link",
+            "isLocal": True,
+        },
+    }
+
+    def send(visit, with_origin=True):
+        raw = json.dumps(visit).encode()
+        handler = object.__new__(daemon.Handler)
+        handler.path = "/v1/history-visit"
+        handler.headers = {"Content-Length": str(len(raw))}
+        setup_handler(handler)
+        if with_origin:
+            handler.headers["Origin"] = handler.server.extension_origin
+        handler.rfile = io.BytesIO(raw)
+        replies = []
+        handler._respond = replies.append
+        handler.do_POST()
+        return replies
+
+    assert send(payload, with_origin=False) == [403]
+    assert send({**payload, "visit": {**payload["visit"], "visitTime": True}}) == [400]
+    assert send(payload) == [204]
+    assert send(payload) == [204]
+    assert send({**payload, "profile": "c" * 32}) == [204]
+
+    lane = tmp_path / "browser/chromium-history-api/chromium-history-api-20251009.jsonl"
+    first, second = map(json.loads, lane.read_text().splitlines())
+    assert first["ts"] == payload["visit"]["visitTime"] / 1_000
+    assert first["payload"]["visit"] == payload["visit"]
+    assert first["payload"]["source"] == "chrome.history.getVisits"
+    assert first["payload"]["profile"] == "b" * 32
+    assert second["payload"]["profile"] == "c" * 32
+    assert first["payload"]["capture_id"] != second["payload"]["capture_id"]
+
+
 def test_reading_stack_push_passes_provenance_and_note(monkeypatch):
     calls = []
     monkeypatch.setattr(

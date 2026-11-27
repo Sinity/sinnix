@@ -6,10 +6,19 @@ let contextMenuHandler;
 let relayHandler;
 let storageHandler;
 let alarmHandler;
+let startupHandler;
+let historyHandler;
 let responseOK = true;
 const requests = [];
 const pending = new Map();
 const alarms = new Map();
+const visitTime = 1_760_000_000_250.25;
+const historyItem = { id: "17", url: "https://visited.example/", lastVisitTime: visitTime };
+const matchingVisit = {
+  id: "17", visitId: "51", referringVisitId: "49", visitTime, transition: "link", isLocal: true,
+};
+let visits = [{ ...matchingVisit, visitId: "50", visitTime: visitTime - 1 }, matchingVisit];
+let historyRequests = 0;
 
 globalThis.fetch = async (url, options) => {
   requests.push({ url, payload: JSON.parse(options.body) });
@@ -28,14 +37,23 @@ globalThis.chrome = {
     removeAll(callback) { callback(); },
     onClicked: { addListener(handler) { contextMenuHandler = handler; } },
   },
+  history: {
+    onVisited: { addListener(handler) { historyHandler = handler; } },
+    async getVisits({ url }) {
+      assert.equal(url, historyItem.url);
+      historyRequests++;
+      return visits;
+    },
+  },
   runtime: {
     onInstalled: { addListener() {} },
     onMessage: { addListener(handler) { relayHandler = handler; } },
-    onStartup: { addListener() {} },
+    onStartup: { addListener(handler) { startupHandler = handler; } },
   },
   storage: {
     local: {
       get: async () => Object.fromEntries(pending),
+      set: async changes => { for (const [key, value] of Object.entries(changes)) pending.set(key, value); },
       remove: async key => { pending.delete(key); },
     },
     onChanged: { addListener(handler) { storageHandler = handler; } },
@@ -131,6 +149,40 @@ alarms.delete("retry-links");
 await alarmHandler({ name: "retry-links" });
 assert.equal(pending.has(key), false);
 assert.deepEqual(requests.at(-1), firstAttempt);
+
+// A visit is only a candidate until its exact API record is available.
+const availableVisits = visits;
+visits = [visits[0]];
+const requestCount = requests.length;
+await historyHandler(historyItem);
+assert.equal(requests.length, requestCount);
+const [historyKey] = [...pending.keys()].filter(key => key.startsWith("history:"));
+assert.ok(historyKey);
+assert.equal(alarms.get("retry-history-visits").periodInMinutes, 1);
+
+visits = availableVisits;
+responseOK = false;
+await alarmHandler({ name: "retry-history-visits" });
+const visitAttempt = requests.at(-1);
+assert.equal(visitAttempt.url, `http://127.0.0.1:${expectedPort}/v1/history-visit`);
+assert.deepEqual(visitAttempt.payload.visit, matchingVisit);
+assert.match(visitAttempt.payload.profile, /^[0-9a-f]{32}$/);
+assert.deepEqual(pending.get(historyKey).visits, [matchingVisit]);
+const lookups = historyRequests;
+
+// Restart both the worker module and its alarm. Even removed history can
+// still be delivered from the API record the previous worker retained.
+visits = [];
+alarms.delete("retry-history-visits");
+await import(`${backgroundScript}?restart`);
+responseOK = true;
+await startupHandler();
+assert.deepEqual(requests.at(-1), visitAttempt);
+assert.equal(historyRequests, lookups);
+assert.equal(pending.has(historyKey), false);
+
+// Content messages can submit clicks, never committed history observations.
+assert.equal(relayHandler({ path: "/v1/history-visit", body: visitAttempt.payload }, {}, assert.fail), false);
 
 // An HTTP refusal is a failed relay, even when fetch itself resolves.
 for (const ok of [true, false]) {

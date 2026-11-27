@@ -1,6 +1,9 @@
 const ENDPOINT = "http://127.0.0.1:8767";
 const LINK_RETRY = "retry-links";
+const HISTORY_RETRY = "retry-history-visits";
+const HISTORY_PROFILE = "history-profile";
 const sendingLinks = new Set();
+let historyDrain;
 
 async function post(path, body, signal) {
   const response = await fetch(`${ENDPOINT}${path}`, {
@@ -36,6 +39,61 @@ async function deliverPendingLinks() {
   }
 }
 
+async function drainHistory() {
+  const state = await chrome.storage.local.get(null);
+  const pending = Object.entries(state).filter(([key]) => key.startsWith("history:"));
+  if (!pending.length) return;
+  const profile = state[HISTORY_PROFILE] ?? crypto.randomUUID().replaceAll("-", "");
+  if (!state[HISTORY_PROFILE]) await chrome.storage.local.set({ [HISTORY_PROFILE]: profile });
+
+  for (const [key, item] of pending) {
+    let visits = item.visits;
+    if (!visits) {
+      try {
+        visits = (await chrome.history.getVisits({ url: item.url })).filter(
+          visit => visit.id === item.id && visit.visitTime === item.lastVisitTime,
+        );
+      } catch {
+        continue;
+      }
+      if (!visits.length) continue;
+      // Preserve the API reply before delivery. It may no longer be readable
+      // from Chrome after a failed request or a browser restart.
+      await chrome.storage.local.set({ [key]: { ...item, visits } });
+    }
+    try {
+      for (const visit of visits) {
+        if (!(await post("/v1/history-visit", { profile, url: item.url, visit }, AbortSignal.timeout(10_000)))) {
+          throw new Error("History capture refused");
+        }
+      }
+    } catch {
+      // This reply is still queued. Continue with independent candidates.
+      continue;
+    }
+    await chrome.storage.local.remove(key);
+  }
+}
+
+async function resumeHistory() {
+  if (!(await chrome.alarms.get(HISTORY_RETRY))) {
+    await chrome.alarms.create(HISTORY_RETRY, { periodInMinutes: 1 });
+  }
+  historyDrain ??= drainHistory().finally(() => { historyDrain = undefined; });
+  return historyDrain;
+}
+
+function reportHistoryError() {
+  console.warn("Could not persist or resume Chrome history capture");
+}
+
+chrome.history.onVisited.addListener(({ id, url, lastVisitTime }) => {
+  if (!url || !Number.isFinite(lastVisitTime)) return;
+  return chrome.storage.local.set({ [`history:${crypto.randomUUID()}`]: { id, url, lastVisitTime } })
+    .then(resumeHistory)
+    .catch(reportHistoryError);
+});
+
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && Object.entries(changes).some(([key, change]) =>
     key.startsWith("link:") && change.newValue
@@ -43,9 +101,13 @@ chrome.storage.onChanged.addListener((changes, area) => {
     void deliverPendingLinks();
   }
 });
-chrome.runtime.onStartup.addListener(deliverPendingLinks);
+chrome.runtime.onStartup.addListener(() => {
+  void deliverPendingLinks();
+  return resumeHistory().catch(reportHistoryError);
+});
 chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === LINK_RETRY) return deliverPendingLinks();
+  if (alarm.name === HISTORY_RETRY) return resumeHistory().catch(reportHistoryError);
 });
 
 async function linkContext(tabId, info, tab) {
@@ -75,7 +137,7 @@ async function promptInPage(tabId, message) {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (!message?.path || !message.body) return false;
+  if (!message?.body || !["/v1/link-event", "/v1/reading-stack/push"].includes(message.path)) return false;
   post(message.path, message.body)
     .then((ok) => sendResponse({ ok }))
     .catch(() => sendResponse({ ok: false }));
@@ -98,6 +160,7 @@ chrome.commands.onCommand.addListener(async (command) => {
 
 chrome.runtime.onInstalled.addListener(() => {
   void deliverPendingLinks();
+  void resumeHistory().catch(reportHistoryError);
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({ id: "defer-link", title: "Defer link", contexts: ["link"] });
     chrome.contextMenus.create({ id: "defer-link-with-note", title: "Defer link with note", contexts: ["link"] });

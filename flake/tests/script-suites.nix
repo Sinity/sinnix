@@ -168,6 +168,9 @@
           # the suite drives the real publish rather than a stub, so a change
           # to the atomic write reaches these assertions.
           extraPythonPackages = [ (pkgs.callPackage ../../pkgs/sinnix-lib/pkg.nix { }) ];
+          nativeBuildInputs = [
+            (pkgs.callPackage ../../pkgs/sinnix-capture/pkg.nix { inherit sinnix-lib; })
+          ];
         };
         picker-suite = mkScriptSuite {
           name = "sinnix-picker";

@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Sinnix Navigation Capture",
-  "version": "0.3.0",
-  "description": "Capture link provenance and defer links without opening tabs.",
-  "permissions": ["activeTab", "alarms", "contextMenus", "scripting", "storage", "tabs"],
+  "version": "0.4.0",
+  "description": "Capture browser visits and link provenance, and defer links without opening tabs.",
+  "permissions": ["activeTab", "alarms", "contextMenus", "history", "scripting", "storage", "tabs"],
   "host_permissions": ["http://127.0.0.1/*", "<all_urls>"],
   "background": {
     "service_worker": "background.js",

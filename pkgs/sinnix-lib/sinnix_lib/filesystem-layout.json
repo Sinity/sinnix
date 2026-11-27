@@ -40,6 +40,7 @@
     "transcripts": "audio/transcript",
     "webhistory": "browser/history",
     "browser-nav-edges": "browser/navigation",
+    "chromium-history-api": "browser/chromium-history-api",
     "reading-stack": "browser/reading",
     "url-ledger": "browser/coverage",
     "video-resolve": "browser/recovery",
