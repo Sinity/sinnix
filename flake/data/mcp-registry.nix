@@ -39,6 +39,19 @@ let
       hermes.headers.Authorization = "Bearer \${CONTEXT7_API_KEY}";
     };
 
+    claudia = {
+      description = "Claudia gallery: music-video production recipes, visual canon, assets, shot planning and prompt lint";
+      transport = "http";
+      tier = "remote-core";
+      url = "https://claudia.gallery/mcp";
+      clients = [
+        "claude"
+        "codex"
+        "hermes"
+        "pi"
+      ];
+    };
+
     github = {
       description = "GitHub issues, pull requests, and repository operations";
       transport = "stdio";

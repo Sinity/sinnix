@@ -1,0 +1,9 @@
+# required (plus the ffmpeg and ffprobe command-line tools on your PATH)
+numpy>=1.22
+
+# optional, each used by one step and imported only there:
+# faster-whisper   # songmap words: word labels for the line table (strongly recommended)
+# Pillow           # cut render, shotbook board
+# mediapipe        # sync mouth / sync lips / takes without sound (needs the face_landmarker.task model file)
+# demucs           # songmap separate
+# wordfreq         # lyric score: rare-word flags

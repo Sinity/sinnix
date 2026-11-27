@@ -1,0 +1,13 @@
+# Night Shift at the Lighthouse: a made-up lyric for the walkthrough.
+# Every line as it is sung, in order, repeats written out. [Section - delivery] headers set the scoring mode
+# (spoken, sung or chant). Words in (parentheses) are the group's voices; Suno sings them as backing vocals.
+
+[Verse - spoken, close and warm]
+I keep the lighthouse running on a battery of songs,
+and every boat that passes gets a chorus of its own.
+The forecast tells me nothing, so I read the water instead.
+It mostly says tomorrow, then it tells me go to bed.
+
+[Chorus - sung, bright; the group asks, she answers]
+(Who is on the radio?) Only me, and you below
+(Who is keeping all the lights?) I am, every single night
