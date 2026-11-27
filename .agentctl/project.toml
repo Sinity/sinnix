@@ -266,9 +266,10 @@ exec = ["sinnix-fs", "refresh", "--index-dir", "/realm/state/fs-index", "--retai
 arguments = "required"
 pool = "bulk"
 timeout_seconds = 7200
-# Match the index service's 2 GiB DuckDB buffer budget plus 1 GiB for
-# allocations outside the buffer manager.
+# Reserve the index service's 3 GiB envelope. Its 1 GiB DuckDB buffer
+# allowance leaves headroom for allocations outside the buffer manager.
 admission = { memory_mib = 3072 }
+unit_properties = ["MemoryMax=3G", "MemorySwapMax=0"]
 
 [operations.fs_index_scan]
 description = "Scan managed filesystems and publish one coherent index generation"

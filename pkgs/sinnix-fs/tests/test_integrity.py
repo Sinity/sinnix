@@ -633,7 +633,7 @@ def test_all_internal_duckdb_sessions_have_bounded_buffers_and_workers(tmp_path)
     assert writer.returncode == 0, writer.stderr
     reader = fs.duckdb_query(db, query)
     assert reader.returncode == 0, reader.stderr
-    assert reader.stdout.strip() == "2.0 GiB|2"
+    assert reader.stdout.strip() == "1.0 GiB|2"
     # The write/materialization route must apply the same policy as readers.
     stored = fs.duckdb_query(db, "SELECT * FROM proof")
     assert stored.returncode == 0, stored.stderr

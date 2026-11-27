@@ -66,15 +66,16 @@ def safe(value):
 
 
 # DuckDB otherwise sizes buffers and workers from the whole host, even inside
-# the scheduled service's memory boundary. That boundary is 3G with no swap
-# (MemoryMax in modules/services/fs-index.nix); the buffer manager gets two
-# thirds of it, which leaves the rest for DuckDB's allocations outside the
-# buffer manager, the scanning Python process and file metadata.
+# the scheduled service's memory boundary. Its 3G envelope has no swap
+# (MemoryMax in modules/services/fs-index.nix). Give the buffer manager 1 GiB
+# so the remaining envelope covers allocations outside that manager, the
+# scanning Python process and file metadata; the buffer limit is not a
+# bound on the complete process working set.
 #
 # A bounded buffer manager is not sufficient for pipe input: DuckDB retains
 # its pipe-read buffers outside spillable memory. Use seekable temporary
 # scan files (the retained October scan was measured to fit with file input).
-DUCKDB_MEMORY_LIMIT = "2GiB"
+DUCKDB_MEMORY_LIMIT = "1GiB"
 DUCKDB_SETTINGS = f"SET memory_limit='{DUCKDB_MEMORY_LIMIT}'; SET threads=2; SET preserve_insertion_order=false;"
 # Writers spill here, on the scratch volume, not beside a generation's
 # database. Where the directory is absent they spill beside the database.
