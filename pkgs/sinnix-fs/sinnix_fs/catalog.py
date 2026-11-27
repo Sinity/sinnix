@@ -761,9 +761,58 @@ def cmd_prepare_relocation(args: argparse.Namespace) -> int:
             normalized(move["destination"])
             if move["source"] == move["destination"]:
                 raise CatalogError("source and destination must differ")
+        # Every explicit move root needs address history, even when the file
+        # has not been inspected before. Enroll metadata only in the prepared
+        # transaction; nothing is published until the physical move verifies.
+        existing_paths = {asset["current_path"] for asset in catalog["assets"]}
+        new_assets = []
+        for move in moves:
+            source = Path(move["source"])
+            # A root-prefix migration maps existing records; "/" is not
+            # itself a physically movable collection.
+            if str(source) == "/" or str(source) in existing_paths:
+                continue
+            if not entry_exists(source):
+                if args.retain_unavailable:
+                    continue
+                raise CatalogError(f"uncatalogued move source is missing: {source}")
+            mode = source.lstat().st_mode
+            if stat.S_ISREG(mode):
+                kind = "file"
+            elif stat.S_ISDIR(mode):
+                kind = "collection"
+            else:
+                raise CatalogError(f"uncatalogued move source is not a regular file or directory: {source}")
+            asset = {
+                "id": str(uuid.uuid4()),
+                "kind": kind,
+                "current_path": str(source),
+                "title": source.name,
+                "description": "Location recorded for an explicit filesystem relocation; payload not inspected.",
+                "identity": identity(source),
+                "previous_paths": [],
+                "tags": [],
+                "relations": [],
+                "inspections": [{
+                    "method": "metadata",
+                    "scope": "explicit move root; filesystem identity only",
+                    "basis": "Prepared relocation observation",
+                }],
+                "uncertainties": ["Historical payload continuity is not asserted."],
+                "coverage": {
+                    "status": "metadata_only",
+                    "scope": "move root; descendants and payload not inspected",
+                    "unit": "object",
+                    "discovered_count": None,
+                    "inspected_count": 0,
+                },
+            }
+            check_asset(asset, require_path=False)
+            new_assets.append(asset)
+            existing_paths.add(str(source))
         rows, unavailable = [], []
         paths = set()
-        for asset in catalog["assets"]:
+        for asset in [*catalog["assets"], *new_assets]:
             old = asset["current_path"]
             destination = relocate_path(old, moves)
             if destination in paths:
@@ -811,6 +860,7 @@ def cmd_prepare_relocation(args: argparse.Namespace) -> int:
             "catalog_sha256": hashlib.sha256(raw).hexdigest(),
             "moves": moves,
             "assets": rows,
+            "new_assets": new_assets,
             "unavailable": unavailable,
         }
         output = Path(args.output)
@@ -837,6 +887,19 @@ def cmd_relocate_batch(args: argparse.Namespace) -> int:
                 "stale catalog digest; prepare a new receipt before renaming"
             )
         catalog = load_catalog(path, paths=False)
+        # New metadata records share the exact same relocation checks and
+        # catalog commit as existing ones, including collision and stale checks.
+        current_paths = {asset["current_path"] for asset in catalog["assets"]}
+        sources = {move["source"] for move in receipt["moves"]}
+        for asset in receipt.get("new_assets", []):
+            check_asset(asset, require_path=False)
+            if asset["current_path"] not in sources or asset["current_path"] in current_paths:
+                raise CatalogError("new relocation asset is not an unregistered move root")
+            if asset.get("previous_paths") or asset.get("relocations"):
+                raise CatalogError("new relocation asset must not assert prior history")
+            current_paths.add(asset["current_path"])
+            catalog["assets"].append(asset)
+        validate_catalog(catalog, check_paths=False)
         by_id = {asset["id"]: asset for asset in catalog["assets"]}
         expected = {
             asset["id"]

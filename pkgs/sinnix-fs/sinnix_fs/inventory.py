@@ -71,12 +71,9 @@ def safe(value):
 # thirds of it, which leaves the rest for DuckDB's allocations outside the
 # buffer manager, the scanning Python process and file metadata.
 #
-# This limit does not make a full scan fit. scan_generation feeds the scan
-# rows through pipes, and DuckDB keeps everything it has read from a pipe in
-# memory, outside what it can spill: the file rows of a full scan are about
-# 2GB of JSON, so the read fails at 512MiB and at 2GiB alike. The same rows
-# read from a regular file load within this limit (measured on the retained
-# scan of 25 October 2026: pipe fails after 1.9GiB, file completes).
+# A bounded buffer manager is not sufficient for pipe input: DuckDB retains
+# its pipe-read buffers outside spillable memory. Use seekable temporary
+# scan files (the retained October scan was measured to fit with file input).
 DUCKDB_MEMORY_LIMIT = "2GiB"
 DUCKDB_SETTINGS = f"SET memory_limit='{DUCKDB_MEMORY_LIMIT}'; SET threads=2; SET preserve_insertion_order=false;"
 # Writers spill here, on the scratch volume, not beside a generation's
@@ -1297,12 +1294,10 @@ DROP VIEW IF EXISTS resolved_judgments;
 CREATE VIEW resolved_judgments AS
 SELECT * FROM effective_judgments;
 
--- Prefix inheritance. A path's judgment is its own sha256: row if one
--- exists, else the LONGEST prefix: row whose prefix it starts with. DuckDB
--- has no native trie join, so this is a correlated subquery keyed on
--- string length -- fine at this row count (hundreds of judgments, not
--- millions), and the alternative (materializing every prefix x path pair)
--- would be the thing actually too slow to run.
+-- A prefix matches its exact address or descendants at a component boundary.
+-- Resolve overlapping rules on the small set of lexical boundaries, then
+-- map each path to its interval once. Exact digest judgments still outrank
+-- prefix inheritance.
 DROP VIEW IF EXISTS prefix_judgments;
 CREATE VIEW prefix_judgments AS
 SELECT target, field, value, confidence, observation, method, evidence, ts,
@@ -1334,27 +1329,41 @@ FROM (
 -- general one about its directory.
 DROP TABLE IF EXISTS inherited_judgments;
 CREATE TABLE inherited_judgments AS
-SELECT path, sha256, field, value, confidence, observation, method, evidence, via_prefix
-FROM (
-    SELECT p.path, p.sha256, pj.field, pj.value, pj.confidence, pj.observation,
-           pj.method, pj.evidence, pj.prefix AS via_prefix, 1 AS specificity,
-           length(pj.prefix) AS match_len
-    FROM all_paths p
+WITH boundaries AS (
+    -- A filesystem path cannot contain NUL. [P, P || chr(0)) contains
+    -- only the exact path P; [P || '/', P || '0') contains its descendants.
+    -- The active rules are constant between successive boundaries.
+    SELECT rtrim(prefix, '/') AS boundary FROM prefix_judgments
+    UNION SELECT rtrim(prefix, '/') || chr(0) FROM prefix_judgments
+    UNION SELECT rtrim(prefix, '/') || '/' FROM prefix_judgments
+    UNION SELECT rtrim(prefix, '/') || '0' FROM prefix_judgments
+), winners AS (
+    SELECT b.boundary, pj.field, pj.value, pj.confidence, pj.observation,
+           pj.method, pj.evidence, pj.prefix AS via_prefix
+    FROM boundaries b
     JOIN prefix_judgments pj ON
-        p.path = rtrim(pj.prefix, '/')
-        OR starts_with(p.path, rtrim(pj.prefix, '/') || '/')
-
-    UNION ALL
-
+        b.boundary = rtrim(pj.prefix, '/')
+        OR starts_with(b.boundary, rtrim(pj.prefix, '/') || '/')
+    QUALIFY row_number() OVER (
+        PARTITION BY b.boundary, pj.field ORDER BY length(pj.prefix) DESC
+    ) = 1
+), segments AS (
+    SELECT p.path, p.sha256, b.boundary
+    FROM all_paths p
+    ASOF JOIN boundaries b ON p.path >= b.boundary
+), exact_matches AS (
     SELECT p.path, p.sha256, rj.field, rj.value, rj.confidence, rj.observation,
-           rj.method, rj.evidence, NULL AS via_prefix, 0 AS specificity, 0 AS match_len
+           rj.method, rj.evidence, NULL::VARCHAR AS via_prefix
     FROM all_paths p
     JOIN resolved_judgments rj ON rj.target = 'sha256:' || p.sha256
     WHERE p.sha256 IS NOT NULL
 )
-QUALIFY row_number() OVER (
-    PARTITION BY path, field ORDER BY specificity ASC, match_len DESC
-) = 1;
+SELECT p.path, p.sha256, w.field, w.value, w.confidence, w.observation,
+       w.method, w.evidence, w.via_prefix
+FROM segments p JOIN winners w USING (boundary)
+ANTI JOIN exact_matches e ON e.path = p.path AND e.field = w.field
+UNION ALL
+SELECT * FROM exact_matches;
 
 -- Coverage: four disjoint states per (path, field). Built against the
 -- 'subject' field, the one the system charter's routing decisions actually
@@ -1619,53 +1628,32 @@ def generation_coverage(path: Path) -> dict:
 
 
 def scan_generation(stage: Path, roots: list[str], judgments: Path) -> None:
-    """Stream both scans and classifications through one DuckDB transaction.
+    """Materialize bounded file-backed scans in one DuckDB transaction.
 
-    Checkpoint at commit instead of journaling the same new tables first.
-    Separate inherited pipe descriptors let SQL consume scans sequentially
-    without ever spooling the rows to a filesystem intermediate.
+    DuckDB cannot spill its input buffers when read_json reads a pipe. The
+    multi-GB content stream therefore exceeds the service memory boundary
+    even when the buffer-manager limit is correct. Seekable scratch files
+    allow the parser to stream and spill; they are not published artifacts.
     """
-    pipes = []
-    owned = set()
     database = stage / "inventory.duckdb"
+    scratch_root = (
+        DUCKDB_SCRATCH_ROOT if DUCKDB_SCRATCH_ROOT.is_dir() else stage
+    )
     try:
-        for _ in range(2):
-            pair = os.pipe()
-            pipes.append(pair)
-            owned.update(pair)
-        sql = "SET wal_autocheckpoint='0B'; BEGIN TRANSACTION;\n"
-        sql += inventory_materialize(
-            Path(f"/dev/fd/{pipes[0][0]}"), database, sql_only=True
-        )
-        sql += content_materialize(
-            Path(f"/dev/fd/{pipes[1][0]}"), database, sql_only=True
-        )
-        sql += ledger_run(stage, judgments, sql_only=True)
-        sql += "\nCOMMIT;"
-
-        def produce():
-            for reader, _writer in pipes:
-                os.close(reader)
-                owned.remove(reader)
-            with os.fdopen(pipes[0][1], "w", encoding="utf-8") as stream:
-                owned.remove(pipes[0][1])
-                inventory_scan(roots, -1, stream, 2000)
-            with os.fdopen(pipes[1][1], "w", encoding="utf-8") as stream:
-                owned.remove(pipes[1][1])
-                content_walk(roots, stream, 5000)
-
-        result = run_duckdb_file(
-            database,
-            sql,
-            "scan",
-            produce,
-            pass_fds=tuple(reader for reader, _writer in pipes),
-        )
-        if result.returncode:
-            raise ValueError(f"scan materialization failed: {result.stderr}")
+        with tempfile.TemporaryDirectory(prefix="sinnix-fs-scan-", dir=scratch_root) as directory:
+            nodes = Path(directory) / "nodes.jsonl"
+            files = Path(directory) / "files.jsonl"
+            inventory_scan(roots, -1, nodes, 2000)
+            content_walk(roots, files, 5000)
+            sql = "SET wal_autocheckpoint='0B'; BEGIN TRANSACTION;\n"
+            sql += inventory_materialize(nodes, database, sql_only=True)
+            sql += content_materialize(files, database, sql_only=True)
+            sql += ledger_run(stage, judgments, sql_only=True)
+            sql += "\nCOMMIT;"
+            result = run_duckdb_file(database, sql, "scan")
+            if result.returncode:
+                raise ValueError(f"scan materialization failed: {result.stderr}")
     finally:
-        for descriptor in owned:
-            os.close(descriptor)
         (stage / ".effective.jsonl").unlink(missing_ok=True)
 
 
@@ -1803,8 +1791,10 @@ CREATE OR REPLACE VIEW population AS SELECT CASE WHEN document_like THEN 'docume
                 index_dir / "last-attempt.json", fsync=True, mode=0o600
             ) as handle:
                 json.dump({"status": "published", "generation": name}, handle)
-            # The writer lock excludes live candidates. Derived caches are regenerable.
-            for candidate in generations.iterdir():
+            # A retained-input repair may be recovering the only old scan evidence.
+            # Preserve its predecessor and interrupted candidates for explicit
+            # owner reconciliation; normal fresh builds retain the usual lifecycle.
+            for candidate in (() if retained_inputs is not None else generations.iterdir()):
                 if (
                     candidate != final
                     and candidate.is_dir()

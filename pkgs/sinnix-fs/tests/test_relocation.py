@@ -19,6 +19,7 @@ def fixture(tmp_path):
     old = tmp_path / "old"
     old.mkdir()
     (old / "entry").write_text("original")
+    (old / "entry").chmod(0o644)
     catalog = tmp_path / "catalog.json"
     rows = [observation(old, kind="collection"), observation(old / "entry")]
     assert import_rows(catalog, rows).returncode == 0
@@ -438,3 +439,47 @@ def test_prepare_preserves_existing_dangling_receipt_pointer(tmp_path):
         and str(receipt.readlink()) == "retained-unavailable-receipt.json"
     )
     assert catalog.read_bytes() == before
+
+
+def test_uncatalogued_move_enrolls_only_after_identity_verified(tmp_path):
+    catalog = tmp_path / "catalog.json"
+    other = tmp_path / "unrelated.txt"
+    other.write_text("other")
+    assert import_rows(catalog, [observation(other)]).returncode == 0
+    old = tmp_path / "unregistered note.md"
+    old.write_text("original")
+    new = tmp_path / "renamed-note.md"
+    before = catalog.read_bytes()
+    result, receipt = prepare(tmp_path, catalog, [{"source": str(old), "destination": str(new)}])
+    assert result.returncode == 0, result.stderr
+    assert catalog.read_bytes() == before
+    prepared = json.loads(receipt.read_text())
+    assert len(prepared["new_assets"]) == 1
+    assert prepared["new_assets"][0]["coverage"]["status"] == "metadata_only"
+    # A receipt cannot publish a rename which has not happened.
+    assert invoke(catalog, "relocate-batch", str(receipt)).returncode != 0
+    assert catalog.read_bytes() == before
+    old.rename(new)
+    assert invoke(catalog, "relocate-batch", str(receipt)).returncode == 0
+    enrolled = next(a for a in assets(catalog) if a["current_path"] == str(new))
+    assert enrolled["previous_paths"] == [str(old)]
+    assert enrolled["current_location"]["content_continuity"] == "unverified"
+    result = invoke(catalog, "resolve", str(old))
+    assert result.returncode == 0 and result.stdout.strip() == str(new)
+
+
+def test_uncatalogued_directory_move_resolves_descendant(tmp_path):
+    catalog = tmp_path / "catalog.json"
+    other = tmp_path / "unrelated.txt"
+    other.write_text("other")
+    assert import_rows(catalog, [observation(other)]).returncode == 0
+    old = tmp_path / "unregistered"
+    old.mkdir()
+    (old / "child").write_text("evidence")
+    new = tmp_path / "renamed"
+    result, receipt = prepare(tmp_path, catalog, [{"source": str(old), "destination": str(new)}])
+    assert result.returncode == 0, result.stderr
+    old.rename(new)
+    assert invoke(catalog, "relocate-batch", str(receipt)).returncode == 0
+    result = invoke(catalog, "resolve", str(old / "child"))
+    assert result.returncode == 0 and result.stdout.strip() == str(new / "child")

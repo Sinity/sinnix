@@ -747,8 +747,8 @@ def test_index_input_failures_keep_their_reason(
     assert not (tmp_path / ".effective.jsonl").exists()
 
 
-def test_streamed_scan_matches_file_fed_tables_and_bounds_writes(tmp_path, monkeypatch):
-    """Account completed child IO as well as Python writes on a synthetic tree."""
+def test_file_backed_scan_matches_tables_and_cleans_scratch(tmp_path, monkeypatch):
+    """Require seekable scan inputs and identical logical tables."""
     fs = load_script()
     monkeypatch.setattr(fs, "CONTENT_COLLECTION_BOUNDARIES", {})
     root = tmp_path / "tree"
@@ -772,23 +772,26 @@ def test_streamed_scan_matches_file_fed_tables_and_bounds_writes(tmp_path, monke
     index.mkdir()
     (index / "judgments.jsonl").write_text("")
 
-    def written_bytes():
-        return int(
-            dict(
-                line.split(":", 1)
-                for line in Path("/proc/self/io").read_text().splitlines()
-            )["write_bytes"]
-        )
+    scratch = tmp_path / "scan-scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(fs, "DUCKDB_SCRATCH_ROOT", scratch)
+    execute = fs.run_duckdb_file
+    checked = []
 
-    before = written_bytes()
+    def inspect_inputs(db, sql, name, producer=None, pass_fds=()):
+        if name == "scan":
+            assert producer is None and not pass_fds
+            inputs = list(scratch.glob("sinnix-fs-scan-*/*.jsonl"))
+            assert {p.name for p in inputs} == {"nodes.jsonl", "files.jsonl"}
+            assert all(p.is_file() and p.stat().st_size > 0 for p in inputs)
+            checked.extend(inputs)
+        return execute(db, sql, name, producer, pass_fds)
+
+    monkeypatch.setattr(fs, "run_duckdb_file", inspect_inputs)
     assert fs.publish_generation(index, roots=[str(root)]) == 0
-    written = written_bytes() - before
     generation = fs.resolve_generation(index)
-    size = sum(path.stat().st_size for path in generation.iterdir())
-    assert written <= size * 1.5, (written, size, written / size)
-    print(
-        f"synthetic scan: {written} written bytes / {size} generation bytes = {written / size:.3f}x"
-    )
+    assert len(checked) == 2
+    assert not list(scratch.iterdir())
     assert {path.name for path in generation.iterdir()} == {
         "inventory.duckdb",
         "manifest.json",
@@ -869,6 +872,7 @@ CREATE TABLE files AS SELECT * FROM projection;
         fs, "content_walk", lambda *args: pytest.fail("refresh must reuse scans")
     )
     assert fs.publish_generation(index, retained_inputs=legacy) == 0
+    assert previous.is_dir() and legacy.is_dir()
     generation = fs.resolve_generation(index)
     assert fs.validate_generation(generation)
     result = fs.duckdb_query(generation / "inventory.duckdb", "SELECT name FROM files")
@@ -880,7 +884,7 @@ CREATE TABLE files AS SELECT * FROM projection;
     assert ledger.read_text() == ""
 
 
-def test_failed_stream_producer_preserves_current_without_leaking_pipes(
+def test_failed_scan_preserves_current_without_leaking_scratch(
     tmp_path, monkeypatch
 ):
     fs = load_script()
@@ -893,6 +897,9 @@ def test_failed_stream_producer_preserves_current_without_leaking_pipes(
     assert fs.publish_generation(index, roots=[str(root)]) == 0
     previous = fs.resolve_generation(index)
     descriptors = set(Path("/proc/self/fd").iterdir())
+    scratch = tmp_path / "scan-scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(fs, "DUCKDB_SCRATCH_ROOT", scratch)
 
     def fail(*_args):
         raise RuntimeError("synthetic scan producer failure")
@@ -901,6 +908,7 @@ def test_failed_stream_producer_preserves_current_without_leaking_pipes(
     with pytest.raises(RuntimeError, match="synthetic scan producer failure"):
         fs.publish_generation(index, roots=[str(root)])
     assert set(Path("/proc/self/fd").iterdir()) == descriptors
+    assert not list(scratch.iterdir())
     assert fs.resolve_generation(index) == previous
     assert fs.validate_generation(previous)
 
@@ -926,3 +934,36 @@ def test_a_reader_that_stops_reports_its_own_error(tmp_path):
     )
     assert result.returncode != 0
     assert "no_such_table" in result.stderr
+
+def test_prefix_segment_join_matches_component_aware_rule(tmp_path):
+    """Segments preserve exact paths and descendants, never similarly named siblings."""
+    import json
+    from sinnix_lib.judgments import read_judgments, resolve_judgments
+
+    fs = load_script()
+    db = tmp_path / "inventory.duckdb"
+    paths = [
+        "/", "/realm", "/realm/a", "/realm/a/", "/realm/a/child",
+        "/realm/a/é", "/realm/a/中", "/realm/a0", "/realm/ab",
+        "/realm/a-old", "/realm/a.b", "/realm/a/b", "/realm/a/b/c",
+        "/realm/a/bc", "/realm/Ω", "/other",
+    ]
+    # Use normalized stored paths, exactly as native inventory does.
+    paths = [p for p in paths if p == "/" or not p.endswith("/")]
+    values = ", ".join(f"({fs.sql_string(p)})" for p in paths)
+    assert fs.run_duckdb_file(db, "CREATE TABLE nodes(path VARCHAR); INSERT INTO nodes VALUES " + values + "; CREATE TABLE files(path VARCHAR,sha256 VARCHAR,error VARCHAR,fingerprint_kind VARCHAR);", "fixture").returncode == 0
+    rows = [
+        dict(target="prefix:" + p,field="topic",value=v,method="operator",evidence="fixture",ts="2026-01-01T00:00:00Z")
+        for p,v in [("/", "root"),("/realm","realm"),("/realm/a","a"),("/realm/a/b","b"),("/realm/Ω","omega")]
+    ]
+    ledger_path=tmp_path/"judgments.jsonl"
+    ledger_path.write_text("".join(json.dumps(r)+"\n" for r in rows))
+    assert fs.ledger_run(tmp_path) == 0
+    result=fs.duckdb_query(db,"SELECT path, value FROM inherited_judgments WHERE field='topic'")
+    assert result.returncode == 0, result.stderr
+    import subprocess
+    result=subprocess.run(["duckdb",str(db),"-json","-c","SELECT path,value FROM inherited_judgments WHERE field='topic'"],capture_output=True,text=True,check=True)
+    actual={r["path"]:r["value"] for r in json.loads(result.stdout)}
+    ledger=read_judgments(ledger_path)
+    for path in paths:
+        assert actual[path] == resolve_judgments(ledger,path)["topic"]["value"]

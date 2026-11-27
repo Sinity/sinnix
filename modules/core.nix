@@ -160,6 +160,10 @@ in
         "v /realm/worktree 0700 ${username} users -"
         "d ${paths.realmRoot}/account 0700 ${username} users -"
         "d ${paths.personalRoot} 0700 ${username} users -"
+        # Correct private note container ownership without recursively changing retained evidence.
+        "d ${paths.personalRoot}/idea 0700 ${username} users -"
+        "d ${paths.personalRoot}/self-model 0700 ${username} users -"
+        "d ${paths.personalRoot}/history/retired-note-system 0700 ${username} users -"
         "d ${paths.devicesRoot} 0755 ${username} users -"
         "d ${config.sinnix.projects.root} 0755 ${username} users -"
         "d ${paths.activityRoot} 0755 ${username} users -"
