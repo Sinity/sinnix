@@ -37,7 +37,9 @@ def test_job_line_reports_cancelled_job_with_failed_scratch_cleanup() -> None:
     )
 
     assert "job 42 fixture:recover cancelled exit 130" in text
-    assert "scratch cleanup failed at /scratch/recover: PermissionError (errno 13)" in text
+    assert (
+        "scratch cleanup failed at /scratch/recover: PermissionError (errno 13)" in text
+    )
 
 
 def task(
@@ -308,7 +310,7 @@ def test_ready_beads_reads_bd_ready_in_the_project(tmp_path: Path) -> None:
         {"id": "fx-1", "title": "One"}
     ]
     assert (tmp_path / "cwd").read_text().strip() == str(tmp_path)
-    executable.write_text("#!/bin/sh\necho '{\"error\": \"no db\"}'\n")
+    executable.write_text('#!/bin/sh\necho \'{"error": "no db"}\'\n')
     with pytest.raises(operator_view.TaskReadError):
         operator_view.ready_beads(tmp_path, str(executable))
     executable.write_text("#!/bin/sh\nexit 1\n")
