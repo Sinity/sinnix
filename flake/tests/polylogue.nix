@@ -1,12 +1,11 @@
 # Polylogue service module evaluation checks.
 #
 # The live wrapper is the daemon's command and the browser host, so both must
-# name the same archive; the host manifest must allow the ID Chrome derives
-# from the extension directory.
+# name the same archive; the host manifest allows the packaged extension ID.
 #
 # Provably fails when: the unit's ExecStart or the host manifest stops going
-# through the polylogue wrapper, or the extension ID derivation changes
-# (checked against an ID Chrome assigned to a known path).
+# through the polylogue wrapper, or the configured extension and manifest
+# disagree.
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;
@@ -40,8 +39,10 @@ in
       liveEvaluated = evalTestSpec system liveSpec;
       hm = hmFor liveEvaluated.config;
       liveService = hm.systemd.user.services.polylogue-live;
+      extension = inputs.polylogue-rewrite.packages.${system}.polylogue-extension;
+      linkedExtension = hm.xdg.dataFile."polylogue/extension";
       hostManifest =
-        hm.home.file.".config/chrome-ws/NativeMessagingHosts/com.polylogue.browser_capture.json".text;
+        hm.home.file.".config/chrome-ws/NativeMessagingHosts/com.polylogue.browser_capture.json".source;
       polylogueTmpfiles = liveEvaluated.config.systemd.tmpfiles.rules;
       archiveInventory = liveEvaluated.config.sinnix.runtime.inventory.polylogue;
     in
@@ -99,6 +100,8 @@ in
             touch "$out"
           '';
         polylogue-live =
+          assert linkedExtension.recursive;
+          assert toString linkedExtension.source == "${extension}/share/polylogue/extension";
           pkgs.runCommand "sinnix-polylogue-live-check"
             {
               nativeBuildInputs = [ pkgs.jq ];
@@ -106,15 +109,11 @@ in
               cli = liveEvaluated.config.system.build.polylogueCli;
               wantedBy = builtins.toJSON liveService.Install.WantedBy;
               servicePolicy = builtins.toJSON liveService.Service;
-              inherit hostManifest liveRoot;
+              inherit extension hostManifest;
             }
             ''
               set -eu
-              chrome_id() { printf %s "$1" | sha256sum | cut -c1-32 | tr 0-9a-f a-p; }
-              # Chrome assigned this ID to an unpacked extension at this path.
-              test "$(chrome_id /realm/worktree/polylogue-installed-candidate-d97162b/browser-extension)" \
-                = pllhcjjmdhchcbobnkdegdnjhkciojkp
-              id="$(chrome_id "$liveRoot/extension")"
+              id="$(cat "$extension/share/polylogue/extension-id")"
               wrapper="''${execStart% daemon}"
               test "$execStart" = "$cli/bin/polylogue daemon"
               case "$wrapper" in */bin/polylogue) ;; *) exit 1 ;; esac
@@ -128,7 +127,7 @@ in
               jq -e --arg wrapper "$wrapper" --arg id "$id" '
                 .path == $wrapper and
                 .allowed_origins == ["chrome-extension://\($id)/"]
-              ' <<<"$hostManifest" >/dev/null
+              ' "$hostManifest" >/dev/null
               touch "$out"
             '';
         polylogue-archive-root =

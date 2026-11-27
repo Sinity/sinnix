@@ -51,9 +51,7 @@ mkServiceModule {
       type = lib.types.str;
       default = "${config.sinnix.paths.stateRoot}/polylogue-live";
       description = ''
-        Everything the rewrite keeps except its spools: the archive's data
-        home (``dataHome``) and ``extension``, the unpacked browser extension
-        Chrome loads. The spools are under ``~/.local/state/polylogue`` on
+        The archive's data home (``dataHome``). The spools are under ``~/.local/state/polylogue`` on
         the root disk, persisted by modules/persistence.nix.
       '';
     };
@@ -121,28 +119,9 @@ mkServiceModule {
       };
       cli = config.system.build.polylogueCli;
 
-      # The unpacked extension is its manifest and sources; its third-party
-      # code is vendored under src/.
-      extensionFiles = pkgs.runCommand "polylogue-browser-extension" { } ''
-        mkdir -p "$out"
-        cp -R ${rewriteSource}/extension/manifest.json ${rewriteSource}/extension/src "$out/"
-      '';
-      extensionDir = "${cfg.liveRoot}/extension";
+      extension = rewriteSource.packages.${pkgs.stdenv.hostPlatform.system}.polylogue-extension;
       browser = config.sinnix.features.desktop.browser;
       hostName = "com.polylogue.browser_capture";
-      # Chrome names an unpacked extension after its directory: the first
-      # 32 hex digits of the path's SHA-256, each mapped 0-f to a-p. A fixed
-      # real directory keeps the ID, and the host manifest below, stable
-      # across rebuilds; a store path would change it with every build.
-      extensionId =
-        let
-          digits = lib.stringToCharacters "0123456789abcdef";
-          letters = lib.stringToCharacters "abcdefghijklmnop";
-          letterOf = lib.listToAttrs (lib.zipListsWith lib.nameValuePair digits letters);
-        in
-        lib.concatMapStrings (d: letterOf.${d}) (
-          lib.stringToCharacters (builtins.substring 0 32 (builtins.hashString "sha256" extensionDir))
-        );
 
       # The live class prioritizes daemon disk access. The daemon, its index
       # build included, fits 8G resident and 1G swapped, or the kernel ends it
@@ -185,41 +164,19 @@ mkServiceModule {
           home.file = lib.optionalAttrs browser.enable {
             "${browser.chromeUserDataDir}/NativeMessagingHosts/${hostName}.json" = {
               force = true;
-              text = builtins.toJSON {
-                name = hostName;
-                description = "Polylogue browser capture host";
-                path = "${cli}/bin/polylogue";
-                type = "stdio";
-                allowed_origins = [ "chrome-extension://${extensionId}/" ];
+              source = rewriteSource.lib.browserHostManifest pkgs {
+                inherit extension;
+                program = "${cli}/bin/polylogue";
               };
             };
           };
 
-          # Chrome loads the extension from this directory and never rereads
-          # its files by itself: a running background keeps the old code
-          # against new page scripts. When the files change, loading the
-          # same directory again reloads the extension under the same ID.
-          # Files are compared by content, so an unchanged extension is not
-          # reloaded on every switch.
-          # Without a reachable Chrome the next browser start loads them.
-          home.activation.polylogueBrowserExtension = lib.mkIf browser.enable (
-            lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-              run mkdir -p ${lib.escapeShellArg extensionDir}
-              changed=$(run ${pkgs.rsync}/bin/rsync -rLic --delete --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r \
-                ${extensionFiles}/ ${lib.escapeShellArg extensionDir}/)
-              control="$HOME/.local/bin/sinnix-chrome-control"
-              if [[ -n $changed && ! -v DRY_RUN && -x $control ]]; then
-                PATH=${
-                  lib.makeBinPath [
-                    pkgs.curl
-                    pkgs.jq
-                    pkgs.websocat
-                  ]
-                }:$PATH "$control" load-extension --path ${lib.escapeShellArg extensionDir} >/dev/null 2>&1 \
-                  || echo "Polylogue extension files changed; Chrome was not reachable, so it loads them on its next start"
-              fi
-            ''
-          );
+          # Chrome resolves the unpacked directory when it loads it. Link
+          # each file so updates keep that directory and registration.
+          xdg.dataFile."polylogue/extension" = lib.mkIf browser.enable {
+            recursive = true;
+            source = "${extension}/share/polylogue/extension";
+          };
 
           systemd.user.services.polylogue-live = {
             Unit.Description = "Polylogue daemon over the live archive";
