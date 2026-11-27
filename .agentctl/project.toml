@@ -266,6 +266,9 @@ exec = ["sinnix-fs", "refresh", "--index-dir", "/realm/state/fs-index", "--retai
 arguments = "required"
 pool = "bulk"
 timeout_seconds = 7200
+# Match the index service's 2 GiB DuckDB buffer budget plus 1 GiB for
+# allocations outside the buffer manager.
+admission = { memory_mib = 3072 }
 
 [operations.fs_index_scan]
 description = "Scan managed filesystems and publish one coherent index generation"
