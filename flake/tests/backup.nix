@@ -346,6 +346,15 @@ assert lib.assertMsg (
         lib.hasSuffix "/bin/sinnix-backup ${command}" services.${name}.serviceConfig.ExecStart;
 
       backupBorgHookRuntime =
+        assert lib.assertMsg (
+          let
+            inherit (backupRuntimeEval.config.sinnix) paths runtime;
+            rebuild = lib.removePrefix "${paths.realmRoot}/" "${runtime.inventory.polylogue.archiveRoot}/index-rebuild";
+            coverage = backup.sources.realm.coverage;
+          in
+          builtins.elem rebuild coverage.noncanonical
+          && builtins.elem "run/borgbackup-snapshot-inputs/realm/${rebuild}" coverage.borg_excludes
+        ) "Realm backups must omit Polylogue's rebuild work files";
         assert lib.assertMsg
           (
             let

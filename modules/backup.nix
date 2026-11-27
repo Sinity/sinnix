@@ -243,13 +243,14 @@ let
       "project/sinity-lynchpin/repo/.venv"
       "project/yt-polisher/repo/.venv"
     ]
-    # Polylogue's index.db, rebuilt from archive.db, in every archive directory.
+    # Polylogue rebuilds these index files from the stored archive and segments.
     ++ lib.concatMap (
       archive:
       map (name: lib.removePrefix "${realmRoot}/" "${archive}/${name}") [
         "index.db"
         "index.db-wal"
         "index.db-shm"
+        "index-rebuild"
       ]
     ) ([ polylogueArchiveRoot ] ++ config.sinnix.services.polylogue.retainedArchives)
     # Stash's caches and media, the ComfyUI venv and downloaded embedding weights.

@@ -404,10 +404,10 @@ rather than the whole Steam tree.
 - The generated filesystem index under `state/fs-index/generations`. The
   authored judgments and references beside it stay covered. Run a fresh scan
   after restoring the authored inputs to regenerate the index.
-- Polylogue's `index.db` with its WAL and SHM files, in the live archive and
-  in every directory of `sinnix.services.polylogue.retainedArchives`; it is
-  rebuilt from `archive.db`. The rest of `state/polylogue-live` comes from
-  the atomic snapshot, which Polylogue accepts as a consistent backup.
+- Polylogue's `index.db`, its WAL and SHM files, and `index-rebuild/` in the
+  live archive and every directory in `sinnix.services.polylogue.retainedArchives`.
+  Polylogue rebuilds the index from the archive and segment log. The backup
+  takes the remaining files from the atomic snapshot.
 
 Evaluation asserts that the scratch roots in
 `modules/lib/storage/scratch-roots.nix` stay within these exclusions, and that no
