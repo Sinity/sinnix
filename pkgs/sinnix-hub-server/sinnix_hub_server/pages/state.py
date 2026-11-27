@@ -87,18 +87,10 @@ def waiting_card(state: dict[str, Any]) -> str:
         )
         for item in state["waiting"]
     )
-    plannotator = (state.get("sources") or {}).get("plannotator") or {}
     return card(
         f"Waiting on you ({state['counts']['waiting']})",
         rows or empty("Nothing needs you."),
-        "Open tasks labelled <code>human</code> in every registered project, and pending "
-        "Plannotator Inbox items when that tool is installed"
-        + (
-            f" (Plannotator: {esc(plannotator['error'])})"
-            if plannotator.get("error")
-            else ""
-        )
-        + ".",
+        "Open tasks labelled <code>human</code> in every registered project.",
         wide=True,
         anchor="waiting",
     )

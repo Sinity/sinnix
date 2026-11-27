@@ -382,7 +382,6 @@ via the template's table JS.
 ## Offline feedback and structured bulk answers
 
 Use this form when the reader needs to work offline or return a dataset.
-For ordinary review, the Plannotator thread carries the comments and answers.
 
 Save drafts in browser storage when available. A different browser, file path
 or sandboxed preview can lose access to that storage. Export the answers to

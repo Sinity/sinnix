@@ -283,20 +283,6 @@ mkFeatureModule {
         piPackages = scriptPkgs.pi-packages;
         dotsRoot = sinnixCfg.paths.dotsRoot;
       };
-      # The Inbox as a login service, started through the launcher
-      # (pkgs/plannotator), so the first Inbox of a session has the launcher's
-      # settings and every later caller joins it. A second `plannotator inbox`
-      # on the same data directory prints the address and exits 0, so the
-      # unit first stops an Inbox an agent started outside it. The Inbox's
-      # own Restart and Stop end the process with 0; systemd brings it back.
-      plannotatorInboxService = {
-        ExecStartPre = "-${scriptPkgs.plannotator}/bin/plannotator inbox stop";
-        ExecStart = "${scriptPkgs.plannotator}/bin/plannotator inbox --no-open";
-        Restart = "always";
-        RestartSec = 2;
-        # The Inbox exits 143 on SIGTERM.
-        SuccessExitStatus = 143;
-      };
     in
     lib.mkMerge [
       {
@@ -349,12 +335,6 @@ mkFeatureModule {
             ".local/state/claude-code"
             ".local/state/codex"
             ".hermes"
-            # Plannotator's Inbox threads, plan history and review drafts.
-            # ~/.plannotator is linked here (below).
-            {
-              directory = ".local/share/plannotator";
-              mode = "0700";
-            }
           ];
         };
 
@@ -376,7 +356,6 @@ mkFeatureModule {
               scriptPkgs.claude-quota
               scriptPkgs.codex-worker
               scriptPkgs.claude-agents
-              scriptPkgs.plannotator
             ];
 
             xdg.configFile = {
@@ -391,29 +370,6 @@ mkFeatureModule {
             }
             // {
               "claude/mcp.json".source = claudeMcpConfigFile;
-              # With its Routines setting on, Plannotator writes this unit
-              # file itself at every start, naming its unwrapped binary: run
-              # that way it adds its tool server to agents' private configs
-              # and a note to their instruction files. It also enables the
-              # unit, which replaces the link in default.target.wants.
-              # Activation puts the declared file and link back, and the
-              # drop-in holds the command for whichever unit file is in place.
-              "systemd/user/plannotator-inbox.service".force = true;
-              "systemd/user/default.target.wants/plannotator-inbox.service".force = true;
-              "systemd/user/plannotator-inbox.service.d/10-launcher.conf".text = ''
-                [Service]
-                ExecStartPre=
-                ExecStart=
-                ${lib.concatStringsSep "\n" (
-                  lib.mapAttrsToList (name: value: "${name}=${toString value}") plannotatorInboxService
-                )}
-              '';
-            };
-
-            systemd.user.services.plannotator-inbox = {
-              Unit.Description = "Plannotator Inbox";
-              Service = plannotatorInboxService;
-              Install.WantedBy = [ "default.target" ];
             };
 
             home.activation.claudeSymlink = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
@@ -483,17 +439,6 @@ mkFeatureModule {
               // {
 
                 ".local/bin/pi" = pi.wrapper;
-
-                # Plannotator run without PLANNOTATOR_DATA_DIR (its unwrapped
-                # binary, its code inside another agent) uses ~/.plannotator
-                # when that exists. As a link to the persisted directory it
-                # is the same store, so no launch can open a second one. A
-                # real directory there is a second store: linking fails on it
-                # and activation stops, until its threads are merged.
-                ".plannotator" = {
-                  source = config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/.local/share/plannotator";
-                  force = true;
-                };
 
                 ".config/hermes/skills" = {
                   source = mkDotsFile "/_ai/skills";

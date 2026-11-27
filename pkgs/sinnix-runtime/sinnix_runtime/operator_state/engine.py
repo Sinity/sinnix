@@ -91,18 +91,6 @@ def waiting_rows(inputs: Mapping[str, Any], now: datetime) -> list[dict[str, Any
                     "answer_with": f"bd human respond {item.get('id')}",
                 }
             )
-    for item in (inputs.get("plannotator") or {}).get("items") or []:
-        rows.append(
-            {
-                "source": "plannotator",
-                "project": item.get("project"),
-                "id": item.get("id"),
-                "title": item.get("title"),
-                "priority": None,
-                "since": item.get("since"),
-                "age_seconds": age(item.get("since"), now),
-            }
-        )
     rows.sort(
         key=lambda row: (
             row["priority"] is None,

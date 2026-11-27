@@ -3,7 +3,7 @@
 # `pi install` would clone or `npm install` each package into ~/.pi at run
 # time, with floating transitive dependencies, and extensions run inside the
 # pi process with access to its credentials. Here every package is a store
-# path: the three npm packages come from one lock file beside this file
+# path: the two npm packages come from one lock file beside this file
 # (package.json holds the exact versions), the two Git sources are fixed
 # revisions, and pi loads all of them as local paths
 # (modules/features/dev/agents/pi.nix).
@@ -18,7 +18,6 @@
   lib,
   buildNpmPackage,
   fetchFromGitHub,
-  python3,
 }:
 let
   # Claude models on a Claude plan: each turn runs through the installed
@@ -48,10 +47,8 @@ buildNpmPackage {
       ./package-lock.json
     ];
   };
-  npmDepsHash = "sha256-H5huTIH98s7MCVf/zhYbLYJmEmb3WRLtmqfkc5R8S+o=";
+  npmDepsHash = "sha256-Urp4evyrmLW3p5kXdcXs3/dcSNpxPSfdJKzwbxJUdIQ=";
   npmFlags = [ "--legacy-peer-deps" ];
-  # node-pty (Plannotator's browser terminal) compiles with node-gyp.
-  nativeBuildInputs = [ python3 ];
   dontNpmBuild = true;
   dontNpmPrune = true;
 
@@ -67,7 +64,6 @@ buildNpmPackage {
   passthru = {
     # What pi's `packages` setting lists, in load order.
     packagePaths = [
-      "node_modules/@plannotator/pi-extension"
       "node_modules/pi-web-access"
       "node_modules/pi-subagents"
       "pi-claude-code"
@@ -76,7 +72,7 @@ buildNpmPackage {
   };
 
   meta = {
-    description = "Pinned third-party pi packages: Plannotator, web access, subagents, Claude Code provider, /answer";
+    description = "Pinned third-party pi packages: web access, subagents, Claude Code provider, /answer";
     platforms = lib.platforms.linux;
   };
 }

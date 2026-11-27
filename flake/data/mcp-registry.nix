@@ -112,25 +112,6 @@ let
       ];
     };
 
-    # Plannotator names its server `plannotator-inbox` and looks for that
-    # name. Its own connect step, which would write this entry into each
-    # client's private config, is switched off in pkgs/plannotator.
-    plannotator-inbox = {
-      description = "Plannotator Inbox: leave the operator messages, questions and files, and read the replies";
-      transport = "stdio";
-      tier = "operator-review";
-      command = "plannotator";
-      args = [
-        "inbox"
-        "mcp"
-      ];
-      # Claude Code gets the native Inbox tool and reply delivery from its plugin.
-      clients = [
-        "codex"
-        "pi"
-      ];
-    };
-
     polylogue = {
       description = "AI chat archive: search and read past Claude, Codex, and ChatGPT sessions";
       transport = "stdio";
@@ -169,18 +150,15 @@ let
     default = [
       "remote-core"
       "recall"
-      "operator-review"
     ];
     evidence = [
       "remote-core"
       "recall"
-      "operator-review"
       "deep-evidence"
     ];
     browser = [
       "remote-core"
       "recall"
-      "operator-review"
       "deep-evidence"
       "browser-mcp"
     ];

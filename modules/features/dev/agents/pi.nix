@@ -63,19 +63,7 @@ let
     packages = [
       "${dotsRoot}/pi"
     ]
-    ++ map (
-      path:
-      # Plannotator's general reference skill is left out here as it is for
-      # the other agents: its description tells every session when to use
-      # the Inbox. The four plannotator-* skills in dots/_ai/skills remain.
-      if lib.hasSuffix "@plannotator/pi-extension" path then
-        {
-          source = "${piPackages}/${path}";
-          skills = [ ];
-        }
-      else
-        "${piPackages}/${path}"
-    ) piPackages.packagePaths;
+    ++ map (path: "${piPackages}/${path}") piPackages.packagePaths;
   };
   settingsFile = jsonFormat.generate "pi-settings.json" settings;
 
@@ -123,15 +111,6 @@ let
 
       export PI_SKIP_VERSION_CHECK=1
       export PI_TELEMETRY=0
-
-      # Plannotator's extension runs inside pi, outside the plannotator
-      # command's own launcher (pkgs/plannotator), so the same switches are
-      # set here: no update check, no adding itself to other agents'
-      # configuration, and the persisted data directory.
-      export PLANNOTATOR_UPDATE_CHECK=0
-      export PLANNOTATOR_AUTO_UPDATE=0
-      export PLANNOTATOR_INBOX_CONNECT=0
-      export PLANNOTATOR_DATA_DIR="''${PLANNOTATOR_DATA_DIR:-$HOME/.local/share/plannotator}"
 
       # The Claude Code provider starts Claude Code itself with its own
       # arguments, so it gets the installed program, not the Sinnix launcher

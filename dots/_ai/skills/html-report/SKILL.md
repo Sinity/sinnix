@@ -26,8 +26,7 @@ only for the interaction patterns the artifact needs.
 4. Add only the sections, controls, and patterns that serve the reader. Keep
    content readable with JavaScript disabled and make paths or queries useful
    without a network request.
-5. Deliver a review through the existing Plannotator thread (see
-   `plannotator-inbox`). One-time comparisons can start in task scratch.
+5. Link the report in the conversation. One-time comparisons can start in task scratch.
    Embed the assets needed to understand them and open the sent edition
    before retiring the scratch. Use a local answer form when the reader
    needs offline review or a structured bulk export.

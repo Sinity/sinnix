@@ -148,10 +148,7 @@ let
       mcp_args=(--mcp-config "$MCP_CONFIG" --strict-mcp-config)
     fi
 
-    claude_args=(
-      --plugin-dir="${scriptPkgs.plannotator.claudePlugin}"
-      "''${mcp_args[@]}"
-    )
+    claude_args=("''${mcp_args[@]}")
     # --add-dir accepts multiple values and would consume a following
     # subcommand such as `mcp list` when passed as separate words.
     if [ -d "${sinnixCfg.paths.realmRoot}" ]; then

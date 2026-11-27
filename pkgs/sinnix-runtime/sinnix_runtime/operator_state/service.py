@@ -121,7 +121,6 @@ class OperatorState:
         self._add("deployment", 60, self._deployment)
         self._add("claude-usage", 600, sources.claude_usage)
         self._add("codex-usage", 300, sources.codex_usage)
-        self._add("plannotator", 120, lambda: sources.plannotator_inbox(self.projects))
         self._add("task-runner-history", 900, self.task_runner.refresh)
         for project in self.projects:
             name, root = project["id"], project["root"]
@@ -287,9 +286,6 @@ class OperatorState:
             "projects": self.projects,
             "jobs": jobs,
             "beads": beads,
-            "plannotator": self._value(
-                "plannotator", {"installed": False, "items": []}
-            ),
             "git": git,
             "pulls": pulls,
             "deployed": self._value("deployment", {}),

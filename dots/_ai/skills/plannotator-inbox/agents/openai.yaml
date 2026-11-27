@@ -1,5 +1,0 @@
-interface:
-  display_name: "Plannotator Inbox"
-  short_description: "Deliver decisions, visual comparisons and finished work for review."
-policy:
-  allow_implicit_invocation: true

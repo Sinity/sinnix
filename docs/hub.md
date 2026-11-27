@@ -96,8 +96,7 @@ without moving it.
 What each part is computed from:
 
 - **Waiting on the operator**: open Beads labelled `human` in every registered
-  project (`bd human list`), and pending Plannotator Inbox items when that
-  tool is installed.
+  project (`bd human list`).
 - **Running**: the agentctl job snapshot. A row names the project and
   operation, the command, the checkout, the caller recorded at launch, how
   long, and for a queued job the reason it waits.

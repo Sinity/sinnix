@@ -90,15 +90,11 @@ def test_nothing_waiting_is_a_zero_count_and_human_tasks_raise_it() -> None:
                 ]
             }
         },
-        plannotator={
-            "installed": True,
-            "items": [{"id": "p1", "title": "Plan", "since": stamp(5)}],
-        },
     )
     state = engine.compute(waiting, {}, NOW)
     assert state["schema"] == SCHEMA
-    assert state["counts"]["waiting"] == 2
-    assert [row["id"] for row in state["waiting"]] == ["alpha-1", "p1"]
+    assert state["counts"]["waiting"] == 1
+    assert [row["id"] for row in state["waiting"]] == ["alpha-1"]
     assert state["waiting"][0]["age_seconds"] == 125 * 60
     assert "alpha alpha-1: Pick a name (waiting 2.1h)" in text.render_text(state)
     # The reserved slots exist and stay empty.

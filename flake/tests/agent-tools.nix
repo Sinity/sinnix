@@ -146,20 +146,6 @@ in
               message = "Claude settings.json must not be managed through Home Manager xdg.configFile.";
             }
             {
-              # Every Home Manager path of the unit that Plannotator rewrites
-              # (the file) or `systemctl --user enable` relinks (the wants
-              # link) is forced; an unforced one fails the next activation.
-              assertion =
-                let
-                  written = lib.filterAttrs (
-                    path: _: lib.hasPrefix "systemd/user/" path && lib.hasSuffix "/plannotator-inbox.service" "/${path}"
-                  ) hm.xdg.configFile;
-                in
-                builtins.length (lib.attrNames written) == 2
-                && lib.all (entry: entry.force) (lib.attrValues written);
-              message = "The Inbox unit file and its default.target link are rewritten by Plannotator, so Home Manager must replace them instead of refusing to activate.";
-            }
-            {
               assertion = lib.hasInfix "export PATH=\"$HOME/.local/bin:" codexWrapperText;
               message = "the Codex wrapper must resolve nested codex calls through ~/.local/bin before its private npm prefix";
             }
@@ -265,7 +251,6 @@ in
           ".codex/agents/explorer.toml"
           ".codex/agents/implementer.toml"
           ".codex/agents/review.toml"
-          ".plannotator"
         ];
         fixtureAssets = [
           {
@@ -298,8 +283,6 @@ in
         xdgConfigFiles = [
           "claude/mcp.json"
           "claude/skills"
-          "systemd/user/plannotator-inbox.service"
-          "systemd/user/plannotator-inbox.service.d/10-launcher.conf"
         ];
         useHmZshrc = true;
         zshrcPreamble = ''
@@ -749,11 +732,11 @@ in
                 '[mcp_servers.github]' 'command = "mcp-github"' "" \
                 '[mcp_servers.github.env]' 'TOKEN = "kept"' ""
               cat <<'TOML'
-            [mcp_servers.plannotator-inbox]
-            command = "/opt/elsewhere/libexec/plannotator"
-            args = ["inbox", "mcp"]
+            [mcp_servers.sinex]
+            command = "/opt/elsewhere/libexec/mcp-sinex"
+            args = ["serve"]
 
-            [mcp_servers.plannotator-inbox.env]
+            [mcp_servers.sinex.env]
             STRAY = "1"
 
             TOML
@@ -771,7 +754,7 @@ in
               run() { :; }
               source ${agentToolsCodexPrivateServersActivation}
             )
-            grep -Fq '/opt/elsewhere/libexec/plannotator' "$codex_home/.codex/config.toml"
+            grep -Fq '/opt/elsewhere/libexec/mcp-sinex' "$codex_home/.codex/config.toml"
             (
               export HOME="$codex_home"
               run() { "$@"; }
@@ -781,7 +764,7 @@ in
             test "$(stat -c '%a' "$codex_home/.codex/config.toml")" = 600
             # A file that is not TOML, and a home without the file, stay as
             # they are.
-            printf '%s\n' '[mcp_servers.plannotator-inbox' 'command = "x"' \
+            printf '%s\n' '[mcp_servers.sinex' 'command = "x"' \
               > "$codex_home/.codex/config.toml"
             cp "$codex_home/.codex/config.toml" "$TMPDIR/codex-private-broken.toml"
             (
@@ -793,33 +776,6 @@ in
               source ${agentToolsCodexPrivateServersActivation}
               test ! -e "$HOME/.codex/config.toml"
             )
-
-            # One Inbox store: Plannotator's default directory is the
-            # persisted one, and the login unit starts the launcher. The
-            # drop-in gives the same command to the unit file Plannotator
-            # writes over the declared one, whose own ExecStart it clears.
-            test "$(readlink -m "$HOME/.plannotator")" = ${
-              agentToolsRuntimeConfig.home-manager.users.${agentToolsRuntimeConfig.sinnix.user.name}.home.homeDirectory
-            }/.local/share/plannotator
-            inbox_unit="$XDG_CONFIG_HOME/systemd/user/plannotator-inbox.service"
-            inbox_dropin="$inbox_unit.d/10-launcher.conf"
-            inbox_start="$(grep '^ExecStart=' "$inbox_unit")"
-            inbox_launcher="''${inbox_start#ExecStart=}"
-            inbox_launcher="''${inbox_launcher% inbox --no-open}"
-            case "$inbox_launcher" in
-              /nix/store/*/bin/plannotator) ;;
-              *)
-                echo "the Inbox unit does not start the launcher: $inbox_start" >&2
-                exit 1
-                ;;
-            esac
-            grep -Fq 'PLANNOTATOR_INBOX_CONNECT' "$inbox_launcher"
-            grep -Fq 'PLANNOTATOR_DATA_DIR' "$inbox_launcher"
-            grep -Fxq 'WantedBy=default.target' "$inbox_unit"
-            test "$(grep -E '^(ExecStart|ExecStartPre)=' "$inbox_dropin" | head -n 2 | sort | tr '\n' ' ')" = 'ExecStart= ExecStartPre= '
-            for setting in ExecStart ExecStartPre Restart RestartSec SuccessExitStatus; do
-              test "$(grep "^$setting=." "$inbox_unit")" = "$(grep "^$setting=." "$inbox_dropin")"
-            done
 
             test -L "$HOME/.config/claude/mcp.json"
             test -L "$HOME/.config/hermes/skills"
@@ -1001,12 +957,10 @@ in
               (.defaultModel | length > 0) and
               .enableInstallTelemetry == false and
               .packages[0] == $own and
-              (.packages[1:] | length) >= 5 and
-              ([.packages[1:][] | if type == "object" then .source else . end
-                | startswith("/nix/store/")] | all) and
-              ([.packages[] | objects | select(.source | endswith("@plannotator/pi-extension")) | .skills == []] == [true])
+              (.packages[1:] | length) == 4 and
+              ([.packages[1:][] | startswith("/nix/store/")] | all)
             ' ${agentToolsPiSources.settingsFile} >/dev/null
-            for package in $(jq -r '.packages[1:][] | if type == "object" then .source else . end' ${agentToolsPiSources.settingsFile}); do
+            for package in $(jq -r '.packages[1:][]' ${agentToolsPiSources.settingsFile}); do
               test -e "$package"
             done
 

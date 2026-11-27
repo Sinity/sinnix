@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -172,55 +171,6 @@ def closed_bead_samples(project: str, root: str, now: datetime) -> list[dict[str
     )
     samples = (bead_sample(project, row) for row in rows or [] if isinstance(row, dict))
     return [sample for sample in samples if sample is not None]
-
-
-def plannotator_inbox(projects: list[dict[str, str]]) -> dict[str, Any]:
-    """Plannotator Inbox threads with a question still waiting on the person.
-
-    An absent tool and a stopped Inbox are normal states with no items. The
-    Inbox is only read while it runs: a listing call would otherwise start it.
-    """
-    if shutil.which("plannotator") is None:
-        return {"installed": False, "running": False, "items": []}
-    status = json.loads(run(["plannotator", "inbox", "status", "--json"], timeout=15))
-    if not status.get("running"):
-        return {"installed": True, "running": False, "items": []}
-    items = []
-    for project in projects:
-        listing = json.loads(
-            run(
-                [
-                    "plannotator",
-                    "inbox",
-                    "call",
-                    "read_thread",
-                    '{"asked_by":"anyone"}',
-                ],
-                cwd=project["root"],
-                timeout=15,
-            )
-        )
-        rows = listing.get("threads") if isinstance(listing, dict) else listing
-        for row in rows or []:
-            questions = row.get("questions") if isinstance(row, dict) else None
-            if not isinstance(questions, dict):
-                continue
-            waiting = int(questions.get("open") or 0) + int(
-                questions.get("picked") or 0
-            )
-            if waiting:
-                items.append(
-                    {
-                        "project": project["id"],
-                        "id": row.get("thread_id"),
-                        "title": row.get("subject") or row.get("thread_name"),
-                        "since": row.get("last_at"),
-                        "questions": waiting,
-                    }
-                )
-    # A thread listed under two projects is one item.
-    unique = {item["id"]: item for item in items}
-    return {"installed": True, "running": True, "items": list(unique.values())}
 
 
 # ---------------------------------------------------------------- Git and checks

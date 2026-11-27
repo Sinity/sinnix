@@ -3,10 +3,7 @@
 # (Polylogue's brief first, then acknowledged outages and recent Sinex
 # sources); a pasted session ID brings its takeover context. Shell commands
 # pass the destructive-command guard Claude Code runs (Codex reports every
-# shell tool as `Bash`). Plannotator reviews a plan when a turn ends with
-# one: its Stop hook reads the turn from the transcript, exits at once when
-# there is no plan, and otherwise holds the turn until the operator decides
-# (the timeout is upstream's four days). The attention hook raises a desktop
+# shell tool as `Bash`). The attention hook raises a desktop
 # notification when an attended session asks for permission or ends a turn
 # longer than ten minutes; the prompt hook stamps the turn's start for it.
 # Plain helper (not a NixOS module) imported directly by mcp.nix's configFn,
@@ -98,15 +95,6 @@ jsonFormat.generate "codex-hooks.json" {
         ];
       }
       { hooks = [ attentionHook ]; }
-      {
-        hooks = [
-          {
-            type = "command";
-            command = "plannotator";
-            timeout = 345600;
-          }
-        ];
-      }
     ];
   };
 }

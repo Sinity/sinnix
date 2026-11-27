@@ -78,7 +78,7 @@ writing rather than adding a runtime syntax-highlighter dependency.
 ## Operator input
 
 Keep exploration controls in the report. Put questions and passage-specific
-feedback in its Plannotator thread. The agent reads the reply, checks which
+feedback in the conversation. The agent reads the reply, checks which
 edition it concerns and applies the decision to the owning document or task.
 For a live report, edit the same project source and send a new edition when
 the change matters to the reviewer.

@@ -88,10 +88,7 @@ instructions, skills, and memory.
   an estimate and is called one. A claim about speed, load or behaviour over
   time is verified by a run on the real data, read from the product's own
   record of that run.
-- Explain IDs on first use. Use the Plannotator Inbox proactively for choices
-  only the operator can make, changes that affect his plans, and finished work
-  worth reviewing, and link the thread in chat; load `plannotator-inbox` to
-  send.
+- Explain IDs on first use.
 - Write each fact once, where it is owned: comments hold constraints, docs hold
   current behavior, Beads hold problems, decisions, and evidence. Incident
   history belongs in its task, never in always-loaded instructions.
