@@ -17,6 +17,14 @@ let
     command = "${dotsRoot}/claude/hooks/attention-notify.py codex";
     timeout = 3;
   };
+  capture = event: {
+    hooks = [
+      {
+        type = "command";
+        command = "polylogue internal hook ${event} --harness codex";
+      }
+    ];
+  };
 in
 jsonFormat.generate "codex-hooks.json" {
   hooks = {
@@ -32,29 +40,14 @@ jsonFormat.generate "codex-hooks.json" {
       }
     ];
     UserPromptSubmit = [
-      {
-        hooks = [
-          {
-            type = "command";
-            command = "polylogue internal hook UserPromptSubmit --harness codex";
-          }
-        ];
-      }
+      (capture "UserPromptSubmit")
       { hooks = [ attentionHook ]; }
     ];
     PermissionRequest = [
+      (capture "PermissionRequest")
       { hooks = [ attentionHook ]; }
     ];
-    PreCompact = [
-      {
-        hooks = [
-          {
-            type = "command";
-            command = "polylogue internal hook PreCompact --harness codex";
-          }
-        ];
-      }
-    ];
+    PreCompact = [ (capture "PreCompact") ];
     PreToolUse = [
       {
         matcher = "^Bash$";
@@ -66,34 +59,14 @@ jsonFormat.generate "codex-hooks.json" {
           }
         ];
       }
-      {
-        hooks = [
-          {
-            type = "command";
-            command = "polylogue internal hook PreToolUse --harness codex";
-          }
-        ];
-      }
+      (capture "PreToolUse")
     ];
-    PostToolUse = [
-      {
-        hooks = [
-          {
-            type = "command";
-            command = "polylogue internal hook PostToolUse --harness codex";
-          }
-        ];
-      }
-    ];
+    PostToolUse = [ (capture "PostToolUse") ];
+    SessionEnd = [ (capture "SessionEnd") ];
+    SubagentStart = [ (capture "SubagentStart") ];
+    SubagentStop = [ (capture "SubagentStop") ];
     Stop = [
-      {
-        hooks = [
-          {
-            type = "command";
-            command = "polylogue internal hook Stop --harness codex";
-          }
-        ];
-      }
+      (capture "Stop")
       { hooks = [ attentionHook ]; }
     ];
   };

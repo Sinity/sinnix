@@ -1,12 +1,11 @@
-# Claude/Codex hook parity: the hooks both clients must run are checked
-# against the two real hook sources (dots/claude/managed-settings.json and the
-# generated Codex hooks), not restated as a list of expected names here.
+# Claude/Codex hook parity compares the two real hook sources and accounts
+# for events supplied by Claude Code alone.
 # Both clients invoke the live rewrite's hook (`polylogue internal hook EVENT`,
 # with `--harness codex` for Codex), which writes the hook spool of the live
 # archive and brings the session-start brief.
 #
-# Provably fails when: a `polylogue internal hook <Event>` lane present in
-# Claude's settings is dropped from the generated Codex hooks, when a writer
+# Provably fails when: a shared `polylogue internal hook <Event>` is dropped
+# from one client's settings, when a writer
 # bakes a sidecar path, when a hook invocation stops appending a spool line
 # naming its harness, event and session, when either client loses the
 # pre-compaction handoff or shared hook coverage, or when either client stops
@@ -107,10 +106,8 @@ in
               exit 1
             }
 
-            # The evidence lanes: every lifecycle event on which a client
-            # ships a session to Polylogue. Codex must cover at least what
-            # Claude does, or half the machine's agent history stops being
-            # captured while the other half looks healthy.
+            # Compare the declared commands with the parsed writer rows so
+            # malformed commands cannot disappear from the coverage check.
             lanes() {
               jq -r '
                 .hooks
@@ -129,12 +126,6 @@ in
               echo "Claude settings declare no polylogue internal hook lane at all" >&2
               exit 1
             }
-            missing="$(comm -23 claude-lanes codex-lanes)"
-            if [ -n "$missing" ]; then
-              echo "Codex hooks are missing Polylogue capture lanes Claude has: $missing" >&2
-              exit 1
-            fi
-
             # Every Polylogue hook declaration names its event and, for a
             # harness other than Claude Code, `--harness NAME`, and nothing
             # else: the anchored capture rejects any trailing flag.
@@ -163,7 +154,14 @@ in
             }
             cut -f1 claude-writers > claude-writer-lanes
             cut -f1 codex-writers > codex-writer-lanes
-            diff -u claude-writer-lanes codex-writer-lanes
+            diff -u claude-lanes claude-writer-lanes
+            diff -u codex-lanes codex-writer-lanes
+            # Codex 0.172's HookEventName has no equivalents for these events.
+            printf '%s\n' Elicitation Notification PermissionDenied StopFailure > claude-only
+            comm -23 claude-writer-lanes codex-writer-lanes > unshared
+            diff -u claude-only unshared
+            comm -13 claude-writer-lanes codex-writer-lanes > codex-only
+            test ! -s codex-only
             require_row $'PreToolUse\tclaude-code' claude-writers claude-pretool
             require_row $'PostToolUse\tclaude-code' claude-writers claude-posttool
             require_row $'Stop\tclaude-code' claude-writers claude-stop
