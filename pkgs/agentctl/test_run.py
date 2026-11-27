@@ -1283,7 +1283,7 @@ def test_build_units_rank_first_for_the_oom_killers(
     assert "ManagedOOMPreference=avoid" not in argv
 
 
-def test_an_out_of_memory_kill_tells_the_owner_where_it_happened(
+def test_an_out_of_memory_kill_reports_the_observed_outcome(
     tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue
 ) -> None:
     fake_systemd.terminal(Result="oom-kill", ExecMainCode="killed", ExecMainStatus="9")
@@ -1294,7 +1294,7 @@ def test_an_out_of_memory_kill_tells_the_owner_where_it_happened(
     record = outcome_of(tmp_path)
     assert record["outcome"] == "out-of-memory"
     assert record["systemd_result"] == "oom-kill"
-    assert "killed: out of memory in the agent budget" in log_of(tmp_path)
+    assert "killed: out of memory (docs/resource-control.md)" in log_of(tmp_path)
 
 
 def test_output_larger_than_eight_mb_is_preserved_completely(tmp_path: Path) -> None:

@@ -102,7 +102,7 @@ of agent work:
 
 1. agentctl job units, `OOMScoreAdjust=900` (measurement jobs 100). A job unit
    carries `OOMPolicy=kill`, so the whole job ends, and agentctl reports it as
-   `out-of-memory` with `killed: out of memory in the agent budget` in its
+   `out-of-memory` with `killed: out of memory` in its
    log. Borg drains rank with them at 900 and resume on their next run.
 2. Rebuilds (their `nix-build.slice` unit) and the Nix daemon's builders, 850.
 3. Tool commands, 800 (`agent-tool-command`).

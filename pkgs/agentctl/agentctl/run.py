@@ -978,10 +978,7 @@ def _run(
                 log.write(f"could not {action} the command: {error}\n".encode())
                 return refused(scratch_error=scratch_owner.cleanup())
             if outcome is Outcome.OUT_OF_MEMORY:
-                log.write(
-                    b"killed: out of memory in the agent budget "
-                    b"(docs/resource-control.md)\n"
-                )
+                log.write(b"killed: out of memory (docs/resource-control.md)\n")
             if outcome is Outcome.TIMEOUT:
                 message = (
                     f"timed out after {launch['timeout_seconds']} seconds\n"

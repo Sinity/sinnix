@@ -177,13 +177,13 @@ attempt 1. A retry never overwrites an earlier attempt.
 | (refused)   | 125  | refused before starting (vanished workdir, unresolvable command) |
 | `out-of-memory` | 121 | the kernel or systemd-oomd killed the unit (`Result=oom-kill`) |
 
-An `out-of-memory` job was the victim the host chose when agent work reached
-its memory ceiling ([resource control](resource-control.md)); the log ends
-with `killed: out of memory in the agent budget`. Job units carry
-`OOMPolicy=kill`, so the whole unit ends with the killed process. Admission
-counts what jobs use as well as what they reserve, so a recurring kill means
-some job outgrew its reservation: compare the outcomes' `memory_peak_mib`
-(the unit's peak, page cache included) with the operations' `admission`.
+An `out-of-memory` job records a kernel or systemd-oomd kill; the log ends
+with `killed: out of memory (docs/resource-control.md)`. Use the kernel and
+systemd-oomd journals to distinguish a unit or slice ceiling from host-wide
+pressure ([resource control](resource-control.md)). Job units carry
+`OOMPolicy=kill`, so the whole unit ends with the killed process. Compare the
+outcomes' `memory_peak_mib` (the unit's peak, page cache included) with the
+operation's `admission` and the applicable memory limits when diagnosing it.
 
 Terminal outcomes publish retained records and finish events for the event feed. They do not send phone notifications. Producers that require
 operator action use explicit alarm paths.
