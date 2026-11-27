@@ -65,7 +65,11 @@ def _sources(
             "status": system_generation.get("status"),
         }
     if below is not None:
-        sources["below"] = {"available": below.get("available")}
+        sources["below"] = {
+            "available": below.get("available"),
+            "gaps": below.get("gaps", []),
+            "errors": below.get("errors", {}),
+        }
     sources["sqlite_errors"] = sqlite_errors()
     return sources
 

@@ -227,6 +227,12 @@ def render_human(report: dict[str, Any]) -> str:
     section("below recent history")
     below = report.get("below", {})
     lines.append(f"window: begin={below.get('begin')} duration={below.get('duration')}")
+    for gap in below.get("gaps", []):
+        lines.append(f"  gap: {gap}")
+    for kind, error in below.get("errors", {}).items():
+        lines.append(
+            f"  {kind} dump failed: exit={error.get('returncode')} {error.get('reason')}"
+        )
     lines.append("cgroup peaks:")
     for row in below.get("cgroup_peaks", [])[:12]:
         lines.append(

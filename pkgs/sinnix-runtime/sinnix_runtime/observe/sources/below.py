@@ -52,7 +52,14 @@ def collect_below(
                 "--duration",
                 duration,
                 "-f",
-                "datetime name full_path cpu.usage_pct mem.total io.rwbytes_per_sec pressure.io_full_pct pressure.memory_full_pct",
+                "datetime",
+                "name",
+                "full_path",
+                "cpu.usage_pct",
+                "mem.total",
+                "io.rwbytes_per_sec",
+                "pressure.io_full_pct",
+                "pressure.memory_full_pct",
                 "-O",
                 "tsv",
                 "--raw",
@@ -61,6 +68,11 @@ def collect_below(
             timeout=10,
         )
         cgroup_text = dump.stdout if dump.ok else ""
+        if not dump.ok:
+            result.setdefault("errors", {})["cgroup"] = {
+                "returncode": dump.returncode,
+                "reason": (dump.error or dump.stderr.strip() or "below dump failed")[:1000],
+            }
 
     cgroup_by_path: dict[str, dict[str, Any]] = {}
     for row in parse_below_tsv(cgroup_text):
@@ -106,7 +118,15 @@ def collect_below(
                 "--duration",
                 duration,
                 "-f",
-                "datetime pid comm state cgroup io.rwbytes_per_sec mem.rss_bytes cpu.usage_pct cmdline",
+                "datetime",
+                "pid",
+                "comm",
+                "state",
+                "cgroup",
+                "io.rwbytes_per_sec",
+                "mem.rss_bytes",
+                "cpu.usage_pct",
+                "cmdline",
                 "-O",
                 "tsv",
                 "--raw",
@@ -115,6 +135,11 @@ def collect_below(
             timeout=10,
         )
         process_text = dump.stdout if dump.ok else ""
+        if not dump.ok:
+            result.setdefault("errors", {})["process"] = {
+                "returncode": dump.returncode,
+                "reason": (dump.error or dump.stderr.strip() or "below dump failed")[:1000],
+            }
 
     process_by_pid: dict[str, dict[str, Any]] = {}
     for row in parse_below_tsv(process_text):
@@ -147,6 +172,10 @@ def collect_below(
         process_by_pid.values(), key=lambda item: item["max_rw_bps"], reverse=True
     )[:limit]
     result["available"] = bool(result["cgroup_peaks"] or result["process_peaks"])
-    if not result["available"]:
+    if result.get("errors"):
+        result["gaps"] = [
+            f"below.history.{kind}.failed" for kind in result["errors"]
+        ]
+    elif not result["available"]:
         result["gaps"] = ["below.history.no_samples"]
     return result
