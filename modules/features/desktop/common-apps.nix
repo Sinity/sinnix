@@ -112,22 +112,6 @@ mkFeatureModule {
       chatgptState = "${paths.stateRoot}/chatgpt-app";
     in
     {
-      systemd.user.services.app-chatgpt = {
-        description = "ChatGPT desktop";
-        wantedBy = [ graphical ];
-        partOf = [ graphical ];
-        requisite = [ graphical ];
-        after = [ graphical ];
-        serviceConfig = {
-          Type = "exec";
-          ExecStart = "${lib.getExe scriptPkgs.chatgpt-app} --systemd-service";
-          Environment = "CHATGPT_APP_HOME=${chatgptState}";
-          IOWriteBandwidthMax = "${chatgptState} 30M";
-          Restart = "on-failure";
-          RestartSec = "10s";
-        };
-      };
-
       sinnix.features.desktop.common-apps.fileNavigation.places = lib.mkDefault [
         {
           name = "Projects";
@@ -167,6 +151,25 @@ mkFeatureModule {
           ...
         }:
         {
+          # Local tasks use the same tools as the graphical user's other agents.
+          systemd.user.services.app-chatgpt = {
+            Unit = {
+              Description = "ChatGPT desktop";
+              After = [ graphical ];
+              PartOf = [ graphical ];
+              Requisite = [ graphical ];
+            };
+            Service = {
+              Type = "exec";
+              ExecStart = "${lib.getExe scriptPkgs.chatgpt-app} --systemd-service";
+              Environment = "CHATGPT_APP_HOME=${chatgptState}";
+              IOWriteBandwidthMax = "${chatgptState} 30M";
+              Restart = "on-failure";
+              RestartSec = "10s";
+            };
+            Install.WantedBy = [ graphical ];
+          };
+
           home.packages = [
             nav.manager
           ]
