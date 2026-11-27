@@ -13,7 +13,10 @@ POSTs to. Two routes:
                                    sinnix-capture write. This is the origin-
                                    chain graph: "how did I get to page X" is
                                    answerable later by walking edges backward
-                                   from target_url.
+                                   from target_url. The extension queues the
+                                   click before navigation and retries with its
+                                   original capture_id and observation time until
+                                   the receiver confirms the write.
 
   POST /v1/reading-stack/push -- {source_url, source_title, target_url,
                                    target_title, anchor_text, note, ts}.
@@ -38,12 +41,13 @@ no analysis, it is a thin relay.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
-from pathlib import Path
 import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 from sinnix_lib.http import read_body
 
@@ -62,7 +66,12 @@ def extension_origin() -> str | None:
     return f"chrome-extension://{identity}"
 
 
-def sinnix_capture_write(lane: str, payload: dict) -> None:
+def sinnix_capture_write(
+    lane: str, payload: dict, *, observed_at: float | None = None
+) -> None:
+    retry_args = (
+        [] if observed_at is None else ["--write-once", "--ts", str(observed_at)]
+    )
     subprocess.run(
         [
             "sinnix-capture",
@@ -71,6 +80,7 @@ def sinnix_capture_write(lane: str, payload: dict) -> None:
             CAPTURE_ROOT,
             "--lane",
             lane,
+            *retry_args,
         ],
         input=json.dumps(payload),
         text=True,
@@ -175,7 +185,26 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             if self.path == "/v1/link-event":
-                sinnix_capture_write("browser-nav-edges", payload)
+                if "capture_id" not in payload:
+                    sinnix_capture_write("browser-nav-edges", payload)
+                else:
+                    try:
+                        capture_id = payload["capture_id"]
+                        observed_at = payload.get("ts")
+                        if not isinstance(capture_id, str) or not re.fullmatch(
+                            r"[0-9a-f]{32}", capture_id
+                        ):
+                            raise ValueError("invalid capture_id")
+                        if type(observed_at) not in (int, float) or not math.isfinite(
+                            observed_at
+                        ):
+                            raise ValueError("invalid observation time")
+                    except (ValueError, OverflowError):
+                        self._respond(400)
+                        return
+                    sinnix_capture_write(
+                        "browser-nav-edges", payload, observed_at=observed_at
+                    )
             elif self.path == "/v1/reading-stack/push":
                 reading_stack_push(payload)
             else:

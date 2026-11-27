@@ -21,6 +21,19 @@ def test_large_capture_payload_uses_stdin(capture_writer):
     assert payload["title"] not in observed["argv"]
 
 
+def test_retry_uses_the_original_click_time_and_id(capture_writer):
+    observed_at = 1_700_000_000.125
+    payload = {
+        "capture_id": "a" * 32,
+        "ts": observed_at,
+        "target_url": "https://example.test/",
+    }
+    daemon.sinnix_capture_write("browser-nav-edges", payload, observed_at=observed_at)
+    recorded = json.loads(capture_writer.read_text())
+    assert recorded["payload"] == payload
+    assert recorded["argv"][-3:] == ["--write-once", "--ts", str(observed_at)]
+
+
 def test_large_browser_push_reaches_stack_and_capture(
     tmp_path, monkeypatch, capture_writer
 ):

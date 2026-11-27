@@ -297,6 +297,34 @@ class CaptureWriter:
     ) -> dict:
         return self.write_batch([(payload, ts)], raw_ref=raw_ref)[0]
 
+    def write_once(self, payload: dict, ts: float, raw_ref: str | None = None) -> dict:
+        """Append a captured observation once under its stable ID and time."""
+        capture_id = payload.get("capture_id")
+        if not isinstance(capture_id, str) or not capture_id:
+            raise ValueError("write-once requires a capture_id in the payload")
+        with flock(self._seq_lock_path):
+            self._recover_unindexed()
+            # The observation time fixes the daily file across retries. The
+            # payload itself is the receipt, including after a lost HTTP reply.
+            try:
+                for record in self._payload_records(self._record_path(ts)):
+                    previous = record["payload"]
+                    if (
+                        not isinstance(previous, dict)
+                        or previous.get("capture_id") != capture_id
+                    ):
+                        continue
+                    if (
+                        previous != payload
+                        or record["ts"] != ts
+                        or record["raw_ref"] != raw_ref
+                    ):
+                        raise ValueError("capture_id already has another observation")
+                    return record
+            except FileNotFoundError:
+                pass
+            return self._append_records_locked([(payload, ts)], raw_ref)[0]
+
     def write_batch(
         self,
         records: Sequence[tuple[dict, float | None]],
@@ -312,40 +340,43 @@ class CaptureWriter:
         stamped = [(payload, now if ts is None else ts) for payload, ts in records]
         with flock(self._seq_lock_path):
             self._recover_unindexed()
-            first = self._reserve_seq(len(stamped)) - len(stamped) + 1
-            envelopes = [
-                build_envelope(
-                    lane=self.lane,
-                    ts=ts,
-                    host=self.host,
-                    seq=first + n,
-                    payload=payload,
-                    raw_ref=raw_ref,
-                )
-                for n, (payload, ts) in enumerate(stamped)
-            ]
-            # Timestamps choose the daily file, so one batch can span days.
-            by_day: dict[Path, list[dict]] = {}
-            for envelope in envelopes:
-                by_day.setdefault(self._record_path(envelope["ts"]), []).append(
-                    envelope
-                )
-            for path, day_envelopes in by_day.items():
-                self._append_with_high_water(path, day_envelopes)
-            ledger.append_jsonl_records(
-                self._index_path,
-                [
-                    {
-                        "ts": envelope["ts"],
-                        "seq": envelope["seq"],
-                        "file": self._record_path(envelope["ts"]).name,
-                    }
-                    for envelope in envelopes
-                ],
-                fsync=True,
-                mode=0o600,
+            return self._append_records_locked(stamped, raw_ref)
+
+    def _append_records_locked(
+        self, stamped: Sequence[tuple[dict, float]], raw_ref: str | None
+    ) -> list[dict]:
+        first = self._reserve_seq(len(stamped)) - len(stamped) + 1
+        envelopes = [
+            build_envelope(
+                lane=self.lane,
+                ts=ts,
+                host=self.host,
+                seq=first + n,
+                payload=payload,
+                raw_ref=raw_ref,
             )
-            return envelopes
+            for n, (payload, ts) in enumerate(stamped)
+        ]
+        # Timestamps choose the daily file, so one batch can span days.
+        by_day: dict[Path, list[dict]] = {}
+        for envelope in envelopes:
+            by_day.setdefault(self._record_path(envelope["ts"]), []).append(envelope)
+        for path, day_envelopes in by_day.items():
+            self._append_with_high_water(path, day_envelopes)
+        ledger.append_jsonl_records(
+            self._index_path,
+            [
+                {
+                    "ts": envelope["ts"],
+                    "seq": envelope["seq"],
+                    "file": self._record_path(envelope["ts"]).name,
+                }
+                for envelope in envelopes
+            ],
+            fsync=True,
+            mode=0o600,
+        )
+        return envelopes
 
     def _append_with_high_water(self, path: Path, envelopes: list[dict]) -> None:
         sidecar = path.with_name(path.name + ".hw")

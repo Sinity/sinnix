@@ -1,13 +1,52 @@
 const ENDPOINT = "http://127.0.0.1:8767";
+const LINK_RETRY = "retry-links";
+const sendingLinks = new Set();
 
-async function post(path, body) {
+async function post(path, body, signal) {
   const response = await fetch(`${ENDPOINT}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal,
   });
   return response.ok;
 }
+
+async function deliverLink(key, payload) {
+  if (sendingLinks.has(key)) return;
+  sendingLinks.add(key);
+  try {
+    if (!(await post("/v1/link-event", payload, AbortSignal.timeout(10_000)))) {
+      throw new Error("Link capture refused");
+    }
+    await chrome.storage.local.remove(key);
+  } catch {
+    if (!(await chrome.alarms.get(LINK_RETRY))) {
+      await chrome.alarms.create(LINK_RETRY, { delayInMinutes: 1 });
+    }
+  } finally {
+    sendingLinks.delete(key);
+  }
+}
+
+async function deliverPendingLinks() {
+  const pending = await chrome.storage.local.get(null);
+  for (const [key, payload] of Object.entries(pending)) {
+    if (key.startsWith("link:")) await deliverLink(key, payload);
+  }
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && Object.entries(changes).some(([key, change]) =>
+    key.startsWith("link:") && change.newValue
+  )) {
+    void deliverPendingLinks();
+  }
+});
+chrome.runtime.onStartup.addListener(deliverPendingLinks);
+chrome.alarms.onAlarm.addListener(alarm => {
+  if (alarm.name === LINK_RETRY) return deliverPendingLinks();
+});
 
 async function linkContext(tabId, info, tab) {
   let captured = {};
@@ -58,6 +97,7 @@ chrome.commands.onCommand.addListener(async (command) => {
 });
 
 chrome.runtime.onInstalled.addListener(() => {
+  void deliverPendingLinks();
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({ id: "defer-link", title: "Defer link", contexts: ["link"] });
     chrome.contextMenus.create({ id: "defer-link-with-note", title: "Defer link with note", contexts: ["link"] });

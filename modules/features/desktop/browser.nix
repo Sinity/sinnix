@@ -81,6 +81,7 @@ mkFeatureModule {
             substituteInPlace extension/background.js --replace-fail \
               '127.0.0.1:8767' '127.0.0.1:${toString navigationPort}'
             crx3 pack extension --outfile "$out/nav-capture.crx"
+            version="$(jq -er '.version' extension/manifest.json)"
             id="$(crx3 id "$out/nav-capture.crx")"
             printf '%s' "$id" > "$out/extension-id"
             # crx3 drops the key it just minted beside the archive. The store
@@ -91,7 +92,7 @@ mkFeatureModule {
             <?xml version="1.0" encoding="UTF-8"?>
             <gupdate xmlns="http://www.google.com/update2/response" protocol="2.0">
               <app appid="$id">
-                <updatecheck codebase="file://$out/nav-capture.crx" version="0.2.0" />
+                <updatecheck codebase="file://$out/nav-capture.crx" version="$version" />
               </app>
             </gupdate>
             XML

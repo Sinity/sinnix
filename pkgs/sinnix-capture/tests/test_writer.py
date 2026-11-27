@@ -50,6 +50,31 @@ def test_write_produces_envelope_and_daily_file(tmp_path: Path) -> None:
     assert json.loads(lines[0]) == envelope
 
 
+def test_retried_capture_reuses_the_observation_in_the_original_day(
+    tmp_path: Path,
+) -> None:
+    when = 1_700_000_000.125
+    click = {"capture_id": "click-one", "target_url": "https://example.test/"}
+
+    def write_click(_):
+        return CaptureWriter(tmp_path, "test-lane", host="fixture").write_once(
+            click, when
+        )
+
+    with ThreadPoolExecutor(max_workers=3) as workers:
+        first, second, third = workers.map(write_click, range(3))
+    assert first == second == third
+    assert first["seq"] == 1
+    assert first["ts"] == when
+    writer = CaptureWriter(tmp_path, "test-lane", host="fixture")
+    assert list(ledger.iter_jsonl(writer._record_path(when))) == [first]
+    assert len(list(ledger.iter_jsonl(writer._index_path))) == 1
+    with pytest.raises(ValueError, match="already has another observation"):
+        writer.write_once({**click, "target_url": "https://other.test/"}, when)
+    distinct = writer.write_once({**click, "capture_id": "click-two"}, when)
+    assert distinct["seq"] == 2
+
+
 def test_seq_is_monotonic_and_persisted_across_instances(tmp_path: Path) -> None:
     first = CaptureWriter(tmp_path, "lane-a")
     e1 = first.write({"n": 1})

@@ -50,6 +50,19 @@ function edgePayload(anchor) {
   };
 }
 
+function captureLink(payload) {
+  const capture_id = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+  // Chrome's storage service accepts the observation even when navigation
+  // tears down this page before the extension worker has started.
+  try {
+    chrome.storage.local.set({ [`link:${capture_id}`]: { ...payload, capture_id } }).catch(() => {});
+  } catch {
+    // The extension may have been reloaded since this document opened.
+  }
+}
+
 document.addEventListener(
   "contextmenu",
   (ev) => {
@@ -71,7 +84,7 @@ document.addEventListener(
     if (!ev.isTrusted) return; // Page-generated events are not operator input.
     const a = nearestAnchor(ev.target);
     if (!a || !a.href) return;
-    postEvent("/v1/link-event", { ...edgePayload(a), trigger: "click" });
+    captureLink({ ...edgePayload(a), trigger: "click" });
   },
   { capture: true }
 );
@@ -84,7 +97,7 @@ document.addEventListener(
     const a = nearestAnchor(ev.target);
     if (!a || !a.href) return;
     const payload = edgePayload(a);
-    postEvent("/v1/link-event", { ...payload, trigger: "middle-click" });
+    captureLink({ ...payload, trigger: "middle-click" });
     postEvent("/v1/reading-stack/push", payload);
     ev.preventDefault();
     ev.stopPropagation();

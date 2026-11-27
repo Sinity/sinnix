@@ -134,6 +134,8 @@ in
               fi
             done
             ${pkgs.gnugrep}/bin/grep -q "appid=\"$packed\"" "$generated/updates.xml"
+            version="$(jq -er '.version' ${../../browser-extensions/nav-capture/manifest.json})"
+            ${pkgs.gnugrep}/bin/grep -Fq "version=\"$version\"" "$generated/updates.xml"
             touch "$out"
           '';
     };

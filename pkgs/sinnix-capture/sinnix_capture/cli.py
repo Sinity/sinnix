@@ -58,6 +58,9 @@ def stream_batches(
 
 
 def _cmd_write(args: argparse.Namespace) -> int:
+    if args.write_once and (args.stream or args.ts is None):
+        print("--write-once requires --ts and a single payload", file=sys.stderr)
+        return 2
     if args.ts is not None:
         try:
             if not math.isfinite(args.ts):
@@ -103,7 +106,18 @@ def _cmd_write(args: argparse.Namespace) -> int:
     payload = (
         json.loads(args.payload) if args.payload is not None else json.load(sys.stdin)
     )
-    emit([writer.write(payload, raw_ref=args.raw_ref, ts=args.ts)])
+    if args.write_once:
+        if not isinstance(payload, dict):
+            print("--write-once requires an object payload", file=sys.stderr)
+            return 2
+        try:
+            envelope = writer.write_once(payload, args.ts, raw_ref=args.raw_ref)
+        except ValueError as error:
+            print(f"sinnix-capture: {error}", file=sys.stderr)
+            return 2
+    else:
+        envelope = writer.write(payload, raw_ref=args.raw_ref, ts=args.ts)
+    emit([envelope])
     return 0
 
 
@@ -158,6 +172,11 @@ def main(argv: list[str] | None = None) -> int:
         type=float,
         default=None,
         help="Observed Unix timestamp for a queued single record",
+    )
+    write_p.add_argument(
+        "--write-once",
+        action="store_true",
+        help="Reuse a record with the same payload capture_id and --ts",
     )
     write_p.add_argument(
         "--raw-ref",
