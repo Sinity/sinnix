@@ -22,6 +22,24 @@ def bead(bead_id: str, title: str, *, issue_type: str = "task") -> dict[str, Any
 NOW = datetime(2026, 9, 3, 9, 0, tzinfo=UTC)
 
 
+def test_job_line_reports_cancelled_job_with_failed_scratch_cleanup() -> None:
+    text = operator_view.Output(as_json=False).job_line(
+        {
+            "task_id": 42,
+            "label": "fixture:recover",
+            "phase": "cancelled",
+            "exit_code": 130,
+            "scratch": {
+                "path": "/scratch/recover",
+                "cleanup_error": "PermissionError (errno 13)",
+            },
+        }
+    )
+
+    assert "job 42 fixture:recover cancelled exit 130" in text
+    assert "scratch cleanup failed at /scratch/recover: PermissionError (errno 13)" in text
+
+
 def task(
     task_id: int,
     label: str,

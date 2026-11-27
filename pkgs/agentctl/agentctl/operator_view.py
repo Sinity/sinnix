@@ -365,13 +365,17 @@ class Output:
             f" exit {job['exit_code']}" if job.get("exit_code") not in (None, 0) else ""
         )
         scratch = job.get("scratch")
-        scratch_text = (
-            f"; scratch {scratch['kind']} {scratch['bytes']} bytes in "
-            f"{scratch['files']} file(s)"
-            + (" (measurement truncated)" if scratch.get("truncated") else "")
-            if isinstance(scratch, Mapping)
-            else ""
-        )
+        scratch_text = ""
+        if isinstance(scratch, Mapping):
+            if error := scratch.get("cleanup_error"):
+                scratch_text = f"; scratch cleanup failed at {scratch['path']}: {error}"
+            else:
+                scratch_text = (
+                    f"; scratch {scratch['kind']} {scratch['bytes']} bytes in "
+                    f"{scratch['files']} file(s)"
+                )
+                if scratch.get("truncated"):
+                    scratch_text += " (measurement truncated)"
         selection_text = ""
         if any(
             key in job
