@@ -50,7 +50,14 @@ in
     };
   };
 
-  # Starting greetd conflicts with getty@tty1 and would end the current
-  # console session during the first activation. Let boot start it instead.
-  systemd.services.greetd.unitConfig.X-OnlyManualStart = true;
+  # NixOS starts active targets again during activation. Only the generation
+  # that booted may arrange for graphical.target to claim tty1 through greetd.
+  systemd.services.greetd = {
+    aliases = lib.mkForce [ ];
+    wantedBy = lib.mkForce [ ];
+  };
+  systemd.generators.sinnix-desktop-login = pkgs.writeShellScript "sinnix-desktop-login" ''
+    test -e /run/booted-system/etc/systemd/system/greetd.service || exit 0
+    ${pkgs.coreutils}/bin/ln -s /etc/systemd/system/greetd.service "$1/display-manager.service"
+  '';
 }

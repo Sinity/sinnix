@@ -8,22 +8,20 @@
       host = inputs.self.nixosConfigurations.sinnix-prime.config;
       hyprland = host.programs.hyprland.package;
       noctalia = host.home-manager.users.${host.sinnix.user.name}.programs.noctalia.package;
+      login = import ../../hosts/sinnix-prime/desktop-login.nix {
+        inherit
+          pkgs
+          lib
+          hyprland
+          noctalia
+          ;
+        user = "fixture";
+        sessionEnvironment = pkgs.writeText "fixture-session-environment" ''
+          export FIXTURE_DESKTOP=started
+        '';
+      };
       guest = enableLocker: {
-        imports = [
-          (import ../../hosts/sinnix-prime/desktop-login.nix {
-            inherit
-              pkgs
-              lib
-              hyprland
-              noctalia
-              ;
-            user = "fixture";
-            sessionEnvironment = pkgs.writeText "fixture-session-environment" ''
-              export FIXTURE_DESKTOP=started
-            '';
-          })
-          inputs.noctalia.nixosModules.default
-        ];
+        imports = [ inputs.noctalia.nixosModules.default ];
         virtualisation = {
           graphics = true;
           qemu.options = [ "-vga virtio" ];
@@ -66,11 +64,33 @@
       heavyChecks.desktop-login-vm = pkgs.testers.runNixOSTest {
         name = "desktop-login";
         nodes = {
-          normal = guest true;
-          missingLocker = guest false;
+          normal.imports = [
+            (guest true)
+            login
+          ];
+          missingLocker.imports = [
+            (guest false)
+            login
+          ];
+          legacy = {
+            imports = [ (guest true) ];
+            systemd.defaultUnit = "graphical.target";
+            specialisation = {
+              locked-desktop.configuration.imports = [ login ];
+              direct-login.configuration = {
+                imports = [ login ];
+                systemd.services.greetd = {
+                  aliases = lib.mkOverride 10 [ "display-manager.service" ];
+                  wantedBy = lib.mkOverride 10 [ "graphical.target" ];
+                };
+              };
+            };
+          };
         };
         testScript = ''
           runtime = "/run/user/1000"
+          userctl = f"runuser -u fixture -- env XDG_RUNTIME_DIR={runtime} systemctl --user"
+          compositor = r"wayland-wm@start\x2dhyprland.service"
           hyprctl = (
               f'instance=$(basename "$(find {runtime}/hypr -name .socket.sock -printf "%h" -quit)")'
               f'; runuser -u fixture -- env XDG_RUNTIME_DIR={runtime} '
@@ -83,6 +103,33 @@
               machine.fail("systemctl is-active --quiet getty@tty1.service")
               machine.send_key("meta_l-ret")
               machine.fail("test -e /tmp/desktop-shortcut")
+
+          def activate(machine, name):
+              machine.succeed(f"/run/booted-system/specialisation/{name}/bin/switch-to-configuration test >&2")
+
+          def main_pid(machine, manager, unit):
+              pid = int(machine.succeed(f"{manager} show -p MainPID --value '{unit}'"))
+              assert pid > 0, f"{unit} has no running process"
+              return pid
+
+          legacy.start()
+          with subtest("live activation keeps the existing tty1 login"):
+              legacy.wait_for_unit("graphical.target")
+              legacy.wait_for_unit("getty@tty1.service")
+              getty_pid = main_pid(legacy, "systemctl", "getty@tty1.service")
+              activate(legacy, "locked-desktop")
+              assert main_pid(legacy, "systemctl", "getty@tty1.service") == getty_pid
+              legacy.fail("systemctl is-active --quiet greetd.service")
+          with subtest("live activation keeps a desktop that greetd already started"):
+              activate(legacy, "direct-login")
+              expect_locked(legacy)
+              greetd_pid = main_pid(legacy, "systemctl", "greetd.service")
+              compositor_pid = main_pid(legacy, userctl, compositor)
+              activate(legacy, "locked-desktop")
+              assert main_pid(legacy, "systemctl", "greetd.service") == greetd_pid
+              assert main_pid(legacy, userctl, compositor) == compositor_pid
+              expect_locked(legacy)
+          legacy.shutdown()
 
           normal.start()
           with subtest("Noctalia requires the user's password"):
@@ -102,8 +149,6 @@
               normal.wait_for_unit("getty@tty2.service")
               normal.fail("loginctl list-sessions --no-legend | grep tty2")
           with subtest("UWSM stops Hyprland before the final stop timeout"):
-              userctl = f"runuser -u fixture -- env XDG_RUNTIME_DIR={runtime} systemctl --user"
-              compositor = r"wayland-wm@start\x2dhyprland.service"
               normal.succeed(f"{userctl} is-active --quiet '{compositor}'")
               normal.succeed(f"timeout 9s {userctl} stop '{compositor}'")
               normal.fail(f"{userctl} is-active --quiet '{compositor}'")
