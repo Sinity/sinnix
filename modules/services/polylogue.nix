@@ -36,11 +36,6 @@ mkServiceModule {
         default = "standalone";
         description = "Whether the live archive is Polylogue's own (standalone) or held by this host's Sinex (primary).";
       };
-      passwordFile = lib.mkOption {
-        type = lib.types.str;
-        default = config.sinnix.secrets.paths.sinex-nats-polylogue;
-        description = "The `polylogue` producer's NATS password, readable by the operator.";
-      };
     };
 
     dataDir = lib.mkOption {
@@ -120,15 +115,9 @@ mkServiceModule {
       rewriteSource = inputs.polylogue-rewrite;
 
       primary = cfg.sinex.mode == "primary";
-      sinex = config.services.sinex;
-      # Read by every polylogue command. Polylogue reads the password
-      # from the file when it connects; it is never in this one.
+      # Polylogue reads only the archive mode from this file.
       sinexSettings = (pkgs.formats.toml { }).generate "sinex.toml" {
         inherit (cfg.sinex) mode;
-        nats = "nats://${sinex.nats.address}:${toString sinex.nats.port}";
-        password_file = cfg.sinex.passwordFile;
-        subject_root = sinex.nats.subjectRoot;
-        store = sinex.storeDir;
       };
       cli = config.system.build.polylogueCli;
 

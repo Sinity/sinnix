@@ -132,13 +132,13 @@
     };
     polylogue = {
       enable = true;
-      # A fresh archive, filled by the daemon from the inputs on this host.
-      # Earlier archives stay whole at their own paths, read by nothing,
-      # until the history import brings them in.
-      dataHome = "/realm/state/polylogue-live/data-20261124";
+      # The format-10 conversion copies the stopped archive into this home.
+      # The index is rebuilt here and the old home stays available for rollback.
+      dataHome = "/realm/state/polylogue-live/data-20261127-format10";
       retainedArchives = [
         "/realm/state/polylogue-live/data-20261111/polylogue"
         "/realm/state/polylogue-live/data-20261123/polylogue"
+        "/realm/state/polylogue-live/data-20261124/polylogue"
       ];
       # The Python archive lives on the realm NVMe volume, not in the
       # impermanent home-directory default.
