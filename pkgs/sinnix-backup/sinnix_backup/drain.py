@@ -250,17 +250,20 @@ def plan(config: BackupConfig, label: str) -> dict[str, Any]:
                     ),
                 }
             )
-        prune_plan = (
-            snapshots.verified_prune_plan(*_queue_arguments(config, source))
-            if latest.is_file()
-            else []
-        )
+        prune_plan = []
+        prune_error = None
+        if latest.is_file():
+            try:
+                prune_plan = snapshots.verified_prune_plan(*_queue_arguments(config, source))
+            except ValueError as error:
+                prune_error = str(error)
     return {
         "label": label,
         "policy_sha256": coverage.policy_identity(
             source.coverage, require_borg_excludes=source.create_check
         ),
         "queue": rows,
+        "prune_error": prune_error,
         "prune_plan": [
             {
                 "snapshot": name,

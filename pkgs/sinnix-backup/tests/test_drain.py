@@ -813,6 +813,9 @@ def test_backlog_restart_collision_and_exclusions(backup_root, monkeypatch, capf
     missing_path, _ = write_fixture_config(root / "missing", missing)
     marker_before = latest_marker.read_bytes()
     snapshots_before = sorted(realm_directory.iterdir())
+    plan = json.loads(run("plan", "realm", path=missing_path).out)
+    assert plan["prune_error"] == "verified acknowledgement snapshot is unavailable"
+    assert plan["prune_plan"] == []
     refused = run("drain", "realm", ok=False, path=missing_path)
     assert "verified acknowledgement snapshot is unavailable" in refused.err
     assert latest_marker.read_bytes() == marker_before

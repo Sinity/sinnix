@@ -27,7 +27,9 @@ only by the coordinator, so they pause too.
 `sinnix-backup plan <label>` (`persist`, `realm` or `genome`) shows what the
 drain would do, without taking the Borg lock or changing anything: the policy
 hash, each queued snapshot with the archive name and complete `borg create`
-arguments it would get, and the snapshots the drain would then delete.
+arguments it would get, and the snapshots the drain would then delete. If a
+local snapshot cannot be verified for deletion, `prune_error` gives the
+reason and the archive queue is still shown.
 `sinnix-backup maintain --dry-run` previews retention. The health probes run
 `sinnix-backup freshness <label>`, `acquisition-freshness` and
 `audit-status`.
