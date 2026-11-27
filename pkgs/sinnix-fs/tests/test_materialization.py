@@ -774,7 +774,7 @@ def test_file_backed_scan_matches_tables_and_cleans_scratch(tmp_path, monkeypatc
 
     scratch = tmp_path / "scan-scratch"
     scratch.mkdir()
-    monkeypatch.setattr(fs, "DUCKDB_SCRATCH_ROOT", scratch)
+    monkeypatch.setenv("AGENTCTL_SCRATCH", str(scratch))
     execute = fs.run_duckdb_file
     checked = []
 
@@ -899,7 +899,7 @@ def test_failed_scan_preserves_current_without_leaking_scratch(
     descriptors = set(Path("/proc/self/fd").iterdir())
     scratch = tmp_path / "scan-scratch"
     scratch.mkdir()
-    monkeypatch.setattr(fs, "DUCKDB_SCRATCH_ROOT", scratch)
+    monkeypatch.setenv("AGENTCTL_SCRATCH", str(scratch))
 
     def fail(*_args):
         raise RuntimeError("synthetic scan producer failure")

@@ -640,12 +640,25 @@ def test_all_internal_duckdb_sessions_have_bounded_buffers_and_workers(tmp_path)
     assert stored.stdout.strip() == reader.stdout.strip()
 
 
-def test_writers_spill_to_a_scratch_directory_removed_afterwards(tmp_path, monkeypatch):
-    """Fails if a writer spills beside its database or leaves its scratch."""
+@pytest.mark.parametrize("owner_kind", ["directory", "missing", "file", None])
+def test_writers_spill_to_a_scratch_directory_removed_afterwards(
+    tmp_path, monkeypatch, owner_kind
+):
+    """Managed writers stay within their owner's cleanup; manual runs fall back."""
     fs = load()
     scratch_root = tmp_path / "scratch"
     scratch_root.mkdir()
     monkeypatch.setattr(fs, "DUCKDB_SCRATCH_ROOT", scratch_root)
+    owner_root = tmp_path / "job-scratch"
+    if owner_kind == "directory":
+        owner_root.mkdir()
+    elif owner_kind == "file":
+        owner_root.write_text("not a directory")
+    if owner_kind is None:
+        monkeypatch.delenv("AGENTCTL_SCRATCH", raising=False)
+    else:
+        monkeypatch.setenv("AGENTCTL_SCRATCH", str(owner_root))
+    expected_root = owner_root if owner_kind == "directory" else scratch_root
     db = tmp_path / "generation" / "spill.duckdb"
     writer = fs.run_duckdb_file(
         db,
@@ -654,10 +667,12 @@ def test_writers_spill_to_a_scratch_directory_removed_afterwards(tmp_path, monke
     )
     assert writer.returncode == 0, writer.stderr
     spill = Path(fs.duckdb_query(db, "SELECT spill FROM proof").stdout.strip())
-    assert spill.parent == scratch_root
+    assert spill.parent == expected_root
     assert spill.name.startswith("sinnix-fs-duckdb-")
+    assert list(expected_root.iterdir()) == []
     assert list(scratch_root.iterdir()) == []
-    # Without the scratch volume a writer still gets a private spill directory.
+    # Without a usable owner or scratch volume, spill beside the database.
+    monkeypatch.delenv("AGENTCTL_SCRATCH", raising=False)
     monkeypatch.setattr(fs, "DUCKDB_SCRATCH_ROOT", tmp_path / "absent")
     fallback = fs.run_duckdb_file(
         db,

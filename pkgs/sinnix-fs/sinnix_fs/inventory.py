@@ -77,9 +77,19 @@ def safe(value):
 # scan files (the retained October scan was measured to fit with file input).
 DUCKDB_MEMORY_LIMIT = "1GiB"
 DUCKDB_SETTINGS = f"SET memory_limit='{DUCKDB_MEMORY_LIMIT}'; SET threads=2; SET preserve_insertion_order=false;"
-# Writers spill here, on the scratch volume, not beside a generation's
-# database. Where the directory is absent they spill beside the database.
+# Outside a managed job, keep large temporary data on the scratch volume.
+# Without that volume, use the unpublished generation beside its database.
 DUCKDB_SCRATCH_ROOT = Path("/realm/tmp/work")
+
+
+def scratch_root(fallback: Path) -> Path:
+    """Use the job owner so its cleanup also covers killed writers."""
+    for value in (os.environ.get("AGENTCTL_SCRATCH"), DUCKDB_SCRATCH_ROOT):
+        if value:
+            root = Path(value)
+            if root.is_dir() and os.access(root, os.W_OK | os.X_OK):
+                return root
+    return fallback
 
 
 def name_memory_limit(
@@ -116,10 +126,9 @@ def run_duckdb_file(
         delete=False,
     ) as handle:
         script = Path(handle.name)
-        scratch_root = (
-            DUCKDB_SCRATCH_ROOT if DUCKDB_SCRATCH_ROOT.is_dir() else db.parent
+        scratch = Path(
+            tempfile.mkdtemp(prefix="sinnix-fs-duckdb-", dir=scratch_root(db.parent))
         )
-        scratch = Path(tempfile.mkdtemp(prefix="sinnix-fs-duckdb-", dir=scratch_root))
         handle.write(
             f"{DUCKDB_SETTINGS} SET temp_directory={sql_string(scratch)};\n{sql}"
         )
@@ -1637,11 +1646,10 @@ def scan_generation(stage: Path, roots: list[str], judgments: Path) -> None:
     allow the parser to stream and spill; they are not published artifacts.
     """
     database = stage / "inventory.duckdb"
-    scratch_root = (
-        DUCKDB_SCRATCH_ROOT if DUCKDB_SCRATCH_ROOT.is_dir() else stage
-    )
     try:
-        with tempfile.TemporaryDirectory(prefix="sinnix-fs-scan-", dir=scratch_root) as directory:
+        with tempfile.TemporaryDirectory(
+            prefix="sinnix-fs-scan-", dir=scratch_root(stage)
+        ) as directory:
             nodes = Path(directory) / "nodes.jsonl"
             files = Path(directory) / "files.jsonl"
             inventory_scan(roots, -1, nodes, 2000)
