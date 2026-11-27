@@ -109,6 +109,9 @@ mkFeatureModule {
             systemd.enable = true;
           };
 
+          # Noctalia owns the Wayland session lock. Replacing its process
+          # during activation strands a locked session until recovery.
+          systemd.user.services.noctalia.Unit.X-SwitchMethod = "keep-old";
           systemd.user.services.noctalia.Service =
             (lib.sinnix.mkRuntimeServiceConfig {
               runtimeInventory = nixosConfig.sinnix.runtime.inventory;
