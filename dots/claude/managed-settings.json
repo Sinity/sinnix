@@ -39,6 +39,65 @@
     "defaultMode": "bypassPermissions"
   },
   "hooks": {
+    "Elicitation": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "polylogue internal hook Elicitation",
+            "timeout": 2,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "polylogue internal hook SubagentStart",
+            "timeout": 2,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PermissionDenied": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "polylogue internal hook PermissionDenied",
+            "timeout": 2,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "polylogue internal hook PermissionRequest",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "polylogue internal hook SubagentStop",
+            "timeout": 2,
+            "async": true
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash",
@@ -83,6 +142,16 @@
     ],
     "Notification": [
       {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "polylogue internal hook Notification",
+            "timeout": 2,
+            "async": true
+          }
+        ]
+      },
+      {
         "matcher": "permission_prompt|elicitation_dialog",
         "hooks": [
           {
@@ -94,6 +163,16 @@
       }
     ],
     "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "polylogue internal hook StopFailure",
+            "timeout": 2,
+            "async": true
+          }
+        ]
+      },
       {
         "matcher": "rate_limit",
         "hooks": [
@@ -158,6 +237,16 @@
       }
     ],
     "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "polylogue internal hook SessionEnd",
+            "timeout": 2,
+            "async": true
+          }
+        ]
+      },
       {
         "hooks": [
           {
