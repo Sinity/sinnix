@@ -56,6 +56,7 @@ in
               test "$XDG_STATE_HOME" = "$EXPECTED_STATE_HOME"
               test -z "''${POLYLOGUE_ARCHIVE+x}"
               test -z "''${POLYLOGUE_HOME+x}"
+              test "''${POLYLOGUE_MCP_SOCKET:-}" = "''${EXPECTED_MCP_SOCKET:-}"
               test "$1" = mcp
               test "$2" = 'one argument'
             '';
@@ -72,12 +73,14 @@ in
                 config.users.users.op.home = "/fixture/home";
               };
             mcp =
-              cli:
+              cli: mcpSocket:
               (import ../../modules/features/dev/agents/mcp-tools.nix {
                 inherit lib pkgs inputs;
                 scriptPkgs = { };
                 config.system.build.polylogueCli = cli;
+                config.sinnix.services.polylogue.mcpSocket = mcpSocket;
               }).mcpPolylogueBin;
+            endpoint = "/run/user/1234/polylogue-mcp.sock";
           in
           pkgs.runCommand "polylogue-command-binding" { } ''
             export XDG_DATA_HOME=/foreign/data XDG_STATE_HOME=/foreign/state
@@ -85,10 +88,10 @@ in
             export EXPECTED_STATE_HOME=/fixture/home/.local/state
             export EXPECTED_DATA_HOME='/fixture/live archive/data'
             ${wrapper "standalone"}/bin/polylogue mcp 'one argument'
-            ${(mcp (wrapper "standalone"))}/bin/mcp-polylogue 'one argument'
+            EXPECTED_MCP_SOCKET=${endpoint} ${(mcp (wrapper "standalone") endpoint)}/bin/mcp-polylogue 'one argument'
             export EXPECTED_DATA_HOME='/fixture/live archive/sinex-data'
             ${wrapper "primary"}/bin/polylogue mcp 'one argument'
-            ${(mcp (wrapper "primary"))}/bin/mcp-polylogue 'one argument'
+            EXPECTED_MCP_SOCKET=${endpoint} ${(mcp (wrapper "primary") endpoint)}/bin/mcp-polylogue 'one argument'
             # Polylogue reads /etc/machine-id at start-up and the build sandbox
             # has none: run the MCP check with a copy of /etc that has one.
             mkdir etc
@@ -96,7 +99,7 @@ in
             echo 00000000000000000000000000000001 > etc/machine-id
             ${pkgs.util-linux}/bin/unshare --user --map-root-user --mount ${pkgs.bash}/bin/sh -c \
               '${pkgs.util-linux}/bin/mount --bind "$PWD/etc" /etc && exec "$0" "$@"' \
-              ${pkgs.python3}/bin/python ${./polylogue-mcp.py} ${(mcp liveEvaluated.config.system.build.polylogueCli)}/bin/mcp-polylogue
+              ${pkgs.python3}/bin/python ${./polylogue-mcp.py} ${(mcp liveEvaluated.config.system.build.polylogueCli liveEvaluated.config.sinnix.services.polylogue.mcpSocket)}/bin/mcp-polylogue
             touch "$out"
           '';
         polylogue-live =
@@ -109,10 +112,13 @@ in
               cli = liveEvaluated.config.system.build.polylogueCli;
               wantedBy = builtins.toJSON liveService.Install.WantedBy;
               servicePolicy = builtins.toJSON liveService.Service;
+              endpoint = liveEvaluated.config.sinnix.services.polylogue.mcpSocket;
               inherit extension hostManifest;
             }
             ''
               set -eu
+              jq -e --arg endpoint "$endpoint" '.Environment | index("POLYLOGUE_MCP_SOCKET=" + $endpoint) != null' <<<"$servicePolicy"
+              case "$endpoint" in /run/user/[0-9]*/polylogue-mcp.sock) ;; *) exit 1 ;; esac
               id="$(cat "$extension/share/polylogue/extension-id")"
               wrapper="''${execStart% daemon}"
               test "$execStart" = "$cli/bin/polylogue daemon"

@@ -71,6 +71,14 @@ mkServiceModule {
       '';
     };
 
+    mcpSocket = lib.mkOption {
+      type = lib.types.str;
+      default = "/run/user/${toString config.users.users.${userName}.uid}/polylogue-mcp.sock";
+      internal = true;
+      readOnly = true;
+      description = "Private runtime socket shared by the installed MCP launcher and daemon.";
+    };
+
     readSources = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -182,6 +190,7 @@ mkServiceModule {
             Unit.Description = "Polylogue daemon over the live archive";
             Service = liveServiceClass // {
               ExecStart = "${cli}/bin/polylogue daemon" + lib.optionalString (!cfg.readSources) " --no-sources";
+              Environment = [ "POLYLOGUE_MCP_SOCKET=${cfg.mcpSocket}" ];
               # Restart even after a clean stop: a SIGTERM from the OOM response counts as clean.
               Restart = "always";
               RestartSec = "5s";

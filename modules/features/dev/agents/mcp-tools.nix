@@ -64,6 +64,7 @@ let
       ''
         mkdir -p $out/bin
         makeBinaryWrapper ${config.system.build.polylogueCli}/bin/polylogue $out/bin/mcp-polylogue \
+          --set POLYLOGUE_MCP_SOCKET ${lib.escapeShellArg config.sinnix.services.polylogue.mcpSocket} \
           --add-flags mcp
       '';
   sinex = lib.attrByPath [ "services" "sinex" ] null config;
