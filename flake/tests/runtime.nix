@@ -180,11 +180,16 @@ in
               message = "the system failure-notify template must exec the hook with the unit instance";
             }
             {
-              assertion = lib.hasInfix "--user" (
-                toString
-                  config.home-manager.users.sinity.systemd.user.services."sinnix-unit-failure-notify@".Service.ExecStart
-              );
-              message = "the user failure-notify template must pass --user to the hook";
+              assertion =
+                let
+                  hm = config.home-manager.users.sinity;
+                in
+                hm.systemd.user.services."sinnix-unit-failure-notify@".Service.ExecStart
+                == [ "%h/.local/libexec/sinnix-unit-failure-notify %i --user" ]
+                && lib.hasSuffix "/bin/sinnix-unit-failure-notify" (
+                  toString hm.home.file.".local/libexec/sinnix-unit-failure-notify".source
+                );
+              message = "the user failure-notify template must call the managed notifier path";
             }
             {
               # Delivered as a drop-in rather than a unit body: a user surface
@@ -201,9 +206,8 @@ in
                   dropIn =
                     config.home-manager.users.sinity.xdg.configFile."systemd/user/runtime-policy-user.service.d/50-sinnix-unit-failure-notify.conf".text;
                 in
-                lib.hasInfix "[Service]\nExecStopPost=-" dropIn
-                && lib.hasInfix "/bin/sinnix-unit-failure-notify %n --user\n" dropIn;
-              message = "observed user services must report every unsuccessful end from ExecStopPost";
+                lib.hasInfix "[Service]\nExecStopPost=-%h/.local/libexec/sinnix-unit-failure-notify %n --user\n" dropIn;
+              message = "observed user services must report unsuccessful ends through a stable ExecStopPost path";
             }
             {
               # A generated job reports its own failure even when nothing

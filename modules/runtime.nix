@@ -43,6 +43,8 @@ let
       sinnix-hub-server emit-failure --unit "$unit" --result "''${result:-unknown}" --manager "$manager"
     '';
   };
+  userFailureNotifyFile = ".local/libexec/sinnix-unit-failure-notify";
+  userFailureNotifyCommand = "%h/${userFailureNotifyFile}";
 
   units = config.sinnix.runtime.units;
   surfaceRows = lib.mapAttrsToList (name: surface: {
@@ -532,11 +534,16 @@ in
         ]
       );
       home-manager.users.${cfg.user.name} = {
+        # A change to the notifier (or its dependencies) must not restart
+        # every observed user service. Home Manager compares drop-in contents
+        # when switching units. It updates this link before the unit switch.
+        home.file.${userFailureNotifyFile}.source = "${unitFailureNotify}/bin/sinnix-unit-failure-notify";
+
         systemd.user.services."sinnix-unit-failure-notify@" = {
           Unit.Description = "Record + surface the failure of user unit %i";
           Service = {
             Type = "oneshot";
-            ExecStart = "${unitFailureNotify}/bin/sinnix-unit-failure-notify %i --user";
+            ExecStart = "${userFailureNotifyCommand} %i --user";
           };
         };
 
@@ -560,7 +567,7 @@ in
                   OnFailure=sinnix-unit-failure-notify@%n.service
 
                   [Service]
-                  ExecStopPost=-${unitFailureNotify}/bin/sinnix-unit-failure-notify %n --user
+                  ExecStopPost=-${userFailureNotifyCommand} %n --user
                 '';
               }
             )
