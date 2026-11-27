@@ -295,10 +295,24 @@ def record(destination, command):
     finally:
         os.close(write_fd)
 
-    def forward(signum, _frame):
-        if recorder.poll() is None:
-            recorder.send_signal(signum)
+    stopping = False
 
+    def forward(signum, _frame):
+        nonlocal stopping
+        if stopping:
+            return
+        stopping = True
+        # The cast writer can be blocked even after asciinema exits. Allow a
+        # short drain on shutdown, then release both children and their pipes.
+        signal.alarm(3)
+        recorder.send_signal(signum)
+
+    def end_stalled_stop(_signum, _frame):
+        print("terminal capture: stopping with an unfinished recording", file=sys.stderr, flush=True)
+        recorder.kill()
+        writer.kill()
+
+    signal.signal(signal.SIGALRM, end_stalled_stop)
     for signum in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, forward)
 
@@ -310,6 +324,7 @@ def record(destination, command):
     watcher.start()
     status = recorder.wait()
     watcher.join()  # EOF drains all queued bytes before reporting success.
+    signal.alarm(0)
     writer_status = writer.returncode
     if writer_status:
         print(f"terminal capture: writer exited with status {writer_status}", file=sys.stderr)

@@ -8,7 +8,9 @@
 {
   boot = {
     loader = {
-      timeout = 15;
+      # Hold a key during boot or use systemctl reboot --boot-loader-menu=30
+      # to choose an older generation.
+      timeout = 1;
       systemd-boot = {
         editor = true;
         consoleMode = "keep";

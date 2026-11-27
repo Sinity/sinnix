@@ -17,6 +17,14 @@
 
   networking.hostName = "sinnix-prime";
 
+  # These services still wait for the network. Start them from the background
+  # target so network readiness does not hold back graphical.target.
+  systemd.services.caddy.wantedBy = lib.mkForce [ "sinnix-background.target" ];
+  systemd.services.proton-openai-proxy.wantedBy = lib.mkForce [ "sinnix-background.target" ];
+  systemd.services.proton-openai-wg.wantedBy = lib.mkForce [ "sinnix-background.target" ];
+  systemd.services.tailscaled.wantedBy = lib.mkForce [ "sinnix-background.target" ];
+  systemd.services.tailscaled-autoconnect.wantedBy = lib.mkForce [ "sinnix-background.target" ];
+
   # SSH and Mosh retain their emergency access grant without publishing the
   # authorized client identity in the system configuration.
   services.openssh.authorizedKeysFiles = lib.mkAfter [ "/run/sinnix/authorized_keys/%u" ];

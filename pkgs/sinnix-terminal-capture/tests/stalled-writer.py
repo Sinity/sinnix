@@ -3,6 +3,7 @@
 import json
 import os
 import shlex
+import signal
 import subprocess
 import sys
 import threading
@@ -83,6 +84,36 @@ result = subprocess.run(
     timeout=15,
 )
 assert result.returncode != 0
+
+# SIGTERM must also release a recorder whose cast writer cannot drain. Use a
+# real PTY and leave the FIFO unread throughout the stop.
+command[3] = str(fifo)
+command[-1] = "printf 'STOP-READY\\n'; exec sleep 60"
+with transcript.open("wb") as output:
+    process = subprocess.Popen(
+        ["script", "-qfec", "exec " + shlex.join(command), "/dev/null"],
+        stdout=output,
+        stderr=subprocess.STDOUT,
+    )
+    supervisor = None
+    try:
+        deadline = time.monotonic() + 10
+        while b"STOP-READY" not in transcript.read_bytes():
+            assert process.poll() is None
+            assert time.monotonic() < deadline, "recorder did not start"
+            time.sleep(0.05)
+        children = Path(f"/proc/{process.pid}/task/{process.pid}/children")
+        (supervisor,) = map(int, children.read_text().split())
+        os.kill(supervisor, signal.SIGTERM)
+        assert process.wait(timeout=8) != 0
+        assert not Path(f"/proc/{supervisor}").exists()
+        assert b"stopping with an unfinished recording" in transcript.read_bytes()
+    finally:
+        if process.poll() is None:
+            if supervisor is not None:
+                os.kill(supervisor, signal.SIGKILL)
+            process.kill()
+            process.wait()
 
 # Exercise exhaustion with a small bound instead of consuming 256 MiB in CI.
 # The producer must block, emit a warning, then resume without losing bytes.

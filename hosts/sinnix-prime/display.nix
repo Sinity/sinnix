@@ -19,6 +19,17 @@ let
 in
 lib.mkMerge [
 
+  (lib.mkIf config.sinnix.features.desktop.hyprland.enable (
+    import ./desktop-login.nix {
+      inherit pkgs lib user;
+      hyprland = config.programs.hyprland.package;
+      noctalia = config.home-manager.users.${user}.programs.noctalia.package;
+      sessionEnvironment = "${
+        config.home-manager.users.${user}.home.sessionVariablesPackage
+      }/etc/profile.d/hm-session-vars.sh";
+    }
+  ))
+
   # ── Common ──────────────────────────────────────────────────────────────────
   {
     hardware.graphics = {
@@ -31,9 +42,6 @@ lib.mkMerge [
         libglvnd
       ];
     };
-    # Lock-screen PAM is declared by the Noctalia module
-    # (security.pam.services.noctalia).
-
     # DDC/CI to the monitor over the display cable. Without i2c-dev there are
     # no /dev/i2c-* nodes and ddcutil cannot see the panel at all. VCP READS
     # work and are what modules/services/capture-monitor.nix polls (power

@@ -49,7 +49,9 @@ let
     (simple "SUPER + SHIFT + F" "Smart fullscreen" (
       call "window.fullscreen" ''{ mode = "fullscreen", action = "toggle" }''
     ))
-    (run "SUPER + Return" "Open a terminal" "kitty --single-instance --instance-group terminal")
+    (run "SUPER + Return" "Open a terminal"
+      "uwsm app -- kitty --single-instance --instance-group terminal"
+    )
     (simple "SUPER + Q" "Close the focused window" (call "window.close" ""))
     (simple "SUPER + F" "Toggle fullscreen" (
       call "window.fullscreen" ''{ mode = "fullscreen", action = "toggle" }''

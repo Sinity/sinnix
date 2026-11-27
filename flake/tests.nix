@@ -36,6 +36,7 @@ in
     ./tests/browser-workflow.nix
     ./tests/interactive-storage.nix
     ./tests/desktop-file-navigation.nix
+    ./tests/desktop-login-vm.nix
     ./tests/terminal-capture.nix
     ./tests/capture-clipboard.nix
     ./tests/capture-primary.nix

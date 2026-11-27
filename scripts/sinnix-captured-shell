@@ -315,7 +315,8 @@ cleanup_recorder_subtree() {
 
   kill -TERM "$recorder_pid" 2>/dev/null || true
 
-  for _ in 1 2 3 4 5; do
+  # The recorder supervisor gives its children three seconds to drain.
+  for _ in {1..25}; do
     if ! kill -0 "$recorder_pid" 2>/dev/null; then
       break
     fi
@@ -334,6 +335,7 @@ cleanup_recorder_subtree() {
 handle_supervisor_signal() {
   local exit_reason="$1"
   local process_status="$2"
+  trap '' HUP INT TERM
   cleanup_reason="$exit_reason"
   cleanup_recorder_subtree "$exit_reason" "$process_status"
   trap - EXIT

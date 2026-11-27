@@ -9,6 +9,7 @@ let
   cfg = config.sinnix.features.desktop.hyprland;
   user = config.sinnix.user.name;
   hyprlandPkg = config.programs.hyprland.package or pkgs.hyprland;
+  consoleLogin = !config.services.greetd.enable;
   # Agent/devshell library overrides can outlive a host upgrade. The native
   # control client must use its packaged C++ ABI, without changing the
   # compositor's or applications' library environment.
@@ -178,23 +179,25 @@ in
         {
           imports = [ ./idle.nix ];
 
-          programs.zsh.loginExtra = lib.mkBefore ''
-            if [ "$(id -un)" = "${user}" ] && [ -z "$DISPLAY" ]; then
-              current_tty=$(tty 2>/dev/null || true)
-              if [ "$current_tty" = "/dev/tty1" ] && command -v uwsm >/dev/null 2>&1; then
-                # UWSM's packaged desktop entry launches Hyprland without a
-                # config argument. Select Lua through the environment: --config
-                # canonicalizes Home Manager's symlink to an immutable store
-                # file, leaving subsequent reloads stuck on that generation.
-                # HYPRLAND_CONFIG retains the path through symlink replacements.
-                # Hyprland 0.56+ expects its start-hyprland watchdog (it
-                # warns otherwise); uwsm's hyprland plugin recognises that
-                # launcher, and the earlyoom avoid pattern protects it.
-                export HYPRLAND_CONFIG="$HOME/.config/hypr/hyprland.lua"
-                exec uwsm start -e -D Hyprland -- ${hyprlandPkg}/bin/start-hyprland
+          programs.zsh.loginExtra = lib.mkIf consoleLogin (
+            lib.mkBefore ''
+              if [ "$(id -un)" = "${user}" ] && [ -z "$DISPLAY" ]; then
+                current_tty=$(tty 2>/dev/null || true)
+                if [ "$current_tty" = "/dev/tty1" ] && command -v uwsm >/dev/null 2>&1; then
+                  # UWSM's packaged desktop entry launches Hyprland without a
+                  # config argument. Select Lua through the environment: --config
+                  # canonicalizes Home Manager's symlink to an immutable store
+                  # file, leaving subsequent reloads stuck on that generation.
+                  # HYPRLAND_CONFIG retains the path through symlink replacements.
+                  # Hyprland 0.56+ expects its start-hyprland watchdog (it
+                  # warns otherwise); uwsm's hyprland plugin recognises that
+                  # launcher, and the earlyoom avoid pattern protects it.
+                  export HYPRLAND_CONFIG="$HOME/.config/hypr/hyprland.lua"
+                  exec uwsm start -e -D Hyprland -- ${hyprlandPkg}/bin/start-hyprland
+                fi
               fi
-            fi
-          '';
+            ''
+          );
 
           wayland.windowManager.hyprland = {
             enable = true;
