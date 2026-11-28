@@ -70,7 +70,7 @@
     # flake.lock alone holds the deployed revision; moving it is a deploy,
     # done with `update polylogue-rewrite`, which first fetches the package
     # Polylogue's CI published to sinity.cachix.org.
-    polylogue-rewrite.url = "github:Sinity/polylogue";
+    polylogue-rewrite.url = "github:Sinity/polylogue/release-format23-current-parsers-20261128";
 
     # Private repo — fetch via HTTPS through the local gh/git credential helper.
     yt-polisher = {
