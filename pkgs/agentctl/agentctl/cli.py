@@ -62,7 +62,6 @@ EXIT_USAGE = 2
 EXIT_SUBSTRATE = 3
 EXIT_JOB_NOT_SUCCEEDED = 4
 
-DEFAULT_WAIT_SECONDS = 3_600
 DEFAULT_EVENT_LINES = 40
 FOLLOW_POLL_SECONDS = 1.0
 MAX_EVENT_LINE_BYTES = 1024 * 1024
@@ -208,8 +207,7 @@ def parser() -> argparse.ArgumentParser:
     start.add_argument(
         "--wait-seconds",
         type=int,
-        default=DEFAULT_WAIT_SECONDS,
-        help="how long --wait waits; the job's runtime limit is the operation's declared timeout_seconds",
+        help="how long --wait waits (defaults to the operation's runtime budget)",
     )
     start.add_argument(
         "--idempotency-key",
@@ -311,7 +309,11 @@ def parser() -> argparse.ArgumentParser:
     wait = job_verbs.add_parser("wait")
     wait.add_argument("task_id", type=int)
     _job_id_option(wait)
-    wait.add_argument("--timeout-seconds", type=int, default=DEFAULT_WAIT_SECONDS)
+    wait.add_argument(
+        "--timeout-seconds",
+        type=int,
+        help="how long to wait (defaults to the operation's runtime budget)",
+    )
     _output_arguments(wait)
 
     view = verbs.add_parser("view", help="the operator screen")

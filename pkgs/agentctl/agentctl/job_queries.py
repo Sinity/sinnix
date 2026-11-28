@@ -1061,7 +1061,7 @@ def unfinished_attempt(config: Config, task: Task) -> bool:
 def wait(
     task_id: int,
     *,
-    timeout_seconds: float,
+    timeout_seconds: float | None = None,
     job_id: str | None = None,
     config: Config | None = None,
 ) -> dict[str, Any]:
@@ -1072,6 +1072,11 @@ def wait(
         return view
     if task.status == "Archived":
         raise JobError(f"job {job_id} has no terminal result")
+    if timeout_seconds is None:
+        configured = view.get("timeout_seconds")
+        timeout_seconds = (
+            configured if isinstance(configured, int) and configured > 0 else 3_600
+        )
     detail = None
     try:
         pueue.wait(task_id, timeout_seconds=timeout_seconds)

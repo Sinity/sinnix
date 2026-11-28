@@ -41,8 +41,9 @@ functions. Waiting never cancels a job; queue cleanup keeps its input and output
 
 `job start --wait --wait-seconds N` and `job wait --timeout-seconds N` bound
 only the caller's wait; a job's runtime limit is always its operation's
-declared `timeout_seconds`. When the
-waited job ends without success, both print its failure lines (nextest
+declared `timeout_seconds`. Without an explicit limit, callers wait for one
+recorded runtime budget. Jobs with no known finite budget use one hour.
+When the waited job ends without success, both print its failure lines (nextest
 verdicts, compiler errors, panics with their message, refusals and the
 `recorded as run N` history pointer) and the log's last lines to stderr.
 The project is `--project`, a leading positional naming a project or checkout

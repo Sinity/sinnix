@@ -640,6 +640,42 @@ def test_wait_reports_elapsed_age_after_blocking(
     assert "(10m) (wait timed out)" in text
 
 
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize(
+    "runtime, override, expected",
+    [(28_800, None, 28_800), (28_800, 17, 17), (0, None, 3_600)],
+)
+def test_job_wait_defaults_to_its_recorded_runtime(
+    existing: bool,
+    runtime: int,
+    override: int | None,
+    expected: int,
+    fake_pueue: FakePueue,
+    cli_config: Config,
+    capsys: pytest.CaptureFixture[str],
+    project_root: Path,
+) -> None:
+    descriptor = project_root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace("timeout_seconds = 120", f"timeout_seconds = {runtime}")
+    )
+    command = ["job", "start", "fixture", "verify_quick"]
+    if existing:
+        assert cli.main(command) == cli.EXIT_OK
+        started = json.loads(capsys.readouterr().out)
+        command = ["job", "wait", str(started["task_id"]), "--job-id", started["job_id"]]
+        option = "--timeout-seconds"
+    else:
+        command += ["--wait"]
+        option = "--wait-seconds"
+    if override is not None:
+        command.extend([option, str(override)])
+    before = fake_pueue.clock
+    assert cli.main(command + ["--json"]) == cli.EXIT_JOB_NOT_SUCCEEDED
+    assert json.loads(capsys.readouterr().out)["wait_timed_out"] is True
+    assert fake_pueue.clock - before == expected
+
+
 @pytest.mark.parametrize("flags", [[], ["--if-idle"]])
 def test_job_launch_wait_timeout_is_not_success(
     flags: list[str],
