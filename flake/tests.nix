@@ -69,7 +69,7 @@ in
     ./tests/quota.nix
     ./tests/noctalia.nix
     ./tests/scratch-subvolumes.nix
-    ./tests/fstrim.nix
+    ./tests/realm-discard.nix
     ./tests/devkit-pg.nix
     ./tests/host-config.nix
     ./tests/hyprland-rules.nix

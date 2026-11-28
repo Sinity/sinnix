@@ -15,6 +15,8 @@ On sinnix-prime, `sinnix-realm-writeback.service` applies `max_ratio=25` and `st
 
 The existing global dirty limit remains 1 GiB and the background threshold remains 128 MiB. Realm receives a 25% writeback share, nominally 256 MiB. This allocates no extra RAM and limits dirty backlog rather than total Btrfs metadata or clean cache. Kernel accounting and in-flight writes can exceed a nominal dirty threshold. Synchronous IO and shared Btrfs log, transaction and extent locks can still stall. See the [kernel BDI controls](https://docs.kernel.org/admin-guide/abi-testing.html).
 
+Realm's NVMe filesystem uses asynchronous discard. Btrfs coalesces freed data extents and issues discard outside transaction commit. Both the top-level mount and Sinex's subvolume use the same setting because it applies to the filesystem. [Btrfs mount options](https://btrfs.readthedocs.io/en/stable/Administration.html#mount-options)
+
 ## Verification
 
 Source checks, without activation:
@@ -22,6 +24,7 @@ Source checks, without activation:
 ```sh
 nix build --no-link -L .#checks.x86_64-linux.browser-ram-cache
 nix build --no-link -L .#checks.x86_64-linux.realm-writeback
+nix build --no-link -L .#checks.x86_64-linux.sinnix-realm-discard
 ```
 
 The browser fixture exercises the evaluated package override through both direct aliases and `sinnix-chrome`, including argument preservation and an inherited slow-disk `TMPDIR`. It checks the evaluated mount limits. The writeback fixture executes the host's script against a synthetic Btrfs UUID-to-BDI symlink, with a different BDI number, and verifies that other BDIs remain untouched and missing filesystems fail. It also forces the rendered systemd unit and mount/sysctl ordering.

@@ -71,6 +71,7 @@ let
 
   realmFsUuid = "43701cf7-7880-4e0c-9725-b6e12d91898a";
   realmFsDevice = "/dev/disk/by-uuid/${realmFsUuid}";
+  realmDiscard = "discard=async";
 
   # Initrd scaffold: early-boot placeholders derived from persistence config
   scaffoldCfg = config.sinnix.persistence.initrdScaffold;
@@ -79,45 +80,6 @@ let
     map (d: "mkdir -p /btrfs_tmp/@${d}") scaffoldDirs
     ++ map (f: "touch /btrfs_tmp/@${f}") scaffoldCfg.files
   );
-  fstrimCanonical = pkgs.writeShellApplication {
-    name = "sinnix-fstrim-canonical";
-    runtimeInputs = [
-      pkgs.coreutils
-      pkgs.findutils
-      pkgs.util-linux
-    ];
-    text = ''
-      set -eu
-
-      mountpoint=/realm
-      if findmnt --mountpoint "$mountpoint" >/dev/null; then
-        fstrim --verbose "$mountpoint"
-      fi
-    '';
-  };
-
-  fstrimJob =
-    lib.sinnix.mkScheduledJob
-      {
-        inherit config;
-        unitName = "sinnix-fstrim";
-        description = "Trim canonical NVMe data filesystem";
-        surface = config.sinnix.runtime.units.sinnix-fstrim;
-      }
-      {
-        resourceClass = "background";
-        execStart = "${fstrimCanonical}/bin/sinnix-fstrim-canonical";
-        # Daily, over every free extent: /realm's free space lies mostly in
-        # small gaps inside allocated chunks, which a minimum extent size
-        # skipped, and a QLC drive that is not told what is free behaves as
-        # nearly full. 05:00 keeps it off the midnight snapshot and index
-        # jobs and the drain's 03:05 start.
-        timer = {
-          onCalendar = "*-*-* 05:00";
-          randomizedDelaySec = "30min";
-          persistent = true;
-        };
-      };
 in
 {
   sinnix.backup.genomeRoot = "${neoOuterRealm}/content/genome";
@@ -226,12 +188,13 @@ in
     # btrbk (unsafe to block-snapshot a live database); recovery uses Sinex's
     # immutable core artifact and paired content/key Borg archives.
     "/var/lib/sinex" = {
-      device = "/dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a";
+      device = realmFsDevice;
       fsType = "btrfs";
       options = [
         "subvol=/state/sinex"
         "compress=zstd:3"
         "noatime"
+        realmDiscard
         "nofail"
       ];
     };
@@ -279,7 +242,7 @@ in
         # Capture lake is write-heavy; atime writes on read are pure waste.
         "noatime"
         "lazytime"
-        "nodiscard"
+        realmDiscard
         "nofail"
       ];
     };
@@ -319,8 +282,6 @@ in
   };
 
   systemd = {
-    services.sinnix-fstrim = fstrimJob.systemd.services.sinnix-fstrim;
-
     # Btrfs owns a filesystem BDI, separate from the block device's BDI.
     # Resolve it through the mounted filesystem UUID; btrfs-N changes at boot.
     # Keep a soft 25% share of the global dirty budget for this filesystem.
@@ -376,8 +337,6 @@ in
       wantedBy = [ "timers.target" ];
       timerConfig.OnCalendar = "*-*-* 07:00:00";
     };
-
-    timers.sinnix-fstrim = fstrimJob.systemd.timers.sinnix-fstrim;
 
     # Create the nodatacow subvolume through /realm before mounting it; the
     # first btrfs mount sets filesystem-wide options.
@@ -550,12 +509,6 @@ in
     "/home/${username}/.local/share"
     polylogueShareMount
   ];
-
-  sinnix.runtime.units.sinnix-fstrim = {
-    unit = "sinnix-fstrim.service";
-    resourceClass = "background";
-    notifyOnFailure = true;
-  };
 
   boot.supportedFilesystems = [
     "btrfs"
