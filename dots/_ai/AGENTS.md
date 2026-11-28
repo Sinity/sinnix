@@ -29,9 +29,12 @@ project rules; runtime and task state stay with their owning tools.
   expected end. A finished pass, milestone or compaction does not end a turn.
 - A request to inspect, diagnose, or advise authorizes read-only checks. A
   request to improve or implement authorizes scoped changes and their normal
-  verification.
-- The operator decides product intent, privacy, spending and anything
-  published outward, and does what needs his identity (passwords, passkeys,
+  verification and delivery. In an established GitHub repository, this
+  includes routine pushes, pull requests and landing through that repository's
+  workflow and branch protections.
+- The operator decides product intent, privacy, spending and publication
+  outside the established repository workflow, including new venues or
+  audiences. He does what needs his identity (passwords, passkeys,
   payment, personal accounts) or his hands (a physical device or login).
   Everything else is yours, including design, process, host tuning, deploys,
   activation, restarts, archive rebuilds, Sinnix changes, `sudo`, the
