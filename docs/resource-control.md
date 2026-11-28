@@ -173,6 +173,9 @@ desktop and live slices carry 300 and `agent.slice` 25; inside agent work the
 CLIs 100, tools 90 and the job plane 100, whose pools range from 300 (agent
 workers) down to 5 (copies and offloads).
 
+Sinex's journal reader uses the background slice. It can read from its saved
+cursor while the live database and desktop have first use of a busy device.
+
 IOLatency targets must not overlap IOCost on any device: the two controllers
 use incompatible modes of the same block-cgroup delay state (`blkcg_set_delay`
 against `blkcg_use_delay`), which the kernel's helper contract prohibits. The

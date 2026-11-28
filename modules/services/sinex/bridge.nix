@@ -185,10 +185,11 @@ in
       };
       sinex-capture-journald = {
         unit = "sinex-capture-journald.service";
-        resourceClass = "live";
-        # Its peaks (1-2G) are page cache of the journal files it reads.
+        # The persistent journal supplies a cursor and can be caught up at
+        # background priority. Its peaks are the journal files' page cache.
+        resourceClass = "background";
         resources = {
-          MemoryLow = mib budget.journaldCapture;
+          Slice = "background.slice";
           MemoryHigh = "1G";
           MemoryMax = "2G";
         };

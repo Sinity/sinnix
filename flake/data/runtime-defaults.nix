@@ -53,12 +53,11 @@ let
     postgresql = 5632;
     sinexd = 1024;
     nats = 128;
-    journaldCapture = 128;
     # The Polylogue daemon (1.5 GiB) and the session producer.
     polylogue = 1536;
     sessionProducer = 256;
     userLive = polylogue + sessionProducer;
-    systemLive = postgresql + sinexd + nats + journaldCapture;
+    systemLive = postgresql + sinexd + nats;
     # Other system daemons (system.slice, 0.9 GiB median) and recovery tools.
     systemServices = 1024;
     systemCritical = 256;
