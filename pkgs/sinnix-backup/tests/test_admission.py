@@ -13,6 +13,7 @@ from sinnix_backup import admission as a
     ("inactive", 8192, True),
     ("idle", 8191, False),
     ("rebuilding", 32000, False),
+    ("catching_up", 32000, False),
     ("unknown", 32000, False),
 ])
 def test_admission(index, available, ready):
@@ -28,13 +29,15 @@ def test_start_and_yield_thresholds():
     assert a.yield_reason("idle", 3000, 100) is None
 
 
-@pytest.mark.parametrize("rebuilding,installed,exit_code,expected", [
-    ("writing", "unusable", 5, "rebuilding"),
-    ("no", "current", 0, "idle"),
-    ("no", "current", 5, "idle"),
-    ("no", "unusable", 5, "unknown"),
+@pytest.mark.parametrize("rebuilding,installed,caught_up,exit_code,expected", [
+    ("writing", "unusable", False, 5, "rebuilding"),
+    ("no", "current", True, 0, "idle"),
+    ("no", "current", True, 5, "idle"),
+    ("no", "current", False, 5, "catching_up"),
+    ("no", "current", None, 5, "unknown"),
+    ("no", "unusable", False, 5, "unknown"),
 ])
-def test_live_index_probe(monkeypatch, rebuilding, installed, exit_code, expected):
+def test_live_index_probe(monkeypatch, rebuilding, installed, caught_up, exit_code, expected):
     monkeypatch.setattr(a, "properties", lambda *_: {"ActiveState": "active"})
 
     def command(argv):
@@ -43,7 +46,7 @@ def test_live_index_probe(monkeypatch, rebuilding, installed, exit_code, expecte
         assert argv[:4] == ["runuser", "-u", "operator", "--"]
         assert "--deadline" in argv
         return subprocess.CompletedProcess(argv, exit_code, json.dumps({
-            "value": {"index": {
+            "value": {"caught_up": caught_up, "index": {
                 "rebuilding": {"state": rebuilding},
                 "installed": {"state": installed},
             }}

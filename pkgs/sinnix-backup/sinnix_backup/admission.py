@@ -68,12 +68,16 @@ class IndexProbe:
                 return "unknown"
             result = command([*as_user, self.program, "status", "--json", "--deadline", "2000"])
             # A building index may return a typed degraded reply with exit 5.
-            index = json.loads(result.stdout)["value"]["index"]
+            status = json.loads(result.stdout)["value"]
+            index = status["index"]
             rebuilding = index["rebuilding"]["state"]
             if rebuilding in ("writing", "pending", "waiting", "building"):
                 return "rebuilding"
             if rebuilding == "no" and index["installed"]["state"] == "current":
-                return "idle"
+                if status["caught_up"] is True:
+                    return "idle"
+                if status["caught_up"] is False:
+                    return "catching_up"
             return "unknown"
         except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
             return "unknown"

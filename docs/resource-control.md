@@ -188,10 +188,11 @@ Primary contract: [Linux block-cgroup delay helpers](https://raw.githubuserconte
 
 The Realm, Persist and genome drains share the existing borgdrain.slice
 (6 GiB resident in total, no swap). Before starting, each waits for at least
-8 GiB available RAM and a current Polylogue index, or a confirmed inactive
-user manager. An unavailable active index status is not readiness. Waiting
-takes no Borg lock. Local snapshot acquisition and the hourly custody jobs
-remain independent.
+8 GiB available RAM. If the Polylogue user manager is active, Polylogue
+must report that it has caught up as well as installed a current index.
+That leaves the resource-intensive catch-up after a rebuild to finish before
+the drain starts. Waiting takes no Borg lock. Local snapshot acquisition
+and the hourly custody jobs remain independent.
 
 The systemd admission timer checks only running full-volume drains. If a
 live rebuild starts after admission, or memory crosses the emergency
