@@ -23,10 +23,10 @@ project rules; runtime and task state stay with their owning tools.
 
 ## Work
 
-- Keep working until the requested end state holds and is verified. End a
-  turn only when it does, when the next step needs the operator (below), or
-  when all remaining scope waits on a job or check you started, named with its
-  expected end. A finished pass, milestone or compaction does not end a turn.
+- Keep working until the requested end state holds and is verified or the
+  next step needs the operator. When all work depends on a running job or
+  check, stay attached or hand off its result and next action to an owner
+  who can continue. Give the expected end or next check time.
 - A request to inspect, diagnose, or advise authorizes read-only checks. A
   request to improve or implement authorizes scoped changes and their normal
   verification and delivery. In an established GitHub repository, this
@@ -145,18 +145,17 @@ running agents in parallel.
   `/realm/project/sinnix/repo/docs/agentctl.md`. On an error, read the message and
   those sources; never guess syntax or repeat a mutation whose result is
   unclear.
-- Sustained I/O or memory pressure, a long queue or a frozen desktop is a
-  defect in agent work: find the process causing it and fix or stop the cause
-  before starting more heavy work. Recorded telemetry (`sinnix-observe
-  --since`, `below dump`, the journal, earlier notes) answers what happened
-  and how values moved; read it instead of sampling live or waiting.
-- Wait on a job or check with one blocking command, acting on its exit
-  status: `agentctl job wait <task> --job-id <id>`, or `gh pr checks <n>
-  --required --watch --interval 60 && gh pr merge <n> --squash
-  --match-head-commit <sha>`; in Claude Code run it in the background and keep
-  doing in-scope work. A status read is not progress. At about twice the
-  duration recorded for comparable runs, inspect and decide to repair, cancel,
-  or extend.
+- Before starting bulk work, check concurrent work and host headroom. When
+  disk or memory stalls persist, use recorded telemetry (`sinnix-observe
+  --since`, `below dump`, the journal) to identify and relieve contention.
+  Continue independent source work and hosted checks while the host recovers.
+- Keep one blocking wait per job or check that controls the next action.
+  Chain the action on the exit status if it is already decided. Inspect on
+  an uncertain launch, before a change, or when a job overruns comparable
+  work. Keep working on independent tasks while the wait runs.
+- Before activating a service doing long work, verify what a restart would
+  repeat. Compare the planned package's store and parser versions and keep
+  unrelated changes from interrupting a rebuild.
 
 ## Delivery
 

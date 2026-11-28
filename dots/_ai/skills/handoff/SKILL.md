@@ -18,6 +18,11 @@ blockers, and the next action. Include only facts needed to continue. Preserve
 uncommitted work; a handoff does not require a cleanliness commit. Link detailed
 history rather than copying it or requerying completed records for narration.
 
+Transfer a running job's stable ID, expected end or next check time, and the
+action to take on its result. Confirm that the recipient can continue before
+leaving it. Close a predecessor session you own once its transcript,
+uncommitted work, jobs and next action are accounted for.
+
 ## Resuming from one
 
 Check active and action-dependent facts against their owner: the checkout
